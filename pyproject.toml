@@ -1,6 +1,57 @@
 [project]
 name = "computer-use-test"
-version = "0.1.0"
-description = "Add your description here"
-requires-python = ">=3.9"
-dependencies = []
+version = "0.0.1"
+description = "This project is computer-use action evaluation with evironment. You can collect data at the env automatically and evaluate according to evaluation set."
+readme = "README.md"
+authors = [
+  {name = "minsing-jin", email = "developerminsing@gmail.com"}
+]
+maintainers = [
+  {name = "minsing-jin", email = "developerminsing@gmail.com"}
+]
+classifiers = [
+    # TODO
+]
+license = {text = "MIT"}
+dependencies = [
+  "typer"
+]
+requires-python = ">= 3.10"
+
+[project.optional-dependencies]
+test = [
+    "coverage",  # testing
+    "pytest",  # testing
+    "ruff",  # linting
+    "ty", # checking types
+    "ipdb", # debugging
+]
+
+[project.urls]
+bugs = "https://github.com/minsing-jin/computer_use_test/issues"
+changelog = "https://github.com/minsing-jin/computer_use_test/blob/master/changelog.md"
+homepage = "https://github.com/minsing-jin/computer_use_test"
+
+[project.scripts]
+computer_use_test = "computer_use_test.cli:app"
+
+[tool.ty]
+# All rules are enabled as "error" by default; no need to specify unless overriding.
+# Example override: relax a rule for the entire project (uncomment if needed).
+# rules.TY015 = "warn"  # For invalid-argument-type, warn instead of error.
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # Pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+]
+
+[tool.uv]
+package = true
