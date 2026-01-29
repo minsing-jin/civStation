@@ -3,7 +3,7 @@
 ![PyPI version](https://img.shields.io/pypi/v/computer-use-test.svg)
 [![Documentation Status](https://readthedocs.org/projects/computer-use-test/badge/?version=latest)](https://computer-use-test.readthedocs.io/en/latest/?version=latest)
 
-This project is computer-use action evaluation with evironment. You can collect data at the env automatically and evaluate according to evaluation set.
+This project is computer-use action evaluation with evironment in specific workflow or tool. You can collect data at the env automatically and evaluate according to evaluation set.
 
 * PyPI package: https://pypi.org/project/computer-use-test/
 * Free software: MIT License
