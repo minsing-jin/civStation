@@ -14,7 +14,13 @@ classifiers = [
 ]
 license = {text = "MIT"}
 dependencies = [
-  "typer"
+  "anthropic>=0.77.0",
+  "dotenv>=0.9.9",
+  "google-genai>=1.60.0",
+  "openai>=2.16.0",
+  "pillow>=12.1.0",
+  "pyautogui>=0.9.54",
+  "typer",
 ]
 requires-python = ">= 3.10"
 
@@ -25,6 +31,7 @@ test = [
     "ruff",  # linting
     "ty", # checking types
     "ipdb", # debugging
+    "pre-commit",  # git hooks
 ]
 
 [project.urls]
@@ -34,6 +41,20 @@ homepage = "https://github.com/minsing-jin/computer_use_test"
 
 [project.scripts]
 computer_use_test = "computer_use_test.cli:app"
+
+[tool.pytest.ini_options]
+testpaths = ["tests/evaluator"]
+addopts = "-v --strict-markers"
+markers = [
+    "integration: marks tests requiring full environment (deselect with '-m \"not integration\"')",
+]
+
+[tool.coverage.run]
+source = ["computer_use_test"]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
 
 [tool.ty]
 # All rules are enabled as "error" by default; no need to specify unless overriding.
