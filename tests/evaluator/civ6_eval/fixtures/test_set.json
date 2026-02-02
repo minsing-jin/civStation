@@ -1,0 +1,99 @@
+[
+  {
+    "screenshot": "turn_10_science.png",
+    "gt_primitive": "science_decision_primitive",
+    "gt_actions": [
+      {
+        "type": "click",
+        "x": 100,
+        "y": 200
+      },
+      {
+        "type": "press",
+        "keys": ["esc"]
+      }
+    ]
+  },
+  {
+    "screenshot": "unit_settler_move.png",
+    "gt_primitive": "unit_ops_primitive",
+    "gt_actions": [
+      {
+        "type": "click",
+        "x": 960,
+        "y": 540
+      },
+      {
+        "type": "press",
+        "keys": ["m"]
+      },
+      {
+        "type": "click",
+        "x": 1000,
+        "y": 500
+      }
+    ]
+  },
+  {
+    "screenshot": "city_production_select.png",
+    "gt_primitive": "city_production_primitive",
+    "gt_actions": [
+      {
+        "type": "click",
+        "x": 800,
+        "y": 600
+      }
+    ]
+  },
+  {
+    "screenshot": "culture_civic_choice.png",
+    "gt_primitive": "culture_decision_primitive",
+    "gt_actions": [
+      {
+        "type": "click",
+        "x": 640,
+        "y": 360
+      },
+      {
+        "type": "press",
+        "keys": ["enter"]
+      }
+    ]
+  },
+  {
+    "screenshot": "unit_warrior_combat.png",
+    "gt_primitive": "unit_ops_primitive",
+    "gt_actions": [
+      {
+        "type": "click",
+        "x": 850,
+        "y": 450
+      },
+      {
+        "type": "press",
+        "keys": ["space"]
+      }
+    ]
+  },
+  {
+    "screenshot": "popup_next_turn.png",
+    "gt_primitive": "popup_primitive",
+    "gt_actions": [
+      {
+        "type": "press",
+        "keys": ["enter"]
+      }
+    ]
+  },
+  {
+    "screenshot": "research_select_popup.png",
+    "gt_primitive": "research_select_primitive",
+    "gt_actions": [
+      {
+        "type": "click",
+        "x": 300,
+        "y": 400
+      }
+    ]
+  }
+]

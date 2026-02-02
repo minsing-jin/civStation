@@ -1,0 +1,2 @@
+# This file keeps the screenshots directory in git
+# Actual screenshot files should not be committed (see .gitignore)
