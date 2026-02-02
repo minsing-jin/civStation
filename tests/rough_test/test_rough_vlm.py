@@ -4,6 +4,7 @@ from io import BytesIO
 import base64
 import pyautogui
 
+
 def capture_screen_pil(max_size=2048):
     """화면을 캡처하고 리사이징된 PIL 이미지를 반환"""
     screenshot = pyautogui.screenshot()
@@ -94,9 +95,11 @@ class VLMProvider(ABC):
 # 3. 모델별 구현 (Gemini, Claude, GPT)
 # ==============================================================================
 
+
 class GeminiProvider(VLMProvider):
     def __init__(self, api_key):
-        if not genai: raise ImportError("google-genai library not installed.")
+        if not genai:
+            raise ImportError("google-genai library not installed.")
         self.client = genai.Client(api_key=api_key)
         # 최신 모델 사용 (gemini-2.0-flash or gemini-1.5-pro)
         self.model_name = "gemini-3-flash-preview"
@@ -107,10 +110,7 @@ class GeminiProvider(VLMProvider):
             response = self.client.models.generate_content(
                 model=self.model_name,
                 contents=[pil_image, prompt],
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    temperature=0.1
-                )
+                config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.1),
             )
             return json.loads(response.text.strip())
         except Exception as e:
@@ -120,7 +120,8 @@ class GeminiProvider(VLMProvider):
 
 class ClaudeProvider(VLMProvider):
     def __init__(self, api_key):
-        if not anthropic: raise ImportError("anthropic library not installed.")
+        if not anthropic:
+            raise ImportError("anthropic library not installed.")
         self.client = anthropic.Anthropic(api_key=api_key)
         self.model_name = "claude-sonnet-4-5-20250929"
 
@@ -132,13 +133,18 @@ class ClaudeProvider(VLMProvider):
             response = self.client.messages.create(
                 model=self.model_name,
                 max_tokens=1024,
-                messages=[{
-                    "role": "user",
-                    "content": [
-                        {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": base64_img}},
-                        {"type": "text", "text": prompt}
-                    ]
-                }]
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image",
+                                "source": {"type": "base64", "media_type": "image/jpeg", "data": base64_img},
+                            },
+                            {"type": "text", "text": prompt},
+                        ],
+                    }
+                ],
             )
             # JSON 파싱
             text = response.content[0].text
@@ -152,7 +158,8 @@ class ClaudeProvider(VLMProvider):
 
 class GPTProvider(VLMProvider):
     def __init__(self, api_key):
-        if not openai: raise ImportError("openai library not installed.")
+        if not openai:
+            raise ImportError("openai library not installed.")
         self.client = openai.OpenAI(api_key=api_key)
         self.model_name = "gpt-4o"
 
@@ -168,12 +175,12 @@ class GPTProvider(VLMProvider):
                         "role": "user",
                         "content": [
                             {"type": "text", "text": prompt},
-                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_img}"}}
-                        ]
+                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_img}"}},
+                        ],
                     }
                 ],
                 response_format={"type": "json_object"},
-                max_tokens=1024
+                max_tokens=1024,
             )
             return json.loads(response.choices[0].message.content)
         except Exception as e:

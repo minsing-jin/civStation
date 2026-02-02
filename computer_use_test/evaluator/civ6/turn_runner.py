@@ -101,10 +101,7 @@ def route_screenshot(
         reasoning = data.get("reasoning", "")
 
         if selected not in PRIMITIVE_NAMES:
-            logger.warning(
-                f"Router returned unknown primitive '{selected}', "
-                f"defaulting to unit_ops_primitive"
-            )
+            logger.warning(f"Router returned unknown primitive '{selected}', defaulting to unit_ops_primitive")
             selected = "unit_ops_primitive"
 
         logger.info(f"Router selected: {selected}")
@@ -192,9 +189,7 @@ def run_one_turn(
 
     # Step 3: Planning
     logger.info(f"[3/4] Planning: generating action for {primitive_name}...")
-    action = plan_action(
-        planner_provider, pil_image, primitive_name, normalizing_range
-    )
+    action = plan_action(planner_provider, pil_image, primitive_name, normalizing_range)
 
     if action is None:
         logger.error("  VLM returned no action. Turn aborted.")
@@ -249,9 +244,9 @@ def run_multi_turn(
     )
 
     for turn in range(1, num_turns + 1):
-        logger.info(f"\n{'='*60}")
+        logger.info(f"\n{'=' * 60}")
         logger.info(f"TURN {turn}/{num_turns}")
-        logger.info(f"{'='*60}")
+        logger.info(f"{'=' * 60}")
 
         success = run_one_turn(
             router_provider=router_provider,
@@ -292,19 +287,21 @@ Examples:
       --router-provider gemini --router-model gemini-3.0-flash-preview \\
       --planner-provider claude --planner-model claude-sonnet-4-20250514
 
-Available providers: {', '.join(provider_choices)}
+Available providers: {", ".join(provider_choices)}
         """,
     )
 
     # Shared default provider/model
     parser.add_argument(
-        "--provider", "-p",
+        "--provider",
+        "-p",
         default=None,
         choices=provider_choices,
         help="Default VLM provider for both router and planner",
     )
     parser.add_argument(
-        "--model", "-m",
+        "--model",
+        "-m",
         default=None,
         help="Default model for both router and planner",
     )
@@ -337,23 +334,28 @@ Available providers: {', '.join(provider_choices)}
 
     # Execution parameters
     parser.add_argument(
-        "--turns", "-t",
-        type=int, default=1,
+        "--turns",
+        "-t",
+        type=int,
+        default=1,
         help="Number of turns to execute (default: 1)",
     )
     parser.add_argument(
         "--range",
-        type=int, default=1000,
+        type=int,
+        default=1000,
         help="Coordinate normalization range (default: 1000)",
     )
     parser.add_argument(
         "--delay-action",
-        type=float, default=0.5,
+        type=float,
+        default=0.5,
         help="Delay before executing each action in seconds (default: 0.5)",
     )
     parser.add_argument(
         "--delay-turn",
-        type=float, default=1.0,
+        type=float,
+        default=1.0,
         help="Delay between turns in seconds (default: 1.0)",
     )
 
@@ -366,13 +368,9 @@ Available providers: {', '.join(provider_choices)}
     planner_model = args.planner_model or args.model
 
     if not router_provider_name:
-        parser.error(
-            "--provider is required, or specify both --router-provider and --planner-provider"
-        )
+        parser.error("--provider is required, or specify both --router-provider and --planner-provider")
     if not planner_provider_name:
-        parser.error(
-            "--provider is required, or specify both --router-provider and --planner-provider"
-        )
+        parser.error("--provider is required, or specify both --router-provider and --planner-provider")
 
     # Create providers
     router_provider = create_provider(

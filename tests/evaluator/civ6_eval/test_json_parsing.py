@@ -6,28 +6,36 @@ from computer_use_test.utils.provider.base import BaseVLMProvider
 # 테스트 시 로그 확인이 필요하다면 설정 (pytest -s 옵션으로 확인 가능)
 logger = logging.getLogger(__name__)
 
+
 def strip_markdown(text: str) -> str:
     """실제 BaseVLMProvider의 메서드를 활용"""
     return BaseVLMProvider._strip_markdown(text)
 
-@pytest.mark.parametrize("test_name, raw_response, expected_valid", [
-    # --- Valid cases ---
-    ("Valid plain JSON", '{"primitive": "unit_ops_primitive", "reasoning": "test"}', True),
-    ("Valid with code fence", '```json\n{"primitive": "unit_ops_primitive", "reasoning": "test"}\n```', True),
-    ("Valid with generic fence", '```\n{"primitive": "unit_ops_primitive", "reasoning": "test"}\n```', True),
-    ("Valid with whitespace", '  \n{\n  "primitive": "unit_ops_primitive",\n  "reasoning": "test"\n}\n  ', True),
-    ("Valid action", '{"action": "click", "x": 500, "y": 300, "reasoning": "click here"}', True),
-    ("Code fence no closing", '```json\n{"primitive": "unit_ops_primitive", "reasoning": "test"}', True),
-    ("Multiple code fences", '```json\n{"primitive": "unit_ops_primitive", "reasoning": "test"}\n```\n```', True),
-    ("Multiline reasoning", '{"primitive": "unit_ops_primitive", "reasoning": "This is\\na test"}', True),
 
-    # --- Invalid cases ---
-    ("Unterminated string", '{"primitive": "unit_ops_primitive", "reasoning": "test', False),
-    ("Missing quote", '{"primitive": unit_ops_primitive, "reasoning": "test"}', False),
-    ("Trailing comma", '{"primitive": "unit_ops_primitive", "reasoning": "test",}', False),
-    ("Single quotes", "{'primitive': 'unit_ops_primitive', 'reasoning': 'test'}", False),
-    ("Newline in reasoning (invalid)", '{\n  "primitive": "unit_ops_primitive",\n  "reasoning": "Line 1\nLine 2"\n}', False),
-])
+@pytest.mark.parametrize(
+    "test_name, raw_response, expected_valid",
+    [
+        # --- Valid cases ---
+        ("Valid plain JSON", '{"primitive": "unit_ops_primitive", "reasoning": "test"}', True),
+        ("Valid with code fence", '```json\n{"primitive": "unit_ops_primitive", "reasoning": "test"}\n```', True),
+        ("Valid with generic fence", '```\n{"primitive": "unit_ops_primitive", "reasoning": "test"}\n```', True),
+        ("Valid with whitespace", '  \n{\n  "primitive": "unit_ops_primitive",\n  "reasoning": "test"\n}\n  ', True),
+        ("Valid action", '{"action": "click", "x": 500, "y": 300, "reasoning": "click here"}', True),
+        ("Code fence no closing", '```json\n{"primitive": "unit_ops_primitive", "reasoning": "test"}', True),
+        ("Multiple code fences", '```json\n{"primitive": "unit_ops_primitive", "reasoning": "test"}\n```\n```', True),
+        ("Multiline reasoning", '{"primitive": "unit_ops_primitive", "reasoning": "This is\\na test"}', True),
+        # --- Invalid cases ---
+        ("Unterminated string", '{"primitive": "unit_ops_primitive", "reasoning": "test', False),
+        ("Missing quote", '{"primitive": unit_ops_primitive, "reasoning": "test"}', False),
+        ("Trailing comma", '{"primitive": "unit_ops_primitive", "reasoning": "test",}', False),
+        ("Single quotes", "{'primitive': 'unit_ops_primitive', 'reasoning': 'test'}", False),
+        (
+            "Newline in reasoning (invalid)",
+            '{\n  "primitive": "unit_ops_primitive",\n  "reasoning": "Line 1\nLine 2"\n}',
+            False,
+        ),
+    ],
+)
 def test_json_parsing(test_name, raw_response, expected_valid):
     """JSON 파싱 테스트: 성공해야 하는 케이스와 실패해야 하는 케이스를 검증합니다."""
 

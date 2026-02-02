@@ -231,9 +231,7 @@ class TestJSONSerialization:
         restored = AgentPlan(**json.loads(json_str))
 
         assert len(restored.actions) == 4
-        assert all(
-            type(orig) == type(rest) for orig, rest in zip(plan.actions, restored.actions)
-        )
+        assert all(type(orig) == type(rest) for orig, rest in zip(plan.actions, restored.actions))
 
 
 class TestDiscriminatorValidation:

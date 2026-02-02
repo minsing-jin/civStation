@@ -8,7 +8,7 @@ Everything else (call_vlm, analyze, parse) builds on top to avoid duplication.
 import json
 import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Union
 
@@ -38,14 +38,14 @@ class AgentAction:
     Supports: click, double_click, drag, press, type
     """
 
-    action: str = ""          # "click", "double_click", "drag", "press", "type"
-    x: int = 0                # Normalized x (0-1000)
-    y: int = 0                # Normalized y (0-1000)
-    end_x: int = 0            # Drag end x (0-1000)
-    end_y: int = 0            # Drag end y (0-1000)
-    button: str = "left"      # "left" or "right"
-    key: str = ""             # Key name for "press"
-    text: str = ""            # Text for "type"
+    action: str = ""  # "click", "double_click", "drag", "press", "type"
+    x: int = 0  # Normalized x (0-1000)
+    y: int = 0  # Normalized y (0-1000)
+    end_x: int = 0  # Drag end x (0-1000)
+    end_y: int = 0  # Drag end y (0-1000)
+    button: str = "left"  # "left" or "right"
+    key: str = ""  # Key name for "press"
+    text: str = ""  # Text for "type"
     reasoning: str = ""
 
 
@@ -140,23 +140,37 @@ class BaseVLMProvider(ABC):
             for ad in data.get("actions", []):
                 action_type = ad.get("type")
                 if action_type == "click":
-                    actions.append(ClickAction(
-                        type="click", x=ad["x"], y=ad["y"],
-                        button=ad.get("button", "left"), description=ad.get("description"),
-                    ))
+                    actions.append(
+                        ClickAction(
+                            type="click",
+                            x=ad["x"],
+                            y=ad["y"],
+                            button=ad.get("button", "left"),
+                            description=ad.get("description"),
+                        )
+                    )
                 elif action_type == "press":
-                    actions.append(KeyPressAction(
-                        type="press", keys=ad["keys"],
-                        interval=ad.get("interval", 0.1), description=ad.get("description"),
-                    ))
+                    actions.append(
+                        KeyPressAction(
+                            type="press",
+                            keys=ad["keys"],
+                            interval=ad.get("interval", 0.1),
+                            description=ad.get("description"),
+                        )
+                    )
                 elif action_type == "drag":
-                    actions.append(DragAction(
-                        type="drag",
-                        start_x=ad["start_x"], start_y=ad["start_y"],
-                        end_x=ad["end_x"], end_y=ad["end_y"],
-                        duration=ad.get("duration", 0.5), button=ad.get("button", "left"),
-                        description=ad.get("description"),
-                    ))
+                    actions.append(
+                        DragAction(
+                            type="drag",
+                            start_x=ad["start_x"],
+                            start_y=ad["start_y"],
+                            end_x=ad["end_x"],
+                            end_y=ad["end_y"],
+                            duration=ad.get("duration", 0.5),
+                            button=ad.get("button", "left"),
+                            description=ad.get("description"),
+                        )
+                    )
 
             return AgentPlan(
                 primitive_name=primitive_name,
@@ -250,7 +264,7 @@ class BaseVLMProvider(ABC):
 
         # Remove all closing fences (handle multiple ``` with possible newlines)
         # Use regex to remove trailing ``` blocks
-        content = re.sub(r'(\n```)+\s*$', '', content)
+        content = re.sub(r"(\n```)+\s*$", "", content)
         if content.endswith("```"):
             content = content[:-3]
 
@@ -296,11 +310,14 @@ class MockVLMProvider(BaseVLMProvider):
 
     def _send_to_api(self, content_parts, temperature=0.7, max_tokens=4096):
         return VLMResponse(
-            content=json.dumps({
-                "reasoning": "Mock analysis",
-                "actions": [{"type": "click", "x": 500, "y": 300}, {"type": "press", "keys": ["esc"]}],
-            }),
-            tokens_used=100, cost=0.0,
+            content=json.dumps(
+                {
+                    "reasoning": "Mock analysis",
+                    "actions": [{"type": "click", "x": 500, "y": 300}, {"type": "press", "keys": ["esc"]}],
+                }
+            ),
+            tokens_used=100,
+            cost=0.0,
             finish_reason="stop",
         )
 

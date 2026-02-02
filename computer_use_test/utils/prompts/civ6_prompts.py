@@ -9,7 +9,6 @@ Prompts use Korean instructions to match the Korean version of the game UI.
 # TODO: primitive action만 이 File에서는 구현하고, 행동 전략은 High-level order를 반영할수 있도록 파라미터로 받고 고도화 시키기
 # TODO: policy selection prompt (drag and drop 필요, 설명 읽는것 필요 - visual grounding 필요)
 
-
 # Base JSON format instruction (reusable across all prompts)
 JSON_FORMAT_INSTRUCTION = """
 Generate a JSON response with the following format:
@@ -257,10 +256,7 @@ def get_primitive_prompt(primitive_name: str) -> str:
     }
 
     if primitive_name not in prompts:
-        raise ValueError(
-            f"Unknown primitive: {primitive_name}. "
-            f"Available: {', '.join(prompts.keys())}"
-        )
+        raise ValueError(f"Unknown primitive: {primitive_name}. Available: {', '.join(prompts.keys())}")
 
     return prompts[primitive_name]
 

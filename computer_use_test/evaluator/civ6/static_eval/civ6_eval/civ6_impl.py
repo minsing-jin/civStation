@@ -97,9 +97,7 @@ class UnitOpsPrimitive(BasePrimitive):
         actions: List[Action] = [
             ClickAction(x=base_x, y=base_y, description="Select unit"),
             KeyPressAction(keys=["m"], description="Initiate move command"),
-            ClickAction(
-                x=base_x + offset_x, y=base_y + offset_y, description="Click destination tile"
-            ),
+            ClickAction(x=base_x + offset_x, y=base_y + offset_y, description="Click destination tile"),
         ]
 
         return AgentPlan(

@@ -262,9 +262,7 @@ class TestEvaluationPipeline:
             result = evaluator.evaluate_single(gt)
 
             # With keyword-based routing, primitive should always match
-            assert (
-                result.primitive_match
-            ), f"Expected {gt.expected_primitive}, got {result.selected_primitive}"
+            assert result.primitive_match, f"Expected {gt.expected_primitive}, got {result.selected_primitive}"
 
     @pytest.mark.skipif(
         not GT_DATA_FILE.exists(),
@@ -357,9 +355,7 @@ class TestEndToEndEvaluation:
         total = len(results)
         primitive_accuracy = (sum(r.primitive_match for r in results) / total) * 100
         action_accuracy = (sum(r.action_sequence_match for r in results) / total) * 100
-        overall_accuracy = (
-            sum(r.primitive_match and r.action_sequence_match for r in results) / total
-        ) * 100
+        overall_accuracy = (sum(r.primitive_match and r.action_sequence_match for r in results) / total) * 100
 
         print(f"\nFinal Metrics:")
         print(f"  Primitive Accuracy: {primitive_accuracy:.2f}%")
@@ -371,9 +367,7 @@ class TestEndToEndEvaluation:
 
 
 # Utility function for manual testing
-def evaluate_screenshot_directory(
-    screenshots_dir: str, ground_truth_file: str, output_file: str = None
-):
+def evaluate_screenshot_directory(screenshots_dir: str, ground_truth_file: str, output_file: str = None):
     """
     Evaluate all screenshots in a directory against ground truth.
 
@@ -417,9 +411,7 @@ def evaluate_screenshot_directory(
     total = len(results)
     primitive_accuracy = (sum(r.primitive_match for r in results) / total) * 100
     action_accuracy = (sum(r.action_sequence_match for r in results) / total) * 100
-    overall_accuracy = (
-        sum(r.primitive_match and r.action_sequence_match for r in results) / total
-    ) * 100
+    overall_accuracy = (sum(r.primitive_match and r.action_sequence_match for r in results) / total) * 100
 
     metrics = {
         "primitive_accuracy": primitive_accuracy,
