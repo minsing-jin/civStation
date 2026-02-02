@@ -12,6 +12,7 @@ This project is computer-use action evaluation with evironment in specific workf
 ## Features
 
 * TODO
+  - Implement primitive router
 
 ## Credits
 
