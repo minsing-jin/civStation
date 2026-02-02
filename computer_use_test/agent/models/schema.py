@@ -26,9 +26,7 @@ class ActionType(str, Enum):
 class BaseAction(BaseModel):
     """Base class for all action types."""
 
-    description: Optional[str] = Field(
-        None, description="Optional description for debugging and logging"
-    )
+    description: Optional[str] = Field(None, description="Optional description for debugging and logging")
 
 
 # Concrete Action implementations with discriminator

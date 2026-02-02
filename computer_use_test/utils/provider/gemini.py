@@ -33,9 +33,7 @@ class GeminiVLMProvider(BaseVLMProvider):
         if self.api_key is None:
             self.api_key = os.getenv("GOOGLE_API_KEY")
             if not self.api_key:
-                raise ValueError(
-                    "Google API key must be provided or set in GOOGLE_API_KEY environment variable"
-                )
+                raise ValueError("Google API key must be provided or set in GOOGLE_API_KEY environment variable")
 
         if self.model is None:
             self.model = self.DEFAULT_MODEL
@@ -48,8 +46,7 @@ class GeminiVLMProvider(BaseVLMProvider):
             self.client = genai.GenerativeModel(self.model)
         except ImportError:
             raise ImportError(
-                "google-generativeai package not installed. "
-                "Install with: pip install google-generativeai"
+                "google-generativeai package not installed. Install with: pip install google-generativeai"
             )
 
     # ==================== Abstract method implementations ====================
@@ -88,7 +85,7 @@ class GeminiVLMProvider(BaseVLMProvider):
             finish_reason = None
             if response.candidates:
                 raw_reason = response.candidates[0].finish_reason
-                finish_reason = raw_reason.name if hasattr(raw_reason, 'name') else str(raw_reason)
+                finish_reason = raw_reason.name if hasattr(raw_reason, "name") else str(raw_reason)
 
             if finish_reason == "MAX_TOKENS":
                 self.logger.warning(
@@ -118,9 +115,7 @@ class GeminiVLMProvider(BaseVLMProvider):
 
             return Image.open(image_path)
         except ImportError:
-            raise ImportError(
-                "PIL package not installed. Install with: pip install Pillow"
-            )
+            raise ImportError("PIL package not installed. Install with: pip install Pillow")
 
     def _build_pil_image_content(self, pil_image) -> object:
         """Pass through PIL image (Gemini uses PIL natively)."""

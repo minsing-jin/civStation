@@ -34,9 +34,7 @@ class ClaudeVLMProvider(BaseVLMProvider):
         if self.api_key is None:
             self.api_key = os.getenv("ANTHROPIC_API_KEY")
             if not self.api_key:
-                raise ValueError(
-                    "Anthropic API key must be provided or set in ANTHROPIC_API_KEY environment variable"
-                )
+                raise ValueError("Anthropic API key must be provided or set in ANTHROPIC_API_KEY environment variable")
 
         if self.model is None:
             self.model = self.DEFAULT_MODEL
@@ -46,9 +44,7 @@ class ClaudeVLMProvider(BaseVLMProvider):
 
             self.client = Anthropic(api_key=self.api_key)
         except ImportError:
-            raise ImportError(
-                "anthropic package not installed. Install with: pip install anthropic"
-            )
+            raise ImportError("anthropic package not installed. Install with: pip install anthropic")
 
     # ==================== Provider-specific helpers ====================
 
@@ -99,20 +95,11 @@ class ClaudeVLMProvider(BaseVLMProvider):
 
             # Cost estimation
             if "opus" in self.model.lower():
-                cost = (
-                    response.usage.input_tokens * 15
-                    + response.usage.output_tokens * 75
-                ) / 1_000_000
+                cost = (response.usage.input_tokens * 15 + response.usage.output_tokens * 75) / 1_000_000
             elif "sonnet" in self.model.lower():
-                cost = (
-                    response.usage.input_tokens * 3
-                    + response.usage.output_tokens * 15
-                ) / 1_000_000
+                cost = (response.usage.input_tokens * 3 + response.usage.output_tokens * 15) / 1_000_000
             else:  # haiku
-                cost = (
-                    response.usage.input_tokens * 0.25
-                    + response.usage.output_tokens * 1.25
-                ) / 1_000_000
+                cost = (response.usage.input_tokens * 0.25 + response.usage.output_tokens * 1.25) / 1_000_000
 
             finish_reason = response.stop_reason  # "end_turn" or "max_tokens"
 

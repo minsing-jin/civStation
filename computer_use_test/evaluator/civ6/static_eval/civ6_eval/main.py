@@ -261,7 +261,7 @@ Examples:
   # Run with Gemini and custom test file
   python -m computer_use_test.evaluator.static_eval.civ6_eval.main --provider gemini --test-file my_tests.json
 
-Available providers: {', '.join(get_available_providers().keys())}
+Available providers: {", ".join(get_available_providers().keys())}
         """,
     )
 

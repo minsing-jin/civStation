@@ -34,9 +34,7 @@ class GPTVLMProvider(BaseVLMProvider):
         if self.api_key is None:
             self.api_key = os.getenv("OPENAI_API_KEY")
             if not self.api_key:
-                raise ValueError(
-                    "OpenAI API key must be provided or set in OPENAI_API_KEY environment variable"
-                )
+                raise ValueError("OpenAI API key must be provided or set in OPENAI_API_KEY environment variable")
 
         if self.model is None:
             self.model = self.DEFAULT_MODEL
@@ -46,9 +44,7 @@ class GPTVLMProvider(BaseVLMProvider):
 
             self.client = OpenAI(api_key=self.api_key)
         except ImportError:
-            raise ImportError(
-                "openai package not installed. Install with: pip install openai"
-            )
+            raise ImportError("openai package not installed. Install with: pip install openai")
 
     # ==================== Provider-specific helpers ====================
 
@@ -96,25 +92,13 @@ class GPTVLMProvider(BaseVLMProvider):
             # Cost estimation
             if "gpt-4o" in self.model.lower():
                 if "mini" in self.model.lower():
-                    cost = (
-                        response.usage.prompt_tokens * 0.15
-                        + response.usage.completion_tokens * 0.6
-                    ) / 1_000_000
+                    cost = (response.usage.prompt_tokens * 0.15 + response.usage.completion_tokens * 0.6) / 1_000_000
                 else:
-                    cost = (
-                        response.usage.prompt_tokens * 2.5
-                        + response.usage.completion_tokens * 10
-                    ) / 1_000_000
+                    cost = (response.usage.prompt_tokens * 2.5 + response.usage.completion_tokens * 10) / 1_000_000
             elif "gpt-4-turbo" in self.model.lower() or "gpt-4-vision" in self.model.lower():
-                cost = (
-                    response.usage.prompt_tokens * 10
-                    + response.usage.completion_tokens * 30
-                ) / 1_000_000
+                cost = (response.usage.prompt_tokens * 10 + response.usage.completion_tokens * 30) / 1_000_000
             else:
-                cost = (
-                    response.usage.prompt_tokens * 30
-                    + response.usage.completion_tokens * 60
-                ) / 1_000_000
+                cost = (response.usage.prompt_tokens * 30 + response.usage.completion_tokens * 60) / 1_000_000
 
             finish_reason = response.choices[0].finish_reason  # "stop" or "length"
 

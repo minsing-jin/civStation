@@ -93,9 +93,7 @@ def execute_action(
         real_x = norm_to_real(action.x, screen_w)
         real_y = norm_to_real(action.y, screen_h)
 
-        logger.info(
-            f"Click: normalized({action.x}, {action.y}) → real({real_x}, {real_y}) - {action.button}"
-        )
+        logger.info(f"Click: normalized({action.x}, {action.y}) → real({real_x}, {real_y}) - {action.button}")
         pyautogui.moveTo(real_x, real_y, duration=0.5)
         pyautogui.click(button=action.button)
 
@@ -103,9 +101,7 @@ def execute_action(
         real_x = norm_to_real(action.x, screen_w)
         real_y = norm_to_real(action.y, screen_h)
 
-        logger.info(
-            f"Double-click: normalized({action.x}, {action.y}) → real({real_x}, {real_y}) - {action.button}"
-        )
+        logger.info(f"Double-click: normalized({action.x}, {action.y}) → real({real_x}, {real_y}) - {action.button}")
         pyautogui.moveTo(real_x, real_y, duration=0.5)
         pyautogui.doubleClick(button=action.button)
 
