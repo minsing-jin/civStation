@@ -13,6 +13,7 @@ Example usage:
     >>> response = provider.call_vlm("Analyze this image", image_path="screenshot.png")
     >>> plan = provider.parse_to_agent_plan(response, "unit_ops_primitive")
 """
+
 from computer_use_test.utils.utils import load_env_variable
 from computer_use_test.utils.provider.base import (
     BaseVLMProvider,
@@ -76,9 +77,7 @@ def create_provider(
 
     if provider_name not in providers:
         available = ", ".join(providers.keys())
-        raise ValueError(
-            f"Unknown provider: {provider_name}. Available providers: {available}"
-        )
+        raise ValueError(f"Unknown provider: {provider_name}. Available providers: {available}")
 
     provider_class = providers[provider_name]
     api_key = api_key or load_env_variable(provider_name)
