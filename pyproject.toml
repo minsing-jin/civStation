@@ -14,7 +14,13 @@ classifiers = [
 ]
 license = {text = "MIT"}
 dependencies = [
-  "typer"
+  "anthropic>=0.77.0",
+  "dotenv>=0.9.9",
+  "google-genai>=1.60.0",
+  "openai>=2.16.0",
+  "pillow>=12.1.0",
+  "pyautogui>=0.9.54",
+  "typer",
 ]
 requires-python = ">= 3.10"
 
