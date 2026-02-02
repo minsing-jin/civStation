@@ -398,7 +398,6 @@ def evaluate_screenshot_directory(
     # Initialize pipeline
     primitives = {
         "unit_ops_primitive": UnitOpsPrimitive(),
-        "country_mayer_primitive": CountryMayerPrimitive(),
         "science_decision_primitive": ScienceDecisionPrimitive(),
         "culture_decision_primitive": CultureDecisionPrimitive(),
     }
