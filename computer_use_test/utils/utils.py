@@ -1,28 +1,22 @@
-from PIL import Image
-from io import BytesIO
-import base64
-import pyautogui
+import os
 
 
-def capture_screen_pil():
-    """화면을 캡처하고 리사이징된 PIL 이미지를 반환"""
-    screenshot = pyautogui.screenshot()
+# Retrieve API key from environment variables
+def load_env_variable(provider_name, default=None):
+    env_key_mapping = {
+        "claude": "ANTHROPIC_API_KEY",
+        "gemini": "GENAI_API_KEY",
+        "gpt": "OPENAI_API_KEY",
+        "openai": "OPENAI_API_KEY",
+    }
 
-    # Retina 디스플레이 등 좌표계 보정을 위해 논리적 해상도 가져오기
-    screen_w, screen_h = pyautogui.size()
+    # Retrieve API key from environment variables
+    env_var_name = env_key_mapping.get(provider_name)
+    api_key = os.getenv(env_var_name)
 
-    if screenshot.mode in ("RGBA", "P"):
-        screenshot = screenshot.convert("RGB")
-
-    # AI 전송용 리사이징 (최대 1024px)
-    max_size = 1024
-    screenshot.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
-
-    return screenshot, screen_w, screen_h
-
-
-def image_to_base64(pil_image):
-    """PIL 이미지를 Base64 문자열로 변환"""
-    buffered = BytesIO()
-    pil_image.save(buffered, format="JPEG", quality=80)
-    return base64.b64encode(buffered.getvalue()).decode("utf-8")
+    if not api_key:
+        raise ValueError(
+            f"API key not found for provider '{provider_name}'. "
+            f"Please set the environment variable '{env_var_name}' in your .env file or system environment."
+        )
+    return api_key
