@@ -1,4 +1,4 @@
-from computer_use_test.evaluator.static_eval.base_static_primitive_evaluator import BaseEvaluator, GroundTruth, \
+from computer_use_test.evaluator.civ6.static_eval.base_static_primitive_evaluator import BaseEvaluator, GroundTruth, \
     EvalResult, BasePrimitive, PrimitiveRouter
 from computer_use_test.agent.models.civ6_models import ClickAction, KeyPressAction, AgentPlan
 
