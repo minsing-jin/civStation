@@ -55,7 +55,7 @@ _TRUNCATION_REASONS = {"max_tokens", "length", "MAX_TOKENS"}
 
 
 # TODO: route primitive지 screenshot을 route하는게 맞냐? 진짜 모름
-def route_screenshot(
+def route_primitive(
     provider: BaseVLMProvider,
     pil_image,
 ) -> str:
@@ -184,7 +184,7 @@ def run_one_turn(
 
     # Step 2: Routing
     logger.info("[2/4] Routing: analyzing game state...")
-    primitive_name = route_screenshot(router_provider, pil_image)
+    primitive_name = route_primitive(router_provider, pil_image)
     logger.info(f"  Selected primitive: {primitive_name}")
 
     # Step 3: Planning
