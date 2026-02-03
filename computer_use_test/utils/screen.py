@@ -11,7 +11,6 @@ Flow:
 """
 
 import logging
-from typing import Optional
 
 import pyautogui
 
@@ -49,7 +48,7 @@ def norm_to_real(norm_val: int, screen_size: int, normalizing_range: int) -> int
 
 
 def execute_action(
-    action: Optional[AgentAction],
+    action: AgentAction | None,
     screen_w: int,
     screen_h: int,
     normalizing_range: int = 1000,

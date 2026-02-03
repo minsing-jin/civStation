@@ -14,18 +14,17 @@ Example usage:
     >>> plan = provider.parse_to_agent_plan(response, "unit_ops_primitive")
 """
 
-from computer_use_test.utils.utils import load_env_variable
+from dotenv import load_dotenv
+
+from computer_use_test.utils.llm_provider.claude import ClaudeVLMProvider
+from computer_use_test.utils.llm_provider.gemini import GeminiVLMProvider
+from computer_use_test.utils.llm_provider.gpt import GPTVLMProvider
 from computer_use_test.utils.provider.base import (
     BaseVLMProvider,
     MockVLMProvider,
     VLMResponse,
 )
-from computer_use_test.utils.provider.claude import ClaudeVLMProvider
-from computer_use_test.utils.provider.gemini import GeminiVLMProvider
-from computer_use_test.utils.provider.gpt import GPTVLMProvider
-
-import os
-from dotenv import load_dotenv
+from computer_use_test.utils.utils import load_env_variable
 
 __all__ = [
     "BaseVLMProvider",

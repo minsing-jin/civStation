@@ -10,7 +10,6 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Union
 
 from computer_use_test.agent.models.schema import AgentPlan
 from computer_use_test.utils.prompts.civ6_action_prompt import get_system_prompt
@@ -24,10 +23,10 @@ class VLMResponse:
     """Response from a VLM API call."""
 
     content: str
-    raw_response: Optional[object] = None
-    tokens_used: Optional[int] = None
-    cost: Optional[float] = None
-    finish_reason: Optional[str] = None  # "stop", "max_tokens", "length" etc.
+    raw_response: object | None = None
+    tokens_used: int | None = None
+    cost: float | None = None
+    finish_reason: str | None = None  # "stop", "max_tokens", "length" etc.
 
 
 @dataclass
@@ -62,7 +61,7 @@ class BaseVLMProvider(ABC):
 
     DEFAULT_MODEL: str = ""
 
-    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
+    def __init__(self, api_key: str | None = None, model: str | None = None):
         self.api_key = api_key
         self.model = model
         self.logger = logger
@@ -93,7 +92,7 @@ class BaseVLMProvider(ABC):
         pass
 
     @abstractmethod
-    def _build_image_content(self, image_path: Union[str, Path]) -> object:
+    def _build_image_content(self, image_path: str | Path) -> object:
         """Build provider-specific image content from file path."""
         pass
 
@@ -116,7 +115,7 @@ class BaseVLMProvider(ABC):
     def call_vlm(
         self,
         prompt: str,
-        image_path: Optional[Union[str, Path]] = None,
+        image_path: str | Path | None = None,
         temperature: float = 0.7,
         max_tokens: int = 4096,
     ) -> VLMResponse:
@@ -186,7 +185,7 @@ class BaseVLMProvider(ABC):
     def call_and_parse(
         self,
         prompt: str,
-        image_path: Optional[Union[str, Path]],
+        image_path: str | Path | None,
         primitive_name: str,
         temperature: float = 0.7,
         max_tokens: int = 4096,
@@ -202,7 +201,7 @@ class BaseVLMProvider(ABC):
         pil_image,
         instruction: str,
         normalizing_range: int = 1000,
-    ) -> Optional[AgentAction]:
+    ) -> AgentAction | None:
         """
         Analyze PIL image and return next action with normalized coordinates.
 
@@ -270,7 +269,7 @@ class BaseVLMProvider(ABC):
 
         return content.strip()
 
-    def _parse_action_json(self, response_text: str) -> Optional[AgentAction]:
+    def _parse_action_json(self, response_text: str) -> AgentAction | None:
         """Parse VLM response into AgentAction (for live agent)."""
         try:
             content = self._strip_markdown(response_text)

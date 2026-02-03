@@ -24,14 +24,13 @@ import argparse
 import json
 import logging
 import time
-from typing import Optional
 
-from computer_use_test.utils.provider import create_provider, get_available_providers
-from computer_use_test.utils.provider.base import AgentAction, BaseVLMProvider
 from computer_use_test.utils.prompts.civ6_prompts import (
     ROUTER_PROMPT,
     get_primitive_prompt,
 )
+from computer_use_test.utils.provider import create_provider, get_available_providers
+from computer_use_test.utils.provider.base import AgentAction, BaseVLMProvider
 from computer_use_test.utils.screen import capture_screen_pil, execute_action
 
 logging.basicConfig(
@@ -127,7 +126,7 @@ def plan_action(
     pil_image,
     primitive_name: str,
     normalizing_range: int = 1000,
-) -> Optional[AgentAction]:
+) -> AgentAction | None:
     """
     Use VLM to generate the next action for the selected primitive.
 
@@ -382,7 +381,7 @@ Available providers: {", ".join(provider_choices)}
     # Reuse same instance if config is identical
     if planner_provider_name == router_provider_name and planner_model == router_model:
         planner_provider = router_provider
-        logger.info(f"Planner: same as router (shared instance)")
+        logger.info("Planner: same as router (shared instance)")
     else:
         planner_provider = create_provider(
             provider_name=planner_provider_name,

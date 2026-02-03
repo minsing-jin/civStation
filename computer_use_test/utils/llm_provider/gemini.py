@@ -13,9 +13,8 @@ lives in BaseVLMProvider.
 
 import os
 from pathlib import Path
-from typing import Optional, Union
 
-from computer_use_test.utils.provider.base import BaseVLMProvider, VLMResponse
+from computer_use_test.utils.llm_provider.base import BaseVLMProvider, VLMResponse
 
 
 class GeminiVLMProvider(BaseVLMProvider):
@@ -27,7 +26,7 @@ class GeminiVLMProvider(BaseVLMProvider):
 
     DEFAULT_MODEL = "gemini-3-flash-preview"
 
-    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
+    def __init__(self, api_key: str | None = None, model: str | None = None):
         super().__init__(api_key, model)
 
         if self.api_key is None:
@@ -44,10 +43,10 @@ class GeminiVLMProvider(BaseVLMProvider):
             genai.configure(api_key=self.api_key)
             self.genai = genai
             self.client = genai.GenerativeModel(self.model)
-        except ImportError:
+        except ImportError as e:
             raise ImportError(
                 "google-generativeai package not installed. Install with: pip install google-generativeai"
-            )
+            ) from e
 
     # ==================== Abstract method implementations ====================
 
@@ -104,7 +103,7 @@ class GeminiVLMProvider(BaseVLMProvider):
         except Exception as e:
             raise RuntimeError(f"Gemini API call failed: {e}") from e
 
-    def _build_image_content(self, image_path: Union[str, Path]) -> object:
+    def _build_image_content(self, image_path: str | Path) -> object:
         """Load image file as PIL Image (Gemini's native format)."""
         image_path = Path(image_path)
         if not image_path.exists():
@@ -114,8 +113,8 @@ class GeminiVLMProvider(BaseVLMProvider):
             from PIL import Image
 
             return Image.open(image_path)
-        except ImportError:
-            raise ImportError("PIL package not installed. Install with: pip install Pillow")
+        except ImportError as e:
+            raise ImportError("PIL package not installed. Install with: pip install Pillow") from e
 
     def _build_pil_image_content(self, pil_image) -> object:
         """Pass through PIL image (Gemini uses PIL natively)."""
