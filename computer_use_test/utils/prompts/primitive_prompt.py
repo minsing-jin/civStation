@@ -1,10 +1,9 @@
 """
-Civilization VI Game Agent Prompts.
+Civilization VI Game Agent Prompt Templates.
 
-This module contains the prompt templates for the Civilization VI agent,
-organized by primitive (unit ops, research, production, culture, etc.).
-
-Prompts use Korean instructions to match the Korean version of the game UI.
+This module contains only prompt template strings for each primitive.
+Registry, routing, and lookup logic lives in
+computer_use_test.agent.modules.router.primitive_registry.
 """
 
 # TODO: primitive action만 이 File에서는 구현하고,
@@ -46,6 +45,8 @@ IMPORTANT:
 - Use 0 or empty string for unused fields
 """
 
+# ==============================================================================
+# Primitive Prompt Templates
 # ==============================================================================
 # Unit Operations Prompt
 # ==============================================================================
@@ -222,52 +223,15 @@ COMBAT_PROMPT = """너는 문명6 에이전트야. 전투 상황을 처리해야
 
 적 위치, 아군 유닛 체력, 지형을 파악하고 최적의 전투 행동을 결정해."""
 
+# ==============================================================================
+# TODO: Policy selection Prompt
+# (for future use - drag and drop, 설명 읽는것 필요 - visual grounding 필요)
+# ==============================================================================
+
 
 # ==============================================================================
-# TODO: Policy selection Prompt (for future use - drag and drop, 설명 읽는것 필요 - visual grounding 필요)
+# Custom prompt builder (TODO: Implement later)
 # ==============================================================================
-
-
-# ==============================================================================
-# Prompt Registry (TODO: context, high-level strategy 반영하여 고도화 필요)
-# ==============================================================================
-def get_primitive_prompt(primitive_name: str, normalizing_range: int = 1000) -> str:
-    """
-    Get the appropriate prompt for a primitive by name.
-
-    Args:
-        primitive_name: Name of the primitive (e.g., "unit_ops_primitive")
-        normalizing_range: Coordinate normalization range (default: 1000)
-
-    Returns:
-        Prompt string for the primitive with formatted JSON instructions
-
-    Raises:
-        ValueError: If primitive name is not recognized
-    """
-    # Format JSON instruction with normalizing_range
-    json_instruction = JSON_FORMAT_INSTRUCTION.format(normalizing_range=normalizing_range)
-
-    # Map primitive names to their prompt templates
-    prompt_templates = {
-        "unit_ops_primitive": UNIT_OPS_PROMPT,
-        "popup_primitive": POPUP_PROMPT,
-        "research_select_primitive": RESEARCH_MANAGER_PROMPT,
-        "city_production_primitive": CITY_PRODUCTION_PROMPT,
-        "science_decision_primitive": RESEARCH_MANAGER_PROMPT,
-        "culture_decision_primitive": CULTURE_MANAGER_PROMPT,
-        "diplomatic_primitive": DIPLOMATIC_PROMPT,
-        "combat_primitive": COMBAT_PROMPT,
-    }
-
-    if primitive_name not in prompt_templates:
-        raise ValueError(f"Unknown primitive: {primitive_name}. Available primitives: {list(prompt_templates.keys())}")
-
-    # Format the selected prompt template with JSON instructions
-    return prompt_templates[primitive_name].format(json_instruction=json_instruction)
-
-
-# Custom prompt builder for advanced use cases (TODO: Implement later)
 def build_custom_prompt(
     scenario: str,
     focus_areas: list[str],
@@ -281,6 +245,7 @@ def build_custom_prompt(
         scenario: Description of the game scenario
         focus_areas: List of specific areas to focus on
         include_json_format: Whether to include JSON format instructions
+        normalizing_range: Coordinate normalization range
 
     Returns:
         Custom prompt string

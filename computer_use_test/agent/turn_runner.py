@@ -25,12 +25,13 @@ import json
 import logging
 import time
 
-from computer_use_test.utils.llm_provider import create_provider, get_available_providers
-from computer_use_test.utils.llm_provider.base import AgentAction, BaseVLMProvider
-from computer_use_test.utils.prompts import ROUTER_PROMPT
-from computer_use_test.utils.prompts.primitive_prompt import (
+from computer_use_test.agent.modules.router.primitive_registry import (
+    PRIMITIVE_NAMES,
+    ROUTER_PROMPT,
     get_primitive_prompt,
 )
+from computer_use_test.utils.llm_provider import create_provider, get_available_providers
+from computer_use_test.utils.llm_provider.base import AgentAction, BaseVLMProvider
 from computer_use_test.utils.screen import capture_screen_pil, execute_action
 
 logging.basicConfig(
@@ -39,21 +40,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Available primitive names
-PRIMITIVE_NAMES = [
-    "unit_ops_primitive",
-    "popup_primitive",
-    "research_select_primitive",
-    "city_production_primitive",
-    "science_decision_primitive",
-    "culture_decision_primitive",
-]
-
 # finish_reason values that indicate truncation across providers
 _TRUNCATION_REASONS = {"max_tokens", "length", "MAX_TOKENS"}
 
 
-# TODO: route primitive지 screenshot을 route하는게 맞냐? 진짜 모름
 def route_primitive(
     provider: BaseVLMProvider,
     pil_image,

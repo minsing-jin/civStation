@@ -1,8 +1,12 @@
 """
 Prompts package for VLM interactions.
 
-This package contains reusable prompts for different game primitives
+This package contains reusable prompt templates for different game primitives
 and scenarios in Civilization VI.
+
+Prompt templates live here in primitive_prompt.py.
+Registry, routing, and lookup logic lives in
+computer_use_test.agent.modules.router.primitive_registry.
 """
 
 from computer_use_test.utils.prompts.primitive_prompt import (
@@ -14,9 +18,7 @@ from computer_use_test.utils.prompts.primitive_prompt import (
     RESEARCH_MANAGER_PROMPT,
     UNIT_OPS_PROMPT,
     build_custom_prompt,
-    get_primitive_prompt,
 )
-from computer_use_test.utils.prompts.router_prompt import ROUTER_PROMPT
 
 __all__ = [
     "UNIT_OPS_PROMPT",
@@ -26,7 +28,5 @@ __all__ = [
     "CULTURE_MANAGER_PROMPT",
     "DIPLOMATIC_PROMPT",
     "COMBAT_PROMPT",
-    "ROUTER_PROMPT",
-    "get_primitive_prompt",
     "build_custom_prompt",
 ]
