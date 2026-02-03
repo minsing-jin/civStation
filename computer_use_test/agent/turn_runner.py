@@ -25,12 +25,12 @@ import json
 import logging
 import time
 
-from computer_use_test.utils.prompts.civ6_prompts import (
-    ROUTER_PROMPT,
+from computer_use_test.utils.llm_provider import create_provider, get_available_providers
+from computer_use_test.utils.llm_provider.base import AgentAction, BaseVLMProvider
+from computer_use_test.utils.prompts import ROUTER_PROMPT
+from computer_use_test.utils.prompts.primitive_prompt import (
     get_primitive_prompt,
 )
-from computer_use_test.utils.provider import create_provider, get_available_providers
-from computer_use_test.utils.provider.base import AgentAction, BaseVLMProvider
 from computer_use_test.utils.screen import capture_screen_pil, execute_action
 
 logging.basicConfig(
@@ -126,6 +126,7 @@ def plan_action(
     pil_image,
     primitive_name: str,
     normalizing_range: int = 1000,
+    high_level_strategy: str | None = None,
 ) -> AgentAction | None:
     """
     Use VLM to generate the next action for the selected primitive.
@@ -135,11 +136,19 @@ def plan_action(
         pil_image: PIL Image of the current game screen
         primitive_name: Selected primitive (determines the prompt)
         normalizing_range: Coordinate normalization range
+        high_level_strategy: Optional high-level strategy/goal to guide action selection
 
     Returns:
         AgentAction with normalized coordinates, or None on failure
     """
-    instruction = get_primitive_prompt(primitive_name)
+    instruction = get_primitive_prompt(primitive_name, normalizing_range)
+
+    # TODO: Incorporate high_level_strategy into the instruction/prompt
+    # when provided to guide the primitive's action selection based on
+    # higher-level goals (e.g., "focus on military expansion", "prioritize science")
+    if high_level_strategy:
+        # TODO: Implement strategy integration logic
+        pass
 
     return provider.analyze(
         pil_image=pil_image,
@@ -153,6 +162,7 @@ def run_one_turn(
     planner_provider: BaseVLMProvider,
     normalizing_range: int = 1000,
     delay_before_action: float = 0.5,
+    high_level_strategy: str | None = None,
 ) -> bool:
     """
     Execute one full game turn.
@@ -168,6 +178,7 @@ def run_one_turn(
         planner_provider: VLM provider for planning (action generation)
         normalizing_range: Coordinate normalization range (default 1000)
         delay_before_action: Seconds to wait before executing the action
+        high_level_strategy: Optional high-level strategy to guide action selection
 
     Returns:
         True if action was executed successfully, False otherwise
@@ -188,7 +199,13 @@ def run_one_turn(
 
     # Step 3: Planning
     logger.info(f"[3/4] Planning: generating action for {primitive_name}...")
-    action = plan_action(planner_provider, pil_image, primitive_name, normalizing_range)
+    action = plan_action(
+        planner_provider,
+        pil_image,
+        primitive_name,
+        normalizing_range,
+        high_level_strategy,
+    )
 
     if action is None:
         logger.error("  VLM returned no action. Turn aborted.")
@@ -224,6 +241,7 @@ def run_multi_turn(
     normalizing_range: int = 1000,
     delay_between_turns: float = 1.0,
     delay_before_action: float = 0.5,
+    high_level_strategy: str | None = None,
 ) -> None:
     """
     Execute multiple consecutive turns.
@@ -235,6 +253,7 @@ def run_multi_turn(
         normalizing_range: Coordinate normalization range
         delay_between_turns: Seconds to wait between turns
         delay_before_action: Seconds to wait before each action
+        high_level_strategy: Optional high-level strategy to guide action selection
     """
     logger.info(
         f"Running {num_turns} turn(s) with "
@@ -252,6 +271,7 @@ def run_multi_turn(
             planner_provider=planner_provider,
             normalizing_range=normalizing_range,
             delay_before_action=delay_before_action,
+            high_level_strategy=high_level_strategy,
         )
 
         if not success:
@@ -357,6 +377,12 @@ Available providers: {", ".join(provider_choices)}
         default=1.0,
         help="Delay between turns in seconds (default: 1.0)",
     )
+    parser.add_argument(
+        "--strategy",
+        "-s",
+        default=None,
+        help="Optional high-level strategy to guide action selection (e.g., 'focus on science')",
+    )
 
     args = parser.parse_args()
 
@@ -396,6 +422,7 @@ Available providers: {", ".join(provider_choices)}
             planner_provider=planner_provider,
             normalizing_range=args.range,
             delay_before_action=args.delay_action,
+            high_level_strategy=args.strategy,
         )
     else:
         run_multi_turn(
@@ -405,6 +432,7 @@ Available providers: {", ".join(provider_choices)}
             normalizing_range=args.range,
             delay_between_turns=args.delay_turn,
             delay_before_action=args.delay_action,
+            high_level_strategy=args.strategy,
         )
 
 
