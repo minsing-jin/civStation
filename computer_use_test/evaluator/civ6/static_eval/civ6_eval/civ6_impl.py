@@ -87,7 +87,7 @@ class UnitOpsPrimitive(BasePrimitive):
             )
 
         # Fallback to mock
-        seed = int(hashlib.md5(screenshot_path.encode()).hexdigest(), 16) % (2**32)
+        seed = int(hashlib.md5(screenshot_path.encode()).hexdigest(), 16) % (2 ** 32)
         rng = random.Random(seed)
 
         base_x, base_y = 960, 540
@@ -103,57 +103,6 @@ class UnitOpsPrimitive(BasePrimitive):
         return AgentPlan(
             primitive_name=self.name,
             reasoning="Mock: Selected unit and issued movement command to nearby tile",
-            actions=actions,
-        )
-
-
-class CountryMayerPrimitive(BasePrimitive):
-    """
-    Primitive for city (mayor) management operations.
-
-    Handles production queue, citizen assignment, building purchases, etc.
-    """
-
-    def __init__(
-        self,
-        vlm_provider: Optional[BaseVLMProvider] = None,
-        custom_prompt: Optional[str] = None,
-    ):
-        """Initialize primitive with optional VLM provider and custom prompt."""
-        self.vlm_provider = vlm_provider
-        self.custom_prompt = custom_prompt
-
-    @property
-    def name(self) -> str:
-        return "country_mayer_primitive"
-
-    def generate_plan(self, screenshot_path: str) -> AgentPlan:
-        """Generate city management plan (with VLM or mock)."""
-        if self.vlm_provider:
-            prompt = self.custom_prompt or get_primitive_prompt(self.name)
-
-            return self.vlm_provider.call_and_parse(
-                prompt=prompt,
-                image_path=screenshot_path,
-                primitive_name=self.name,
-            )
-
-        # Mock fallback
-        seed = int(hashlib.md5(screenshot_path.encode()).hexdigest(), 16) % (2**32)
-        rng = random.Random(seed)
-
-        city_panel_x = 800 + rng.randint(-50, 50)
-        city_panel_y = 600 + rng.randint(-50, 50)
-
-        actions: List[Action] = [
-            ClickAction(x=city_panel_x, y=city_panel_y, description="Open city panel"),
-            ClickAction(x=900, y=700, description="Select production item"),
-            KeyPressAction(keys=["enter"], description="Confirm production choice"),
-        ]
-
-        return AgentPlan(
-            primitive_name=self.name,
-            reasoning="Mock: Opened city management and adjusted production queue",
             actions=actions,
         )
 
@@ -190,7 +139,7 @@ class ScienceDecisionPrimitive(BasePrimitive):
             )
 
         # Mock fallback
-        seed = int(hashlib.md5(screenshot_path.encode()).hexdigest(), 16) % (2**32)
+        seed = int(hashlib.md5(screenshot_path.encode()).hexdigest(), 16) % (2 ** 32)
         rng = random.Random(seed)
 
         tech_tree_x = 100 + rng.randint(0, 100)
@@ -240,7 +189,7 @@ class CultureDecisionPrimitive(BasePrimitive):
             )
 
         # Mock fallback
-        seed = int(hashlib.md5(screenshot_path.encode()).hexdigest(), 16) % (2**32)
+        seed = int(hashlib.md5(screenshot_path.encode()).hexdigest(), 16) % (2 ** 32)
         rng = random.Random(seed)
 
         civic_tree_x = 640 + rng.randint(-50, 50)
@@ -329,7 +278,7 @@ class ResearchSelectPrimitive(BasePrimitive):
             )
 
         # Mock: click on a research item
-        seed = int(hashlib.md5(screenshot_path.encode()).hexdigest(), 16) % (2**32)
+        seed = int(hashlib.md5(screenshot_path.encode()).hexdigest(), 16) % (2 ** 32)
         rng = random.Random(seed)
 
         research_x = 300 + rng.randint(-50, 50)
@@ -376,7 +325,7 @@ class CityProductionPrimitive(BasePrimitive):
             )
 
         # Mock: click on a production item
-        seed = int(hashlib.md5(screenshot_path.encode()).hexdigest(), 16) % (2**32)
+        seed = int(hashlib.md5(screenshot_path.encode()).hexdigest(), 16) % (2 ** 32)
         rng = random.Random(seed)
 
         production_x = 700 + rng.randint(-50, 50)
