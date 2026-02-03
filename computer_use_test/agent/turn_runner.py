@@ -131,14 +131,11 @@ def plan_action(
     Returns:
         AgentAction with normalized coordinates, or None on failure
     """
-    instruction = get_primitive_prompt(primitive_name, normalizing_range)
-
-    # TODO: Incorporate high_level_strategy into the instruction/prompt
-    # when provided to guide the primitive's action selection based on
-    # higher-level goals (e.g., "focus on military expansion", "prioritize science")
-    if high_level_strategy:
-        # TODO: Implement strategy integration logic
-        pass
+    instruction = get_primitive_prompt(
+        primitive_name,
+        normalizing_range,
+        strategy_context=high_level_strategy,
+    )
 
     return provider.analyze(
         pil_image=pil_image,
