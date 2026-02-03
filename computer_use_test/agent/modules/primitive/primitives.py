@@ -3,8 +3,8 @@ import random
 
 from computer_use_test.agent.models.schema import Action, AgentPlan, ClickAction, KeyPressAction
 from computer_use_test.agent.modules.primitive.base_primitive import BasePrimitive
+from computer_use_test.agent.modules.router.primitive_registry import get_primitive_prompt
 from computer_use_test.utils.llm_provider.base import BaseVLMProvider
-from computer_use_test.utils.prompts import get_primitive_prompt
 
 
 class UnitOpsPrimitive(BasePrimitive):
