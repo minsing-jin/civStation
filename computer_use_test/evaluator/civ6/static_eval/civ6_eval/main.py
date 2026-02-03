@@ -12,7 +12,6 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import List, Optional
 
 from computer_use_test.agent.models.schema import (
     Action,
@@ -20,9 +19,7 @@ from computer_use_test.agent.models.schema import (
     DragAction,
     KeyPressAction,
 )
-from computer_use_test.evaluator.civ6.static_eval.civ6_eval.civ6_impl import (
-    Civ6MockRouter,
-    Civ6StaticEvaluator,
+from computer_use_test.agent.modules.primitive.primitives import (
     CityProductionPrimitive,
     CultureDecisionPrimitive,
     PopupPrimitive,
@@ -30,12 +27,16 @@ from computer_use_test.evaluator.civ6.static_eval.civ6_eval.civ6_impl import (
     ScienceDecisionPrimitive,
     UnitOpsPrimitive,
 )
+from computer_use_test.agent.modules.router.router import Civ6MockRouter
+from computer_use_test.evaluator.civ6.static_eval.civ6_eval.civ6_impl import (
+    Civ6StaticEvaluator,
+)
 from computer_use_test.evaluator.civ6.static_eval.interfaces import GroundTruth
-from computer_use_test.utils.provider import create_provider, get_available_providers
-from computer_use_test.utils.provider.base import BaseVLMProvider
+from computer_use_test.utils.llm_provider import create_provider, get_available_providers
+from computer_use_test.utils.llm_provider.base import BaseVLMProvider
 
 
-def load_ground_truth_from_json(json_path: str) -> List[GroundTruth]:
+def load_ground_truth_from_json(json_path: str) -> list[GroundTruth]:
     """
     Load test cases from JSON file.
 
@@ -67,14 +68,14 @@ def load_ground_truth_from_json(json_path: str) -> List[GroundTruth]:
     if not json_file.exists():
         raise FileNotFoundError(f"Test set file not found: {json_path}")
 
-    with open(json_file, "r") as f:
+    with open(json_file) as f:
         data = json.load(f)
 
     ground_truths = []
     for idx, item in enumerate(data):
         try:
             # Parse actions based on discriminator type field
-            actions: List[Action] = []
+            actions: list[Action] = []
             for action_dict in item["gt_actions"]:
                 action_type = action_dict["type"]
 
@@ -128,9 +129,9 @@ def load_ground_truth_from_json(json_path: str) -> List[GroundTruth]:
 
 def main(
     json_path: str = "test_set.json",
-    provider_name: Optional[str] = None,
-    api_key: Optional[str] = None,
-    model: Optional[str] = None,
+    provider_name: str | None = None,
+    api_key: str | None = None,
+    model: str | None = None,
 ) -> None:
     """
     Main evaluation loop.
@@ -148,7 +149,7 @@ def main(
     print()
 
     # Initialize VLM provider if specified
-    vlm_provider: Optional[BaseVLMProvider] = None
+    vlm_provider: BaseVLMProvider | None = None
     if provider_name:
         try:
             vlm_provider = create_provider(

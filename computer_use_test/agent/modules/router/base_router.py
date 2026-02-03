@@ -1,0 +1,8 @@
+from abc import ABC, abstractmethod
+
+
+class PrimitiveRouter(ABC):
+    @abstractmethod
+    def route(self, screenshot_path: str) -> str:
+        """스크린샷을 보고 적절한 Primitive 이름을 반환"""
+        pass

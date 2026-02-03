@@ -7,7 +7,6 @@ and ground truth data. Screenshots should be placed in the fixtures/screenshots 
 
 import json
 from pathlib import Path
-from typing import List
 
 import pytest
 
@@ -18,9 +17,7 @@ from computer_use_test.agent.models.schema import (
     DragAction,
     KeyPressAction,
 )
-from computer_use_test.evaluator.civ6.static_eval.civ6_eval.civ6_impl import (
-    Civ6MockRouter,
-    Civ6StaticEvaluator,
+from computer_use_test.agent.modules.primitive.primitives import (
     CityProductionPrimitive,
     CultureDecisionPrimitive,
     PopupPrimitive,
@@ -28,8 +25,11 @@ from computer_use_test.evaluator.civ6.static_eval.civ6_eval.civ6_impl import (
     ScienceDecisionPrimitive,
     UnitOpsPrimitive,
 )
+from computer_use_test.agent.modules.router.router import Civ6MockRouter
 from computer_use_test.evaluator.civ6.static_eval import EvalResult, GroundTruth
-
+from computer_use_test.evaluator.civ6.static_eval.civ6_eval.civ6_impl import (
+    Civ6StaticEvaluator,
+)
 
 # Fixtures directory paths
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -75,13 +75,13 @@ def ground_truth_data():
     if not GT_DATA_FILE.exists():
         pytest.skip(f"Ground truth file not found: {GT_DATA_FILE}")
 
-    with open(GT_DATA_FILE, "r") as f:
+    with open(GT_DATA_FILE) as f:
         data = json.load(f)
 
     ground_truths = []
     for item in data:
         # Parse actions
-        actions: List[Action] = []
+        actions: list[Action] = []
         for action_dict in item["gt_actions"]:
             action_type = action_dict["type"]
 
@@ -171,7 +171,7 @@ class TestPrimitivePlanGeneration:
         primitive = primitives["unit_ops_primitive"]
         screenshot_path = str(SCREENSHOTS_DIR / "unit_test.png")
 
-        plan = primitive.generate_plan(screenshot_path)
+        plan = primitive.generate_plan_and_action(screenshot_path)
 
         assert isinstance(plan, AgentPlan)
         assert plan.primitive_name == "unit_ops_primitive"
@@ -183,7 +183,7 @@ class TestPrimitivePlanGeneration:
         primitive = primitives["science_decision_primitive"]
         screenshot_path = str(SCREENSHOTS_DIR / "science_test.png")
 
-        plan = primitive.generate_plan(screenshot_path)
+        plan = primitive.generate_plan_and_action(screenshot_path)
 
         assert isinstance(plan, AgentPlan)
         assert plan.primitive_name == "science_decision_primitive"
@@ -194,8 +194,8 @@ class TestPrimitivePlanGeneration:
         primitive = primitives["unit_ops_primitive"]
         screenshot_path = str(SCREENSHOTS_DIR / "unit_test.png")
 
-        plan1 = primitive.generate_plan(screenshot_path)
-        plan2 = primitive.generate_plan(screenshot_path)
+        plan1 = primitive.generate_plan_and_action(screenshot_path)
+        plan2 = primitive.generate_plan_and_action(screenshot_path)
 
         # Should produce identical plans
         assert len(plan1.actions) == len(plan2.actions)
@@ -205,7 +205,7 @@ class TestPrimitivePlanGeneration:
         if len(plan1.actions) > 0:
             action1 = plan1.actions[0]
             action2 = plan2.actions[0]
-            assert type(action1) == type(action2)
+            assert type(action1) is type(action2)
 
 
 class TestEvaluationPipeline:
@@ -248,7 +248,9 @@ class TestEvaluationPipeline:
 
         # Calculate metrics
         primitive_accuracy = sum(r.primitive_match for r in results) / len(results)
-        action_accuracy = sum(r.action_sequence_match for r in results) / len(results)
+        _ = sum(r.action_sequence_match for r in results) / len(
+            results
+        )  # TODO: action_accuracy unused. It will be implemented later.
 
         # Primitive routing should be 100% with mock router (keyword-based)
         assert primitive_accuracy == 1.0, "Keyword-based routing should be 100% accurate"
@@ -357,7 +359,7 @@ class TestEndToEndEvaluation:
         action_accuracy = (sum(r.action_sequence_match for r in results) / total) * 100
         overall_accuracy = (sum(r.primitive_match and r.action_sequence_match for r in results) / total) * 100
 
-        print(f"\nFinal Metrics:")
+        print("\nFinal Metrics:")
         print(f"  Primitive Accuracy: {primitive_accuracy:.2f}%")
         print(f"  Action Accuracy:    {action_accuracy:.2f}%")
         print(f"  Overall Accuracy:   {overall_accuracy:.2f}%")

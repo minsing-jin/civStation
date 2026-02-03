@@ -168,7 +168,8 @@ print(f"Actions: {len(plan.actions)}")
 ### Using with Primitives
 
 ```python
-from computer_use_test.evaluator.civ6.static_eval.civ6_eval.civ6_impl import UnitOpsPrimitive
+
+from computer_use_test.agent.modules.primitive.primitives import UnitOpsPrimitive
 from computer_use_test.utils.provider import create_provider
 
 # Create provider
@@ -178,7 +179,7 @@ provider = create_provider("gpt", model="gpt-4o-mini")
 primitive = UnitOpsPrimitive(vlm_provider=provider)
 
 # Generate plan (will use VLM)
-plan = primitive.generate_plan("screenshot.png")
+plan = primitive.generate_plan_and_action("screenshot.png")
 
 print(f"Generated {len(plan.actions)} actions")
 for i, action in enumerate(plan.actions, 1):
@@ -259,12 +260,12 @@ Primitives accept an optional `vlm_provider` parameter:
 ```python
 # Without provider (uses mock)
 primitive = UnitOpsPrimitive()
-plan = primitive.generate_plan("screenshot.png")  # Mock actions
+plan = primitive.generate_plan_and_action("screenshot.png")  # Mock actions
 
 # With provider (uses real VLM)
 provider = create_provider("claude")
 primitive = UnitOpsPrimitive(vlm_provider=provider)
-plan = primitive.generate_plan("screenshot.png")  # Real VLM call
+plan = primitive.generate_plan_and_action("screenshot.png")  # Real VLM call
 ```
 
 ## Cost Estimation

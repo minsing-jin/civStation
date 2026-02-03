@@ -14,9 +14,8 @@ lives in BaseVLMProvider.
 import base64
 import os
 from pathlib import Path
-from typing import Optional, Union
 
-from computer_use_test.utils.provider.base import BaseVLMProvider, VLMResponse
+from computer_use_test.utils.llm_provider.base import BaseVLMProvider, VLMResponse
 
 
 class GPTVLMProvider(BaseVLMProvider):
@@ -28,7 +27,7 @@ class GPTVLMProvider(BaseVLMProvider):
 
     DEFAULT_MODEL = "gpt-4o"
 
-    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
+    def __init__(self, api_key: str | None = None, model: str | None = None):
         super().__init__(api_key, model)
 
         if self.api_key is None:
@@ -43,12 +42,12 @@ class GPTVLMProvider(BaseVLMProvider):
             from openai import OpenAI
 
             self.client = OpenAI(api_key=self.api_key)
-        except ImportError:
-            raise ImportError("openai package not installed. Install with: pip install openai")
+        except ImportError as e:
+            raise ImportError("openai package not installed. Install with: pip install openai") from e
 
     # ==================== Provider-specific helpers ====================
 
-    def _encode_image(self, image_path: Union[str, Path]) -> str:
+    def _encode_image(self, image_path: str | Path) -> str:
         """Encode image file to base64 data URL."""
         image_path = Path(image_path)
         if not image_path.exists():
@@ -119,7 +118,7 @@ class GPTVLMProvider(BaseVLMProvider):
         except Exception as e:
             raise RuntimeError(f"OpenAI API call failed: {e}") from e
 
-    def _build_image_content(self, image_path: Union[str, Path]) -> object:
+    def _build_image_content(self, image_path: str | Path) -> object:
         """Build OpenAI image_url content from file path."""
         image_url = self._encode_image(image_path)
         return {

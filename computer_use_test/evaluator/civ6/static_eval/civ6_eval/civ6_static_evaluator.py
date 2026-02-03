@@ -1,14 +1,13 @@
+from computer_use_test.agent.models.civ6_models import AgentPlan, ClickAction, KeyPressAction
+from computer_use_test.agent.modules.primitive.base_primitive import BasePrimitive
+from computer_use_test.agent.modules.router.router import Civ6Router
 from computer_use_test.evaluator.civ6.static_eval.base_static_primitive_evaluator import (
     BaseEvaluator,
-    GroundTruth,
     EvalResult,
-    BasePrimitive,
-    PrimitiveRouter,
+    GroundTruth,
 )
-from computer_use_test.agent.models.civ6_models import ClickAction, KeyPressAction, AgentPlan
 
-
-# --- Civ6 Primitives 구현 ---
+# --- Civ6 Primitives 구현 example---
 
 
 class Civ6Primitive(BasePrimitive):
@@ -19,7 +18,7 @@ class Civ6Primitive(BasePrimitive):
     def name(self) -> str:
         return self._name
 
-    def generate_plan(self, screenshot_path: str) -> AgentPlan:
+    def generate_plan_and_action(self, screenshot_path: str) -> AgentPlan:
         # [TODO] 실제 VLM 호출 부분 (여기서는 Mock Return)
         # prompt = f"Analyze {screenshot_path} for {self.name}..."
         # response = call_vlm(prompt)
@@ -36,22 +35,6 @@ class Civ6Primitive(BasePrimitive):
         )
 
 
-# --- Civ6 Router 구현 ---
-
-
-class Civ6Router(PrimitiveRouter):
-    def route(self, screenshot_path: str) -> str:
-        # [TODO] VLM에게 스크린샷을 주고 Primitive 분류 요청
-        # 여기서는 파일명에 힌트가 있다고 가정하고 Mocking
-        if "unit" in screenshot_path:
-            return "unit_ops_primitive"
-        if "mayor" in screenshot_path:
-            return "country_mayer_primitive"
-        if "science" in screenshot_path:
-            return "science_decision_primitive"
-        return "culture_decision_primitive"
-
-
 # --- Civ6 Evaluator (비교 로직 포함) ---
 
 
@@ -66,7 +49,7 @@ class Civ6StaticEvaluator(BaseEvaluator):
         if len(gt.expected_actions) != len(plan.actions):
             actions_match = False
         else:
-            for gt_act, pred_act in zip(gt.expected_actions, plan.actions):
+            for gt_act, pred_act in zip(gt.expected_actions, plan.actions, strict=False):
                 # Pydantic 모델 비교 (타입과 값이 모두 같아야 함)
                 # 좌표의 경우 ±10 픽셀 정도 여유를 주는 로직 추가 가능
                 if gt_act.model_dump(exclude={"description"}) != pred_act.model_dump(exclude={"description"}):

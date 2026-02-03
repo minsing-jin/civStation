@@ -1,7 +1,9 @@
 import json
-import pytest
 import logging
-from computer_use_test.utils.provider.base import BaseVLMProvider
+
+import pytest
+
+from computer_use_test.utils.llm_provider.base import BaseVLMProvider
 
 # 테스트 시 로그 확인이 필요하다면 설정 (pytest -s 옵션으로 확인 가능)
 logger = logging.getLogger(__name__)

@@ -157,8 +157,8 @@ python -m computer_use_test.evaluator.static_eval.civ6_eval.main --provider gemi
 ### 5. Custom 프롬프트 사용 (코드)
 
 ```python
-from computer_use_test.utils.provider import create_provider
-from computer_use_test.evaluator.civ6.static_eval.civ6_eval.civ6_impl import UnitOpsPrimitive
+from computer_use_test.utils.llm_provider import create_provider
+from computer_use_test.agent.modules.primitive.primitives import UnitOpsPrimitive
 
 provider = create_provider("claude")
 primitive = UnitOpsPrimitive(
@@ -166,7 +166,7 @@ primitive = UnitOpsPrimitive(
     custom_prompt="Your custom prompt here..."
 )
 
-plan = primitive.generate_plan("screenshot.png")
+plan = primitive.generate_plan_and_action("screenshot.png")
 ```
 
 ## 🧪 테스트 실행

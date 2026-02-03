@@ -6,7 +6,7 @@ with properly discriminated unions for type-safe serialization.
 """
 
 from enum import Enum
-from typing import Annotated, List, Literal, Optional, Union
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
@@ -26,7 +26,7 @@ class ActionType(str, Enum):
 class BaseAction(BaseModel):
     """Base class for all action types."""
 
-    description: Optional[str] = Field(None, description="Optional description for debugging and logging")
+    description: str | None = Field(None, description="Optional description for debugging and logging")
 
 
 # Concrete Action implementations with discriminator
@@ -52,7 +52,7 @@ class KeyPressAction(BaseAction):
     """Keyboard key press action."""
 
     type: Literal[ActionType.PRESS] = ActionType.PRESS
-    keys: List[str] = Field(..., description="List of keys to press (e.g., ['ctrl', 'c'])")
+    keys: list[str] = Field(..., description="List of keys to press (e.g., ['ctrl', 'c'])")
     interval: float = Field(0.1, description="Interval between key presses in seconds")
 
 
@@ -77,7 +77,7 @@ class WaitAction(BaseAction):
 
 # Discriminated union of all action types
 Action = Annotated[
-    Union[ClickAction, DoubleClickAction, KeyPressAction, DragAction, WaitAction],
+    ClickAction | DoubleClickAction | KeyPressAction | DragAction | WaitAction,
     Field(discriminator="type"),
 ]
 
@@ -92,4 +92,4 @@ class AgentPlan(BaseModel):
 
     primitive_name: str = Field(..., description="Name of the primitive that generated this plan")
     reasoning: str = Field(..., description="Explanation of why these actions were chosen")
-    actions: List[Action] = Field(default_factory=list, description="Ordered list of actions to execute")
+    actions: list[Action] = Field(default_factory=list, description="Ordered list of actions to execute")

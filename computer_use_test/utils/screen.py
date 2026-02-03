@@ -11,11 +11,10 @@ Flow:
 """
 
 import logging
-from typing import Optional
 
 import pyautogui
 
-from computer_use_test.utils.provider.base import AgentAction
+from computer_use_test.utils.llm_provider.base import AgentAction
 
 logger = logging.getLogger(__name__)
 
@@ -42,14 +41,14 @@ def capture_screen_pil():
     return screenshot, screen_w, screen_h
 
 
-def norm_to_real(norm_val: int, screen_size: int, normalizing_range: int) -> int:
+def norm_to_real(norm_val: int, screen_size: int, normalizing_range: int = 1000) -> int:
     """Convert a normalized coordinate to real screen coordinate."""
     clamped = max(0, min(normalizing_range, norm_val))
     return int((clamped / normalizing_range) * screen_size)
 
 
 def execute_action(
-    action: Optional[AgentAction],
+    action: AgentAction | None,
     screen_w: int,
     screen_h: int,
     normalizing_range: int = 1000,
@@ -89,27 +88,34 @@ def execute_action(
     reasoning = action.reasoning
     logger.info(f"Action: {action_type} | Reasoning: {reasoning}")
 
+    # Validate action type
+    if not action_type or action_type not in ["click", "double_click", "drag", "press", "type"]:
+        logger.error(f"Invalid or empty action type: '{action_type}'")
+        logger.error(f"Full action object: {action}")
+        logger.error("Valid action types are: click, double_click, drag, press, type")
+        return
+
     if action_type == "click":
-        real_x = norm_to_real(action.x, screen_w)
-        real_y = norm_to_real(action.y, screen_h)
+        real_x = norm_to_real(action.x, screen_w, normalizing_range)
+        real_y = norm_to_real(action.y, screen_h, normalizing_range)
 
         logger.info(f"Click: normalized({action.x}, {action.y}) → real({real_x}, {real_y}) - {action.button}")
         pyautogui.moveTo(real_x, real_y, duration=0.5)
         pyautogui.click(button=action.button)
 
     elif action_type == "double_click":
-        real_x = norm_to_real(action.x, screen_w)
-        real_y = norm_to_real(action.y, screen_h)
+        real_x = norm_to_real(action.x, screen_w, normalizing_range)
+        real_y = norm_to_real(action.y, screen_h, normalizing_range)
 
         logger.info(f"Double-click: normalized({action.x}, {action.y}) → real({real_x}, {real_y}) - {action.button}")
         pyautogui.moveTo(real_x, real_y, duration=0.5)
         pyautogui.doubleClick(button=action.button)
 
     elif action_type == "drag":
-        start_x = norm_to_real(action.x, screen_w)
-        start_y = norm_to_real(action.y, screen_h)
-        end_x = norm_to_real(action.end_x, screen_w)
-        end_y = norm_to_real(action.end_y, screen_h)
+        start_x = norm_to_real(action.x, screen_w, normalizing_range)
+        start_y = norm_to_real(action.y, screen_h, normalizing_range)
+        end_x = norm_to_real(action.end_x, screen_w, normalizing_range)
+        end_y = norm_to_real(action.end_y, screen_h, normalizing_range)
 
         logger.info(
             f"Drag: ({action.x},{action.y})→({action.end_x},{action.end_y}) "
@@ -130,15 +136,16 @@ def execute_action(
         if key:
             logger.info(f"Press key: {key}")
             pyautogui.press(key)
+        else:
+            logger.error(f"Press action missing 'key' field. Full action: {action}")
 
     elif action_type == "type":
         text = action.text
         if text:
             logger.info(f"Type text: {text}")
             pyautogui.write(text, interval=0.1)
-
-    else:
-        logger.warning(f"Unknown action type: {action_type}")
+        else:
+            logger.error(f"Type action missing 'text' field. Full action: {action}")
 
 
 def agent_loop(

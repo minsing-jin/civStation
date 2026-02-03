@@ -15,8 +15,8 @@ from computer_use_test.agent.models.schema import (
     AgentPlan,
     BaseAction,
     ClickAction,
-    DragAction,
     DoubleClickAction,
+    DragAction,
     KeyPressAction,
     WaitAction,
 )

@@ -1,8 +1,15 @@
 # ==============================================================================
-from PIL import Image
-from io import BytesIO
 import base64
+import json
+import os
+from abc import ABC, abstractmethod
+from io import BytesIO
+
 import pyautogui
+from dotenv import load_dotenv
+from PIL import Image
+
+load_dotenv()
 
 
 def capture_screen_pil(max_size=2048):
@@ -26,14 +33,6 @@ def image_to_base64(pil_image):
     pil_image.save(buffered, format="JPEG", quality=80)
     return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-
-from abc import ABC, abstractmethod
-from dotenv import load_dotenv
-import pyautogui
-import json
-import os
-
-load_dotenv()
 
 try:
     from google import genai
@@ -70,7 +69,8 @@ class VLMProvider(ABC):
         Analyze the screenshot and determine the next action.
 
         CRITICAL INSTRUCTION:
-        1. Coordinates must be NORMALIZED (0-{normalizing_range}). (0,0)=Top-Left, ({normalizing_range},{normalizing_range})=Bottom-Right.
+        1. Coordinates must be NORMALIZED (0-{normalizing_range}).
+           (0,0)=Top-Left, ({normalizing_range},{normalizing_range})=Bottom-Right.
         2. Output MUST be a valid JSON object only.
 
         Action Types:
@@ -294,7 +294,8 @@ if __name__ == "__main__":
     unit_instruction = (
         "너는 문명6 에이전트야. 유닛 정보를 보고 판단해."
         "1. 만약 '개척자'라면 'b'키를 눌러 도시를 건설해."
-        "2. 만약 전투 유닛이라면 유닛의 위치를 제외한 화면의 하늘색 타일(이동 가능 영역) 중 좋은 곳을 골라 '우클릭'으로 이동해. "
+        "2. 만약 전투 유닛이라면 유닛의 위치를 제외한 화면의 하늘색 타일(이동 가능 영역) 중 "
+        "좋은 곳을 골라 '우클릭'으로 이동해. "
     )
 
     """이 사이에 Enter"""
@@ -314,7 +315,8 @@ if __name__ == "__main__":
     """
 
     city_instruction = """
-    도시에서 생산할 수있는 생산품목이 오른쪽 팝업으로 나타났다면 생산품목중에서 가장 턴이 적은 생산품목으로 마우스를 움직여서 마우스 좌클릭해줘
+    도시에서 생산할 수있는 생산품목이 오른쪽 팝업으로 나타났다면
+    생산품목중에서 가장 턴이 적은 생산품목으로 마우스를 움직여서 마우스 좌클릭해줘
     """
 
     # 개척자 움직임 + 팝업 처리

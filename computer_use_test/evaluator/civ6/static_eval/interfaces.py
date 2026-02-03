@@ -6,17 +6,13 @@ for action comparison with coordinate tolerance.
 """
 
 from computer_use_test.evaluator.civ6.static_eval.base_static_primitive_evaluator import (
-    BasePrimitive,
     BaseEvaluator,
     EvalResult,
     GroundTruth,
-    PrimitiveRouter,
 )
 
 # Re-export all base classes for convenience
 __all__ = [
-    "BasePrimitive",
-    "PrimitiveRouter",
     "BaseEvaluator",
     "GroundTruth",
     "EvalResult",
