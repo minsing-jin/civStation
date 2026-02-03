@@ -229,7 +229,7 @@ COMBAT_PROMPT = """너는 문명6 에이전트야. 전투 상황을 처리해야
 
 
 # ==============================================================================
-# Prompt Registry
+# Prompt Registry (TODO: context, high-level strategy 반영하여 고도화 필요)
 # ==============================================================================
 def get_primitive_prompt(primitive_name: str, normalizing_range: int = 1000) -> str:
     """
