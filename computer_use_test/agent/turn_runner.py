@@ -134,7 +134,8 @@ def plan_action(
     instruction = get_primitive_prompt(
         primitive_name,
         normalizing_range,
-        strategy_context=high_level_strategy,
+        high_level_strategy=high_level_strategy,
+        context="현재 게임 상태 정보 없음",  # TODO: Deliver game state and static
     )
 
     return provider.analyze(
