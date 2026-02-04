@@ -7,6 +7,7 @@ from computer_use_test.agent.modules.router.primitive_registry import get_primit
 from computer_use_test.utils.llm_provider.base import BaseVLMProvider
 
 
+# TODO: This file is not used at test runner time, but is kept for reference
 class UnitOpsPrimitive(BasePrimitive):
     """
     Primitive for unit operations in Civilization VI.
