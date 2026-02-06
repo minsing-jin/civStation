@@ -1,39 +1,45 @@
 [project]
 name = "computer-use-test"
 version = "0.0.1"
+requires-python = ">=3.10"
 description = "This project is computer-use action evaluation with evironment. You can collect data at the env automatically and evaluate according to evaluation set."
 readme = "README.md"
 authors = [
-  {name = "minsing-jin", email = "developerminsing@gmail.com"}
+    { name = "minsing-jin", email = "developerminsing@gmail.com" }
 ]
 maintainers = [
-  {name = "minsing-jin", email = "developerminsing@gmail.com"}
+    { name = "minsing-jin", email = "developerminsing@gmail.com" }
 ]
 classifiers = [
     # TODO
 ]
-license = {text = "MIT"}
+license = { text = "MIT" }
 dependencies = [
-  "anthropic>=0.77.0",
-  "dotenv>=0.9.9",
-  "google-genai>=1.60.0",
-  "google-generativeai>=0.8.6",
-  "openai>=2.16.0",
-  "pillow>=12.1.0",
-  "pre-commit>=4.5.1",
-  "pyautogui>=0.9.54",
-  "typer",
+    "anthropic>=0.77.0",
+    "dotenv>=0.9.9",
+    "google-genai>=1.60.0",
+    "openai>=2.16.0",
+    "pillow>=12.1.0",
+    "pre-commit>=4.5.1",
+    "pyautogui>=0.9.54",
+    "speechrecognition>=3.14.5",
+    "typer",
 ]
-requires-python = ">= 3.10"
 
 [project.optional-dependencies]
+# Voice input dependencies for HITL
+voice = [
+    "SpeechRecognition>=3.10.0",
+    "PyAudio>=0.2.14",
+    "openai-whisper>=20231117",  # For local Whisper STT
+]
 test = [
-    "coverage",  # testing
-    "pytest",  # testing
-    "ruff",  # linting
+    "coverage", # testing
+    "pytest", # testing
+    "ruff", # linting
     "ty", # checking types
     "ipdb", # debugging
-    "pre-commit",  # git hooks
+    "pre-commit", # git hooks
 ]
 
 [project.urls]
@@ -68,12 +74,12 @@ line-length = 120
 
 [tool.ruff.lint]
 select = [
-    "E",   # pycodestyle errors
-    "W",   # pycodestyle warnings
-    "F",   # Pyflakes
-    "I",   # isort
-    "B",   # flake8-bugbear
-    "UP",  # pyupgrade
+    "E", # pycodestyle errors
+    "W", # pycodestyle warnings
+    "F", # Pyflakes
+    "I", # isort
+    "B", # flake8-bugbear
+    "UP", # pyupgrade
 ]
 
 [tool.uv]

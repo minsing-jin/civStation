@@ -16,13 +16,14 @@ from computer_use_test.utils.prompts.primitive_prompt import (
     DIPLOMATIC_PROMPT,
     GOVERNOR_PROMPT,
     JSON_FORMAT_INSTRUCTION,
+    POLICY_PROMPT,
     POPUP_PROMPT,
     RESEARCH_MANAGER_PROMPT,
     UNIT_OPS_PROMPT,
 )
 
 # ==============================================================================
-# Primitive Registry
+# Primitive Registry (TODO: Criteria will be replaced by small vlm model or image similarity metric)
 # ==============================================================================
 PRIMITIVE_REGISTRY: dict[str, dict] = {
     "popup_primitive": {
@@ -80,6 +81,14 @@ PRIMITIVE_REGISTRY: dict[str, dict] = {
         "prompt": COMBAT_PROMPT,
         "priority": 9,
     },
+    "policy_primitive": {
+        "criteria": "1. '정부(Government)' 화면이 열려 있음. "
+        "2. '정부 화면'에서 '정책 변경' 탭이 활성화됨. "
+        "3. 새로운 정부(과두제 등)를 선택하는 화면임. "
+        "4. 정책 화면을 닫을 때 발생하는 '정책변경이 확정되지 않았습니다' 팝업이 떠 있음.",
+        "prompt": POLICY_PROMPT,
+        "priority": 10,
+    },
 }
 
 # ==============================================================================
@@ -121,7 +130,9 @@ ROUTER_PROMPT = _build_router_prompt()
 def get_primitive_prompt(
     primitive_name: str,
     normalizing_range: int = 1000,
-    strategy_context: str | None = None,
+    high_level_strategy: str | None = None,
+    context: str | None = None,
+    **kwargs,
 ) -> str:
     """
     Get the appropriate prompt for a primitive by name.
@@ -129,8 +140,12 @@ def get_primitive_prompt(
     Args:
         primitive_name: Name of the primitive (e.g., "unit_ops_primitive")
         normalizing_range: Coordinate normalization range (default: 1000)
-        strategy_context: Optional high-level strategy context to guide decisions.
+        high_level_strategy: Optional high-level strategy context to guide decisions.
                          If None, uses default placeholder strategy.
+        context: Primitive-specific information like statics, current state.
+               ex) "city population: 5, production: 10, food: 8, science: 12.
+                    Current turn: 150. Current Production Items: ..."
+
 
     Returns:
         Prompt string for the primitive with formatted JSON instructions
@@ -142,12 +157,14 @@ def get_primitive_prompt(
         raise ValueError(f"Unknown primitive: {primitive_name}. Available: {PRIMITIVE_NAMES}")
 
     # TODO: Replace with actual high-level strategy from strategy planner
-    if strategy_context is None:
-        strategy_context = "과학 승리를 목표로 함"
+    if high_level_strategy is None:
+        high_level_strategy = "과학 승리를 목표로 함"
 
     json_instruction = JSON_FORMAT_INSTRUCTION.format(normalizing_range=normalizing_range)
     prompt_template = PRIMITIVE_REGISTRY[primitive_name]["prompt"]
     return prompt_template.format(
         json_instruction=json_instruction,
-        strategy_context=strategy_context,
+        high_level_strategy=high_level_strategy,
+        context=context,
+        **kwargs,
     )

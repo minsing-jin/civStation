@@ -13,6 +13,9 @@ lives in BaseVLMProvider.
 
 import os
 from pathlib import Path
+from typing import Any
+
+from google.genai import types
 
 from computer_use_test.utils.llm_provider.base import BaseVLMProvider, VLMResponse
 
@@ -38,11 +41,9 @@ class GeminiVLMProvider(BaseVLMProvider):
             self.model = self.DEFAULT_MODEL
 
         try:
-            import google.generativeai as genai
+            from google import genai
 
-            genai.configure(api_key=self.api_key)
-            self.genai = genai
-            self.client = genai.GenerativeModel(self.model)
+            self.client = genai.Client(api_key=os.getenv("GENAI_API_KEY"))
         except ImportError as e:
             raise ImportError(
                 "google-generativeai package not installed. Install with: pip install google-generativeai"
@@ -55,17 +56,32 @@ class GeminiVLMProvider(BaseVLMProvider):
         content_parts: list,
         temperature: float = 0.7,
         max_tokens: int = 4096,
+        response_json_schema: dict | None = None,
+        use_thinking: bool = True,
     ) -> VLMResponse:
         """Send content parts to Google Generative AI API."""
         try:
-            generation_config = {
+            # Build config kwargs dynamically
+            config_kwargs: dict[str, Any] = {
                 "temperature": temperature,
                 "max_output_tokens": max_tokens,
             }
 
-            response = self.client.generate_content(
-                content_parts,
-                generation_config=generation_config,
+            # Add JSON schema if provided (enforced)
+            if response_json_schema is not None:
+                config_kwargs["response_mime_type"] = "application/json"
+                config_kwargs["response_json_schema"] = response_json_schema
+
+            # Add thinking config
+            if use_thinking:
+                config_kwargs["thinking_config"] = types.ThinkingConfig()
+            else:
+                config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
+
+            response = self.client.models.generate_content(
+                contents=content_parts,
+                model=self.model,
+                config=types.GenerateContentConfig(**config_kwargs),
             )
 
             response_text = response.text
