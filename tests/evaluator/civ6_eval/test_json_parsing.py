@@ -3,15 +3,10 @@ import logging
 
 import pytest
 
-from computer_use_test.utils.llm_provider.base import BaseVLMProvider
+from computer_use_test.utils.llm_provider.parser import strip_markdown
 
 # 테스트 시 로그 확인이 필요하다면 설정 (pytest -s 옵션으로 확인 가능)
 logger = logging.getLogger(__name__)
-
-
-def strip_markdown(text: str) -> str:
-    """실제 BaseVLMProvider의 메서드를 활용"""
-    return BaseVLMProvider._strip_markdown(text)
 
 
 @pytest.mark.parametrize(
