@@ -21,7 +21,9 @@ dependencies = [
     "openai>=2.16.0",
     "pillow>=12.1.0",
     "pre-commit>=4.5.1",
+    "pyaudio>=0.2.14",
     "pyautogui>=0.9.54",
+    "soundfile>=0.13.1",
     "speechrecognition>=3.14.5",
     "typer",
 ]
@@ -32,6 +34,10 @@ voice = [
     "SpeechRecognition>=3.10.0",
     "PyAudio>=0.2.14",
     "openai-whisper>=20231117",  # For local Whisper STT
+]
+# Chat app integration dependencies
+chatapp = [
+    "discord.py>=2.3.0",
 ]
 test = [
     "coverage", # testing
