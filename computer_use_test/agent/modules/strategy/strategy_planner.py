@@ -21,6 +21,7 @@ from computer_use_test.agent.modules.strategy.strategy_schemas import (
     StructuredStrategy,
     VictoryType,
 )
+from computer_use_test.utils.llm_provider.parser import strip_markdown
 
 if TYPE_CHECKING:
     from computer_use_test.agent.modules.context import ContextManager
@@ -50,6 +51,8 @@ class StrategyPlanner(BaseStrategyPlanner):
         input_mode: InputMode | str = InputMode.TEXT,
         stt_provider: str = "whisper",
         voice_timeout: float = 10.0,
+        chatapp_provider=None,
+        discussion_engine=None,
     ):
         """
         Initialize the strategy planner.
@@ -57,14 +60,17 @@ class StrategyPlanner(BaseStrategyPlanner):
         Args:
             vlm_provider: VLM provider instance for LLM calls
             hitl_mode: If True, requires human input; if False, autonomous
-            input_mode: HITL input mode ("voice", "text", or "auto")
+            input_mode: HITL input mode ("voice", "text", "auto", or "chatapp")
             stt_provider: STT provider for voice input ("whisper", "google", "openai")
             voice_timeout: Maximum seconds to wait for voice input
+            chatapp_provider: Optional ChatAppInputProvider for chat app input
+            discussion_engine: Optional StrategyDiscussion engine for multi-turn discussions
         """
         self.provider = vlm_provider
         self.hitl_mode = hitl_mode
         self.input_mode = InputMode(input_mode) if isinstance(input_mode, str) else input_mode
         self.logger = logger
+        self.discussion_engine = discussion_engine
 
         # Initialize HITL input manager if in HITL mode
         self._input_manager: HITLInputManager | None = None
@@ -73,6 +79,7 @@ class StrategyPlanner(BaseStrategyPlanner):
                 input_mode=self.input_mode,
                 stt_provider=stt_provider,
                 voice_timeout=voice_timeout,
+                chatapp_provider=chatapp_provider,
             )
 
     def get_human_input(self, prompt: str = "전략을 입력하세요: ") -> str:
@@ -228,7 +235,7 @@ class StrategyPlanner(BaseStrategyPlanner):
     def _parse_strategy_response(self, response: str) -> StructuredStrategy:
         """Parse VLM response into StructuredStrategy."""
         # Strip markdown if present
-        content = self.provider._strip_markdown(response)
+        content = strip_markdown(response)
 
         try:
             data = json.loads(content)
