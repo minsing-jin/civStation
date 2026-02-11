@@ -10,11 +10,11 @@ Components:
 - DiscordDiscussionHandler: Discord command routing
 """
 
-from computer_use_test.agent.modules.discussion.discussion_engine import (
+from computer_use_test.utils.chatapp.discussion.discussion_engine import (
     DiscussionState,
     StrategyDiscussion,
 )
-from computer_use_test.agent.modules.discussion.discussion_schemas import (
+from computer_use_test.utils.chatapp.discussion.discussion_schemas import (
     DiscussionMessage,
     DiscussionMode,
     DiscussionSession,

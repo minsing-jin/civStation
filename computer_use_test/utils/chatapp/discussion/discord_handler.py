@@ -10,11 +10,11 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from computer_use_test.agent.modules.discussion.discussion_schemas import DiscussionMode
+from computer_use_test.utils.chatapp.discussion.discussion_schemas import DiscussionMode
 
 if TYPE_CHECKING:
-    from computer_use_test.agent.modules.discussion.discussion_engine import StrategyDiscussion
     from computer_use_test.utils.chatapp.base import BaseChatApp, ChatMessage
+    from computer_use_test.utils.chatapp.discussion.discussion_engine import StrategyDiscussion
 
 logger = logging.getLogger(__name__)
 

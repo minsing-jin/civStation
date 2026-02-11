@@ -13,11 +13,11 @@ import uuid
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from computer_use_test.agent.modules.discussion.discussion_schemas import (
+from computer_use_test.utils.chatapp.discussion.discussion_schemas import (
     DiscussionMode,
     DiscussionSession,
 )
-from computer_use_test.agent.modules.discussion.prompts.discussion_prompts import (
+from computer_use_test.utils.chatapp.discussion.prompts.discussion_prompts import (
     DISCUSSION_FINALIZE_PROMPT,
     DISCUSSION_SYSTEM_PROMPT,
     DISCUSSION_TURN_FEEDBACK_PROMPT,
