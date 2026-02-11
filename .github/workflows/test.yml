@@ -21,8 +21,6 @@ jobs:
     - name: Install uv
       uses: astral-sh/setup-uv@v5
 
-    # 💡 수정 포인트: 프로젝트 전체를 설치하지 않고 ruff만 설치합니다.
-    # 이렇게 하면 portaudio 관련 에러를 피할 수 있고 속도도 훨씬 빠릅니다.
     - name: Install ruff
       run: uv pip install --system ruff
 
@@ -49,7 +47,6 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
 
-    # ✅ 여기는 실제 테스트를 위해 전체 설치가 필요하므로 시스템 의존성을 유지합니다.
     - name: Install system dependencies
       run: |
         sudo apt-get update
