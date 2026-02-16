@@ -79,16 +79,10 @@ class HighLevelContext:
 
         # Strategy summary
         if self.current_strategy:
-            lines.append(f"🎯 목표: {self.current_strategy.victory_goal.value} 승리")
-            lines.append(f"📍 현재 단계: {self.current_strategy.current_phase}")
-
-            if self.current_strategy.priorities:
-                lines.append(f"⭐ 우선순위: {', '.join(self.current_strategy.priorities[:3])}")
-
-            if self.current_strategy.immediate_objectives:
-                lines.append("📋 즉각적 목표:")
-                for obj in self.current_strategy.immediate_objectives[:3]:
-                    lines.append(f"  - {obj}")
+            lines.append(f"목표: {self.current_strategy.victory_goal.value} 승리")
+            lines.append(f"단계: {self.current_strategy.current_phase}")
+            lines.append("")
+            lines.append(self.current_strategy.text)
         else:
             lines.append("전략 미설정")
 

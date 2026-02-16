@@ -16,6 +16,7 @@ from computer_use_test.agent.modules.strategy.strategy_schemas import (
     HITLInputRequiredError,
     StructuredStrategy,
     VictoryType,
+    parse_strategy_json,
 )
 
 __all__ = [
@@ -26,4 +27,5 @@ __all__ = [
     "GamePhase",
     "HITLInputRequiredError",
     "InputMode",
+    "parse_strategy_json",
 ]

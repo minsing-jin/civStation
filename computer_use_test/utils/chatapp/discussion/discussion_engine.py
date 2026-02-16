@@ -7,7 +7,6 @@ conversations with the LLM to refine game strategy.
 
 from __future__ import annotations
 
-import json
 import logging
 import uuid
 from enum import Enum
@@ -259,25 +258,6 @@ class StrategyDiscussion:
 
     def _parse_strategy_response(self, response: str) -> StructuredStrategy:
         """Parse VLM response into StructuredStrategy."""
-        from computer_use_test.agent.modules.strategy.strategy_schemas import StructuredStrategy, VictoryType
+        from computer_use_test.agent.modules.strategy.strategy_schemas import parse_strategy_json
 
-        content = strip_markdown(response)
-        data = json.loads(content)
-
-        victory_goal_str = data.get("victory_goal", "science").lower()
-        try:
-            victory_goal = VictoryType(victory_goal_str)
-        except ValueError:
-            logger.warning(f"Unknown victory type: {victory_goal_str}, defaulting to science")
-            victory_goal = VictoryType.SCIENCE
-
-        return StructuredStrategy(
-            victory_goal=victory_goal,
-            current_phase=data.get("current_phase", "early_expansion"),
-            priorities=data.get("priorities", []),
-            focus_areas=data.get("focus_areas", []),
-            constraints=data.get("constraints", []),
-            immediate_objectives=data.get("immediate_objectives", []),
-            long_term_objectives=data.get("long_term_objectives", []),
-            notes=data.get("notes", ""),
-        )
+        return parse_strategy_json(strip_markdown(response))

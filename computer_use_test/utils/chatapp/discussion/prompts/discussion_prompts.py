@@ -36,16 +36,18 @@ DISCUSSION_FINALIZE_PROMPT = """\
 {{
     "victory_goal": "science|culture|domination|religious|diplomatic|score",
     "current_phase": "early_expansion|mid_development|late_consolidation|victory_push",
-    "priorities": ["우선순위1", "우선순위2", "우선순위3"],
-    "focus_areas": ["집중분야1", "집중분야2"],
-    "constraints": ["제약사항1", "제약사항2"],
-    "immediate_objectives": ["즉각목표1", "즉각목표2", "즉각목표3"],
-    "long_term_objectives": ["장기목표1", "장기목표2"],
-    "notes": "추가 참고사항"
+    "text": "전략 본문 (200-400자, 한국어)"
 }}
 ```
 
-토론에서 논의된 내용을 충실히 반영하고, 명시적으로 논의되지 않은 항목은 합리적인 기본값을 사용하세요.
+text 작성 가이드:
+- 핵심 전략 방향과 그 이유를 먼저 서술
+- 우선순위를 ">" 구분으로 명시
+- 위협이나 제약사항을 구체적으로 언급
+- 즉각적 목표 (10-20턴 내)를 구체적 건물/기술/유닛 이름으로 제시
+- 장기 경로를 간략히 서술
+
+토론에서 논의된 내용을 충실히 반영하고, 명시적으로 논의되지 않은 부분은 합리적으로 추론하세요.
 """
 
 DISCUSSION_TURN_FEEDBACK_PROMPT = """\

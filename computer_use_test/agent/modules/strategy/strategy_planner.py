@@ -20,6 +20,7 @@ from computer_use_test.agent.modules.strategy.strategy_schemas import (
     HITLInputRequiredError,
     StructuredStrategy,
     VictoryType,
+    parse_strategy_json,
 )
 from computer_use_test.utils.llm_provider.parser import strip_markdown
 
@@ -152,15 +153,21 @@ class StrategyPlanner(BaseStrategyPlanner):
 
         self.logger.info(f"Refining strategy from human input: {raw_input[:100]}...")
 
-        try:
-            response = self._call_vlm(prompt)
-            strategy = self._parse_strategy_response(response)
-            self.logger.info(f"Strategy refined: {strategy.victory_goal.value} victory")
-            return strategy
-        except Exception as e:
-            self.logger.error(f"Failed to refine strategy: {e}")
-            # Return a default strategy based on input hints
-            return self._fallback_strategy_from_input(raw_input)
+        last_error = None
+        for attempt in range(2):
+            try:
+                response = self._call_vlm(prompt)
+                strategy = parse_strategy_json(strip_markdown(response))
+                self.logger.info(f"Strategy refined: {strategy.victory_goal.value} victory")
+                return strategy
+            except (json.JSONDecodeError, ValueError) as e:
+                last_error = e
+                if attempt == 0:
+                    self.logger.warning(f"Strategy parse failed (attempt 1): {e}, retrying...")
+                    prompt += "\n\n이전 응답이 올바른 JSON이 아니었습니다. 반드시 유효한 JSON만 출력하세요."
+
+        self.logger.error(f"Strategy refinement failed after retries: {last_error}")
+        return self._fallback_strategy_from_input(raw_input)
 
     def update_strategy(
         self,
@@ -190,15 +197,21 @@ class StrategyPlanner(BaseStrategyPlanner):
 
         self.logger.info(f"Updating strategy, reason: {reason or 'periodic update'}")
 
-        try:
-            response = self._call_vlm(prompt)
-            strategy = self._parse_strategy_response(response)
-            self.logger.info(f"Strategy updated: {strategy.victory_goal.value} victory")
-            return strategy
-        except Exception as e:
-            self.logger.error(f"Failed to update strategy: {e}")
-            # Return original strategy if update fails
-            return current_strategy
+        last_error = None
+        for attempt in range(2):
+            try:
+                response = self._call_vlm(prompt)
+                strategy = parse_strategy_json(strip_markdown(response))
+                self.logger.info(f"Strategy updated: {strategy.victory_goal.value} victory")
+                return strategy
+            except (json.JSONDecodeError, ValueError) as e:
+                last_error = e
+                if attempt == 0:
+                    self.logger.warning(f"Strategy update parse failed (attempt 1): {e}, retrying...")
+                    prompt += "\n\n이전 응답이 올바른 JSON이 아니었습니다. 반드시 유효한 JSON만 출력하세요."
+
+        self.logger.error(f"Strategy update failed after retries: {last_error}")
+        return current_strategy
 
     def _autonomous_generation(self, context: "ContextManager") -> StructuredStrategy:
         """Generate strategy autonomously from context."""
@@ -210,15 +223,21 @@ class StrategyPlanner(BaseStrategyPlanner):
 
         self.logger.info("Generating autonomous strategy from context")
 
-        try:
-            response = self._call_vlm(prompt)
-            strategy = self._parse_strategy_response(response)
-            self.logger.info(f"Autonomous strategy generated: {strategy.victory_goal.value} victory")
-            return strategy
-        except Exception as e:
-            self.logger.error(f"Failed to generate autonomous strategy: {e}")
-            # Return default science strategy
-            return StructuredStrategy.default_science_strategy()
+        last_error = None
+        for attempt in range(2):
+            try:
+                response = self._call_vlm(prompt)
+                strategy = parse_strategy_json(strip_markdown(response))
+                self.logger.info(f"Autonomous strategy generated: {strategy.victory_goal.value} victory")
+                return strategy
+            except (json.JSONDecodeError, ValueError) as e:
+                last_error = e
+                if attempt == 0:
+                    self.logger.warning(f"Autonomous strategy parse failed (attempt 1): {e}, retrying...")
+                    prompt += "\n\n이전 응답이 올바른 JSON이 아니었습니다. 반드시 유효한 JSON만 출력하세요."
+
+        self.logger.error(f"Autonomous strategy generation failed after retries: {last_error}")
+        return StructuredStrategy.default_science_strategy()
 
     def _call_vlm(self, prompt: str) -> str:
         """Call the VLM with a text-only prompt."""
@@ -232,37 +251,6 @@ class StrategyPlanner(BaseStrategyPlanner):
 
         return response.content
 
-    def _parse_strategy_response(self, response: str) -> StructuredStrategy:
-        """Parse VLM response into StructuredStrategy."""
-        # Strip markdown if present
-        content = strip_markdown(response)
-
-        try:
-            data = json.loads(content)
-
-            # Parse victory goal
-            victory_goal_str = data.get("victory_goal", "science").lower()
-            try:
-                victory_goal = VictoryType(victory_goal_str)
-            except ValueError:
-                self.logger.warning(f"Unknown victory type: {victory_goal_str}, defaulting to science")
-                victory_goal = VictoryType.SCIENCE
-
-            return StructuredStrategy(
-                victory_goal=victory_goal,
-                current_phase=data.get("current_phase", "early_expansion"),
-                priorities=data.get("priorities", []),
-                focus_areas=data.get("focus_areas", []),
-                constraints=data.get("constraints", []),
-                immediate_objectives=data.get("immediate_objectives", []),
-                long_term_objectives=data.get("long_term_objectives", []),
-                notes=data.get("notes", ""),
-            )
-        except json.JSONDecodeError as e:
-            self.logger.error(f"Failed to parse strategy JSON: {e}")
-            self.logger.error(f"Raw response: {response}")
-            raise ValueError(f"Failed to parse strategy response: {e}") from e
-
     def _fallback_strategy_from_input(self, raw_input: str) -> StructuredStrategy:
         """Create a fallback strategy based on keywords in input."""
         input_lower = raw_input.lower()
@@ -275,7 +263,8 @@ class StrategyPlanner(BaseStrategyPlanner):
         elif any(word in input_lower for word in ["지배", "domination", "군사", "전쟁", "정복"]):
             return StructuredStrategy.default_domination_strategy()
         else:
-            # Default to science
-            strategy = StructuredStrategy.default_science_strategy()
-            strategy.notes = f"플레이어 입력 기반: {raw_input[:100]}"
-            return strategy
+            return StructuredStrategy(
+                text=f"과학 승리를 목표로 한다. 플레이어 지시: {raw_input[:200]}",
+                victory_goal=VictoryType.SCIENCE,
+                current_phase="early_expansion",
+            )
