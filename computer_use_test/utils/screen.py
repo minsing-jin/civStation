@@ -117,10 +117,7 @@ def execute_action(
         end_x = norm_to_real(action.end_x, screen_w, normalizing_range)
         end_y = norm_to_real(action.end_y, screen_h, normalizing_range)
 
-        logger.info(
-            f"Drag: ({action.x},{action.y})→({action.end_x},{action.end_y}) "
-            f"real ({start_x},{start_y})→({end_x},{end_y})"
-        )
+        logger.info(f"Drag: ({action.x},{action.y})→({action.end_x},{action.end_y}) real ({start_x},{start_y})→({end_x},{end_y})")
 
         # Move to start position
         pyautogui.moveTo(start_x, start_y, duration=0.3)
