@@ -9,6 +9,8 @@ Primitive Registry — Single source of truth for all primitives.
 ROUTER_PROMPT, PRIMITIVE_NAMES, get_primitive_prompt() 모두 자동 반영됨.
 """
 
+from dataclasses import dataclass
+
 from computer_use_test.utils.prompts.primitive_prompt import (
     CITY_PRODUCTION_PROMPT,
     COMBAT_PROMPT,
@@ -21,6 +23,20 @@ from computer_use_test.utils.prompts.primitive_prompt import (
     RESEARCH_MANAGER_PROMPT,
     UNIT_OPS_PROMPT,
 )
+
+
+@dataclass
+class RouterResult:
+    """Result from the Router's screenshot classification.
+
+    Contains the selected primitive and turn-recognition metadata.
+    """
+
+    primitive: str
+    reasoning: str = ""
+    observed_turn: int | None = None  # Turn number read from the screen (top-right)
+    is_new_turn: bool = False  # True when the in-game turn number has incremented
+
 
 # ==============================================================================
 # Primitive Registry (TODO: Criteria will be replaced by small vlm model or image similarity metric)
@@ -45,9 +61,7 @@ PRIMITIVE_REGISTRY: dict[str, dict] = {
         "priority": 2,
     },
     "unit_ops_primitive": {
-        "criteria": "유닛이 선택되어 있어서 오른쪽 아래에 유닛 이름과 이동력이 있는 정보가 보이고, "
-        "맵에서 유닛 조작이 필요한 상황이다."
-        "하늘색 이동 가능 타일이 보인다.",
+        "criteria": "유닛이 선택되어 있어서 오른쪽 아래에 유닛 이름과 이동력이 있는 정보가 보이고, 맵에서 유닛 조작이 필요한 상황이다.하늘색 이동 가능 타일이 보인다.",
         "prompt": UNIT_OPS_PROMPT,
         "priority": 3,
     },
@@ -110,6 +124,9 @@ def _build_router_prompt() -> str:
     return f"""너는 문명6 게임 상태를 분석하는 라우터야.
 스크린샷을 보고 현재 상황을 정확히 하나의 카테고리로 분류해.
 
+추가로, 화면 오른쪽 위(Top-right)에 표시된 현재 턴 숫자를 읽어서 "turn_number" 필드에 정수로 기록해.
+턴 숫자를 읽을 수 없는 경우 null로 표기해.
+
 분류 기준 (우선순위 순서대로 판단):
 
 {criteria_block}
@@ -119,7 +136,8 @@ def _build_router_prompt() -> str:
 반드시 아래 JSON 형식으로만 응답해:
 {{
     "primitive": "위_카테고리_중_하나",
-    "reasoning": "이유를 간단히 설명"
+    "reasoning": "이유를 간단히 설명",
+    "turn_number": 현재_턴_숫자_또는_null
 }}
 """
 
