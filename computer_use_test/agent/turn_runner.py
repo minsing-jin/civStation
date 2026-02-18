@@ -12,7 +12,9 @@ from pathlib import Path
 import configargparse  # pip install configargparse
 
 from computer_use_test.agent.modules.context import ContextManager
+from computer_use_test.agent.modules.hitl import CommandQueue, QueueListener
 from computer_use_test.agent.turn_executor import run_multi_turn, run_one_turn
+from computer_use_test.utils.debug import DebugOptions
 from computer_use_test.utils.llm_provider import create_provider, get_available_providers
 
 # 로깅 설정
@@ -56,6 +58,14 @@ def parse_args() -> configargparse.Namespace:
     exec_group.add_argument("--range", type=int, default=1000, help="Coordinate normalization range")
     exec_group.add_argument("--delay-action", type=float, default=0.5, help="Action delay (sec)")
     exec_group.add_argument("--delay-turn", type=float, default=1.0, help="Turn delay (sec)")
+    exec_group.add_argument(
+        "--debug",
+        default="",
+        help=(
+            "Comma-separated debug features to enable. Options: context (log full context string), "
+            "turns (turn-number validation). Use 'all' to enable everything. Example: --debug context,turns"
+        ),
+    )
 
     # --- Group 3: Strategy & HITL ---
     strat_group = parser.add_argument_group("Strategy & Human-in-the-Loop")
@@ -78,6 +88,11 @@ def parse_args() -> configargparse.Namespace:
     know_group = parser.add_argument_group("Knowledge Retrieval")
     know_group.add_argument("--knowledge-index", help="Path to Civopedia JSON")
     know_group.add_argument("--enable-web-search", action="store_true", help="Enable Tavily web search")
+
+    # --- Group 6: Status UI ---
+    ui_group = parser.add_argument_group("Status UI")
+    ui_group.add_argument("--status-ui", action="store_true", help="Enable real-time status dashboard")
+    ui_group.add_argument("--status-port", type=int, default=8765, help="Status UI port (default: 8765)")
 
     return parser.parse_args()
 
@@ -207,7 +222,63 @@ def main():
             chat_app.stop()
         return
 
-    # 3. Execution
+    # 3. Command Queue + Queue Listener (Phase 1)
+    command_queue = CommandQueue()
+    queue_listener = None
+    if args.hitl_mode == "async":
+        from computer_use_test.agent.modules.hitl import HITLInputManager
+
+        input_manager = HITLInputManager(
+            input_mode=args.input_mode,
+            stt_provider=args.stt_provider,
+            chatapp_provider=chatapp_input_provider,
+        )
+        queue_listener = QueueListener(command_queue, input_manager)
+        queue_listener.start()
+
+    # 4. Macro-Turn Manager (Phase 2)
+    macro_turn_manager = None
+    try:
+        from computer_use_test.agent.modules.context.macro_turn_manager import MacroTurnManager
+
+        macro_turn_manager = MacroTurnManager(ctx, planner_provider)
+        logger.info("MacroTurnManager initialized")
+    except Exception as e:
+        logger.warning(f"MacroTurnManager init failed: {e}")
+
+    # 4b. Context Updater (background game-state analysis)
+    context_updater = None
+    try:
+        from computer_use_test.agent.modules.context.context_updater import ContextUpdater
+
+        context_updater = ContextUpdater(ctx, router_provider)
+        context_updater.start()
+        logger.info("ContextUpdater background worker started")
+    except Exception as e:
+        logger.warning(f"ContextUpdater init failed: {e}")
+
+    # 5. Status UI (Phase 3)
+    state_bridge = None
+    status_server = None
+    if args.status_ui:
+        try:
+            from computer_use_test.agent.modules.status_ui.server import StatusServer
+            from computer_use_test.agent.modules.status_ui.state_bridge import AgentStateBridge
+
+            state_bridge = AgentStateBridge(ctx, command_queue)
+            status_server = StatusServer(state_bridge, command_queue, port=args.status_port)
+            status_server.start()
+            logger.info(f"Status UI available at http://localhost:{args.status_port}")
+        except ImportError:
+            logger.warning("Status UI requires fastapi and uvicorn. Install with: pip install 'computer-use-test[ui]'")
+        except Exception as e:
+            logger.warning(f"Status UI init failed: {e}")
+
+    # 6. Execution
+    debug_options = DebugOptions.from_str(getattr(args, "debug", ""))
+    if debug_options.any_enabled():
+        logger.info(f"Debug features enabled: {debug_options}")
+
     logger.info(f"Starting execution for {args.turns} turn(s)...")
     try:
         runner_kwargs = {
@@ -222,10 +293,32 @@ def main():
         }
 
         if args.turns == 1:
-            run_one_turn(**runner_kwargs)
+            run_one_turn(
+                **runner_kwargs,
+                macro_turn_manager=macro_turn_manager,
+                state_bridge=state_bridge,
+                context_updater=context_updater,
+                debug_options=debug_options,
+            )
         else:
-            run_multi_turn(num_turns=args.turns, delay_between_turns=args.delay_turn, hitl_mode=args.hitl_mode, **runner_kwargs)
+            run_multi_turn(
+                num_turns=args.turns,
+                delay_between_turns=args.delay_turn,
+                hitl_mode=args.hitl_mode,
+                command_queue=command_queue,
+                macro_turn_manager=macro_turn_manager,
+                state_bridge=state_bridge,
+                context_updater=context_updater,
+                debug_options=debug_options,
+                **runner_kwargs,
+            )
     finally:
+        if context_updater:
+            context_updater.stop()
+        if queue_listener:
+            queue_listener.stop()
+        if status_server:
+            status_server.stop()
         if chat_app:
             chat_app.stop()
             logger.info("Chat app stopped")
