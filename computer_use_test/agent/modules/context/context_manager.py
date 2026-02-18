@@ -7,6 +7,13 @@ Provides a unified interface to access and update all context types:
 - PrimitiveContext: Short-term execution states and local data
 """
 
+# TODO: MCP 서버 연동 시, ContextManager에 MCP 데이터 소스를 추가 등록하여
+#       VLM 비전 분석 결과와 게임 네이티브 데이터를 통합 관리할 것.
+#       예) ctx.register_data_source("mcp", mcp_client) → update_global_context() 확장
+# TODO: Context Length 관리 — get_context_for_primitive(), get_combined_context() 등이
+#       반환하는 텍스트 길이가 VLM 토큰 한도를 초과하지 않도록 truncation/summarization 로직 추가.
+#       특히 notes, recent_actions, macro_turn_summaries 등 누적 데이터의 최대 길이를 제한할 것.
+
 from __future__ import annotations
 
 import logging
@@ -78,6 +85,9 @@ class ContextManager:
         # History tracking
         self._turn_history: list[TurnRecord] = []
         self._action_count_this_turn: int = 0
+
+        # Macro-turn summaries (LLM-generated summaries of completed game turns)
+        self._macro_turn_summaries: list[str] = []
 
         # Metadata
         self._session_start: datetime = datetime.now()
@@ -159,9 +169,7 @@ class ContextManager:
             # Research needs science output and available techs
             lines.append(f"과학 출력: +{self.global_context.science_per_turn:.1f}/턴")
             if self.global_context.current_research:
-                lines.append(
-                    f"연구 중: {self.global_context.current_research} ({self.global_context.research_turns_left}턴)"
-                )
+                lines.append(f"연구 중: {self.global_context.current_research} ({self.global_context.research_turns_left}턴)")
             if self.global_context.available_techs:
                 lines.append(f"연구 가능: {', '.join(self.global_context.available_techs[:5])}")
 
@@ -169,9 +177,7 @@ class ContextManager:
             # Culture needs culture output and civics
             lines.append(f"문화 출력: +{self.global_context.culture_per_turn:.1f}/턴")
             if self.global_context.current_civic:
-                lines.append(
-                    f"사회제도: {self.global_context.current_civic} ({self.global_context.civic_turns_left}턴)"
-                )
+                lines.append(f"사회제도: {self.global_context.current_civic} ({self.global_context.civic_turns_left}턴)")
             if self.global_context.available_civics:
                 lines.append(f"선택 가능: {', '.join(self.global_context.available_civics[:5])}")
 
@@ -225,6 +231,14 @@ class ContextManager:
                     elif a.action_type == "press":
                         action_strs.append(f"press({a.key})")
                 lines.append(f"최근 액션: {', '.join(action_strs)}")
+
+        # Add recent macro-turn summaries (last 2)
+        macro_summaries = self.get_macro_turn_summaries(last_n=2)
+        if macro_summaries:
+            lines.append("")
+            lines.append("이전 턴 요약:")
+            for i, s in enumerate(macro_summaries, 1):
+                lines.append(f"  [{i}] {s}")
 
         return "\n".join(lines) if lines else "게임 상태 정보 없음"
 
@@ -305,7 +319,7 @@ class ContextManager:
         """Update the currently selected unit information."""
         self.primitive_context.update_selected_unit(unit_info)
 
-    def advance_turn(self, primitive_used: str = "", success: bool = True, notes: str = "") -> None:
+    def advance_turn(self, primitive_used: str = "", success: bool = True, notes: str = "", flush_actions: bool = False) -> None:
         """
         Record turn completion and advance to next turn.
 
@@ -313,6 +327,7 @@ class ContextManager:
             primitive_used: Primary primitive used this turn
             success: Whether the turn was successful
             notes: Any notes about the turn
+            flush_actions: If True, also clear recent_actions (macro-turn boundary)
         """
         # Record turn history
         turn_record = TurnRecord(
@@ -330,10 +345,49 @@ class ContextManager:
 
         # Reset turn-specific state
         self._action_count_this_turn = 0
-        self.primitive_context.reset()
+        self.primitive_context.reset(flush_actions=flush_actions)
 
         self._last_update = datetime.now()
         logger.info(f"Advanced to turn {self.global_context.current_turn}")
+
+    def update_game_observation(
+        self,
+        situation_summary: str,
+        threats: list[str] | None = None,
+        opportunities: list[str] | None = None,
+    ) -> None:
+        """
+        Update high-level context with background game-state observations.
+
+        Called by ContextUpdater to inject strategic observations extracted
+        from screenshots into the high-level context layer.  Keeps only the
+        latest ``_MAX_OBSERVATIONS`` notes and replaces threats/opportunities
+        wholesale so stale entries don't accumulate.
+        """
+        _MAX_OBSERVATIONS = 3
+
+        # Append observation, cap list length
+        self.high_level_context.notes.append(situation_summary)
+        if len(self.high_level_context.notes) > _MAX_OBSERVATIONS:
+            self.high_level_context.notes = self.high_level_context.notes[-_MAX_OBSERVATIONS:]
+
+        # Replace threats/opportunities with the latest detected set
+        if threats is not None:
+            self.high_level_context.active_threats = threats
+        if opportunities is not None:
+            self.high_level_context.opportunities = opportunities
+
+        self._last_update = datetime.now()
+        logger.debug("Game observation updated in high-level context")
+
+    def add_macro_turn_summary(self, summary: str) -> None:
+        """Store a macro-turn LLM summary."""
+        self._macro_turn_summaries.append(summary)
+        self._last_update = datetime.now()
+
+    def get_macro_turn_summaries(self, last_n: int = 3) -> list[str]:
+        """Get the last N macro-turn summaries."""
+        return self._macro_turn_summaries[-last_n:]
 
     def add_threat(self, threat: str) -> None:
         """Add an active threat."""
@@ -375,8 +429,4 @@ class ContextManager:
         }
 
     def __repr__(self) -> str:
-        return (
-            f"ContextManager(turn={self.global_context.current_turn}, "
-            f"era={self.global_context.game_era}, "
-            f"strategy={self.high_level_context.current_strategy is not None})"
-        )
+        return f"ContextManager(turn={self.global_context.current_turn}, era={self.global_context.game_era}, strategy={self.high_level_context.current_strategy is not None})"

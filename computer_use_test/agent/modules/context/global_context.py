@@ -5,6 +5,13 @@ This context maintains high-level game statistics that persist across turns,
 including map status, resources, diplomatic relations, and war status.
 """
 
+# TODO: MCP 서버 연동 시, GlobalContext 필드를 게임 네이티브 데이터로 직접 채울 수 있음.
+#       현재는 ContextUpdater(VLM 비전 분석)로 current_turn, game_era만 업데이트하고
+#       나머지 필드(cities, units, resources 등)는 MCP로 정확한 값을 가져올 것.
+# TODO: Context Length 관리 — cities, known_civilizations, units_by_type 등
+#       리스트/딕셔너리가 게임 후반에 커질 수 있으므로
+#       to_prompt_string() 출력 시 최대 길이 제한 또는 요약 로직 추가할 것.
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -170,11 +177,7 @@ class GlobalContext:
             lines.append("")
             lines.append(f"🏛️ 도시 ({len(self.cities)}개, 총 인구 {self.total_population}):")
             for city in self.cities[:5]:  # Limit to 5 cities for brevity
-                production_info = (
-                    f", 생산: {city.current_production} ({city.production_turns_left}턴)"
-                    if city.current_production
-                    else ""
-                )
+                production_info = f", 생산: {city.current_production} ({city.production_turns_left}턴)" if city.current_production else ""
                 lines.append(f"  - {city.name} (인구 {city.population}{production_info})")
 
         if self.current_research:

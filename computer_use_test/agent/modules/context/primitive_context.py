@@ -5,6 +5,12 @@ This context maintains information about the current primitive execution,
 recent actions, and local state needed for decision making.
 """
 
+# TODO: MCP 서버 연동 시, 선택된 유닛/도시의 상세 정보(HP, 이동력, 생산 큐 등)를
+#       게임 내부 데이터에서 직접 가져와 PrimitiveContext에 채울 수 있음.
+#       현재는 VLM이 스크린샷에서 추론하는 방식.
+# TODO: Context Length 관리 — recent_actions 리스트의 최대 길이를 제한하고,
+#       오래된 액션은 요약 또는 삭제하여 프롬프트 토큰 초과를 방지할 것.
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -166,9 +172,7 @@ class PrimitiveContext:
                 elif action.action_type == "press":
                     lines.append(f"  - press '{action.key}' [{action.result}]")
                 elif action.action_type == "drag":
-                    lines.append(
-                        f"  - drag ({action.x}, {action.y}) -> ({action.end_x}, {action.end_y}) [{action.result}]"
-                    )
+                    lines.append(f"  - drag ({action.x}, {action.y}) -> ({action.end_x}, {action.end_y}) [{action.result}]")
                 else:
                     lines.append(f"  - {action.action_type} [{action.result}]")
 
@@ -191,12 +195,18 @@ class PrimitiveContext:
             "consecutive_failures": self.consecutive_failures,
         }
 
-    def reset(self) -> None:
-        """Reset the primitive context for a new turn."""
+    def reset(self, flush_actions: bool = False) -> None:
+        """Reset the primitive context for a new turn.
+
+        Args:
+            flush_actions: If True, also clear recent_actions (macro-turn boundary).
+                           If False, keep recent_actions for cross-turn context.
+        """
         self.current_primitive = ""
         self.execution_count = 0
         self.selected_unit_info = {}
         self.consecutive_failures = 0
         self.last_error = ""
         self.primitive_state = {}
-        # Keep recent_actions for context across turns
+        if flush_actions:
+            self.recent_actions = []
