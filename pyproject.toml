@@ -83,7 +83,7 @@ skip_empty = true
 # rules.TY015 = "warn"  # For invalid-argument-type, warn instead of error.
 
 [tool.ruff]
-#line-length = 180
+line-length = 500
 
 [tool.ruff.lint]
 ignore = ["E501"]
