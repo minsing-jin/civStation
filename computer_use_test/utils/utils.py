@@ -15,8 +15,5 @@ def load_env_variable(provider_name, default=None):
     api_key = os.getenv(env_var_name)
 
     if not api_key:
-        raise ValueError(
-            f"API key not found for provider '{provider_name}'. "
-            f"Please set the environment variable '{env_var_name}' in your .env file or system environment."
-        )
+        raise ValueError(f"API key not found for provider '{provider_name}'. Please set the environment variable '{env_var_name}' in your .env file or system environment.")
     return api_key

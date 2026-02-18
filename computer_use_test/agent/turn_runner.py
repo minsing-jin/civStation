@@ -1,427 +1,327 @@
 """
-Civilization VI One-Turn Runner.
-
-Executes one full game turn using the primitive-based agent architecture:
-1. Observation: Capture screenshot
-2. Routing: VLM analyzes screenshot → selects appropriate primitive
-3. Planning: Primitive's VLM analyzes screenshot → generates action
-4. Execution: Convert normalized coordinates → execute via PyAutoGUI
-
-Supports separate providers/models for routing and planning:
-    # Same provider for both
-    python -m computer_use_test.evaluator.civ6.turn_runner --provider claude
-
-    # Different models for router vs planner
-    python -m computer_use_test.evaluator.civ6.turn_runner --provider gemini \
-        --router-model gemini-2.0-flash --planner-model gemini-2.5-pro
-
-    # Completely different providers
-    python -m computer_use_test.evaluator.civ6.turn_runner \
-        --router-provider gemini --planner-provider claude
+Civilization VI Agent — CLI Entry Point with ConfigArgParse.
+Loads default settings from config.yaml, overridable via CLI.
 """
 
-import argparse
-import json
+from __future__ import annotations
+
 import logging
-import time
+import os
+from pathlib import Path
 
-from computer_use_test.agent.modules.router.primitive_registry import (
-    PRIMITIVE_NAMES,
-    ROUTER_PROMPT,
-    get_primitive_prompt,
-)
+import configargparse  # pip install configargparse
+
+from computer_use_test.agent.modules.context import ContextManager
+from computer_use_test.agent.modules.hitl import CommandQueue, QueueListener
+from computer_use_test.agent.turn_executor import run_multi_turn, run_one_turn
+from computer_use_test.utils.debug import DebugOptions
 from computer_use_test.utils.llm_provider import create_provider, get_available_providers
-from computer_use_test.utils.llm_provider.base import AgentAction, BaseVLMProvider
-from computer_use_test.utils.screen import capture_screen_pil, execute_action
 
+# 로깅 설정
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-# finish_reason values that indicate truncation across providers
-_TRUNCATION_REASONS = {"max_tokens", "length", "MAX_TOKENS"}
 
-
-def route_primitive(
-    provider: BaseVLMProvider,
-    pil_image,
-) -> str:
-    """
-    Use VLM to classify a screenshot and select the appropriate primitive.
-
-    Sends the screenshot + ROUTER_PROMPT to the VLM, which returns
-    a JSON with the selected primitive name.
-
-    Args:
-        provider: VLM provider instance
-        pil_image: PIL Image of the current game screen
-
-    Returns:
-        Primitive name string (e.g. "unit_ops_primitive")
-    """
-    content_parts = [
-        provider._build_pil_image_content(pil_image),
-        provider._build_text_content(ROUTER_PROMPT),
-    ]
-
-    response = None
-    try:
-        # TODO: For long-horizon tasks, reduce max_tokens and remove "reasoning"
-        #       field from ROUTER_PROMPT JSON format to save tokens.
-        response = provider._send_to_api(
-            content_parts,
-            temperature=0.2,
-            max_tokens=8192,
-        )
-
-        # Check for truncation BEFORE attempting JSON parse
-        if response.finish_reason in _TRUNCATION_REASONS:
-            logger.warning(
-                f"Router response TRUNCATED (finish_reason={response.finish_reason}). "
-                f"JSON is likely incomplete. Raw response:\n{response.content}"
-            )
-
-        content = provider._strip_markdown(response.content)
-        data = json.loads(content)
-
-        selected = data.get("primitive", "")
-        reasoning = data.get("reasoning", "")
-
-        if selected not in PRIMITIVE_NAMES:
-            logger.warning(f"Router returned unknown primitive '{selected}', defaulting to unit_ops_primitive")
-            selected = "unit_ops_primitive"
-
-        logger.info(f"Router selected: {selected}")
-        logger.info(f"Router reasoning: {reasoning}")
-
-        return selected
-
-    except (json.JSONDecodeError, KeyError, RuntimeError) as e:
-        logger.error(f"Router failed to parse response: {e}")
-        if response is not None:
-            logger.error(f"Raw response:\n{response.content}")
-            if response.finish_reason in _TRUNCATION_REASONS:
-                logger.error(
-                    f"Response was truncated (finish_reason={response.finish_reason}) "
-                    f"-- this is the likely cause of the parse failure."
-                )
-        logger.error("Defaulting to unit_ops_primitive")
-        return "unit_ops_primitive"
-
-
-def plan_action(
-    provider: BaseVLMProvider,
-    pil_image,
-    primitive_name: str,
-    normalizing_range: int = 1000,
-    high_level_strategy: str | None = None,
-) -> AgentAction | None:
-    """
-    Use VLM to generate the next action for the selected primitive.
-
-    Args:
-        provider: VLM provider instance
-        pil_image: PIL Image of the current game screen
-        primitive_name: Selected primitive (determines the prompt)
-        normalizing_range: Coordinate normalization range
-        high_level_strategy: Optional high-level strategy/goal to guide action selection
-
-    Returns:
-        AgentAction with normalized coordinates, or None on failure
-    """
-    instruction = get_primitive_prompt(
-        primitive_name,
-        normalizing_range,
-        high_level_strategy=high_level_strategy,
-        context="현재 게임 상태 정보 없음",  # TODO: Deliver game state and static
-    )
-
-    return provider.analyze(
-        pil_image=pil_image,
-        instruction=instruction,
-        normalizing_range=normalizing_range,
-    )
-
-
-def run_one_turn(
-    router_provider: BaseVLMProvider,
-    planner_provider: BaseVLMProvider,
-    normalizing_range: int = 1000,
-    delay_before_action: float = 0.5,
-    high_level_strategy: str | None = None,
-) -> bool:
-    """
-    Execute one full game turn.
-
-    Flow:
-        1. Capture screenshot (observation)
-        2. Route: router_provider classifies game state → selects primitive
-        3. Plan: planner_provider generates action with normalized coordinates
-        4. Execute: Convert coords and execute via PyAutoGUI
-
-    Args:
-        router_provider: VLM provider for routing (primitive selection)
-        planner_provider: VLM provider for planning (action generation)
-        normalizing_range: Coordinate normalization range (default 1000)
-        delay_before_action: Seconds to wait before executing the action
-        high_level_strategy: Optional high-level strategy to guide action selection
-
-    Returns:
-        True if action was executed successfully, False otherwise
-    """
-    logger.info("=" * 50)
-    logger.info("Starting one-turn execution")
-    logger.info("=" * 50)
-
-    # Step 1: Observation
-    logger.info("[1/4] Capturing screenshot...")
-    pil_image, screen_w, screen_h = capture_screen_pil()
-    logger.info(f"  Screen: {screen_w}x{screen_h} (logical)")
-
-    # Step 2: Routing
-    logger.info("[2/4] Routing: analyzing game state...")
-    primitive_name = route_primitive(router_provider, pil_image)
-    logger.info(f"  Selected primitive: {primitive_name}")
-
-    # Step 3: Planning
-    logger.info(f"[3/4] Planning: generating action for {primitive_name}...")
-    action = plan_action(
-        planner_provider,
-        pil_image,
-        primitive_name,
-        normalizing_range,
-        high_level_strategy,
-    )
-
-    if action is None:
-        logger.error("  VLM returned no action. Turn aborted.")
-        return False
-
-    logger.info(f"  Action: {action.action}")
-    logger.info(f"  Coords: ({action.x}, {action.y})")
-    if action.action == "drag":
-        logger.info(f"  End coords: ({action.end_x}, {action.end_y})")
-    if action.key:
-        logger.info(f"  Key: {action.key}")
-    if action.text:
-        logger.info(f"  Text: {action.text}")
-    logger.info(f"  Reasoning: {action.reasoning}")
-
-    # Step 4: Execution
-    if delay_before_action > 0:
-        logger.info(f"  Waiting {delay_before_action}s before execution...")
-        time.sleep(delay_before_action)
-
-    logger.info("[4/4] Executing action...")
-    execute_action(action, screen_w, screen_h, normalizing_range)
-    logger.info("  Action executed.")
-
-    logger.info("Turn complete.")
-    return True
-
-
-def run_multi_turn(
-    router_provider: BaseVLMProvider,
-    planner_provider: BaseVLMProvider,
-    num_turns: int = 1,
-    normalizing_range: int = 1000,
-    delay_between_turns: float = 1.0,
-    delay_before_action: float = 0.5,
-    high_level_strategy: str | None = None,
-) -> None:
-    """
-    Execute multiple consecutive turns.
-
-    Args:
-        router_provider: VLM provider for routing
-        planner_provider: VLM provider for planning
-        num_turns: Number of turns to execute
-        normalizing_range: Coordinate normalization range
-        delay_between_turns: Seconds to wait between turns
-        delay_before_action: Seconds to wait before each action
-        high_level_strategy: Optional high-level strategy to guide action selection
-    """
-    logger.info(
-        f"Running {num_turns} turn(s) with "
-        f"router={router_provider.get_provider_name()}/{router_provider.model}, "
-        f"planner={planner_provider.get_provider_name()}/{planner_provider.model}"
-    )
-
-    for turn in range(1, num_turns + 1):
-        logger.info(f"\n{'=' * 60}")
-        logger.info(f"TURN {turn}/{num_turns}")
-        logger.info(f"{'=' * 60}")
-
-        success = run_one_turn(
-            router_provider=router_provider,
-            planner_provider=planner_provider,
-            normalizing_range=normalizing_range,
-            delay_before_action=delay_before_action,
-            high_level_strategy=high_level_strategy,
-        )
-
-        if not success:
-            logger.warning(f"Turn {turn} failed. Stopping.")
-            break
-
-        if turn < num_turns:
-            logger.info(f"Waiting {delay_between_turns}s before next turn...")
-            time.sleep(delay_between_turns)
-
-    logger.info("\nAll turns completed.")
-
-
-def main():
+def parse_args() -> configargparse.Namespace:
+    """ConfigArgParse를 사용하여 YAML과 CLI 인자를 동시에 처리"""
     available = get_available_providers()
     provider_choices = list(available.keys())
 
-    parser = argparse.ArgumentParser(
-        description="Run Civilization VI AI Agent for one or more turns",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=f"""
-Examples:
-  # Same provider for router and planner
-  python -m computer_use_test.evaluator.civ6.turn_runner --provider claude
-
-  # Different models (same provider)
-  python -m computer_use_test.evaluator.civ6.turn_runner --provider gemini \\
-      --router-model gemini-2.0-flash --planner-model gemini-2.5-pro
-
-  # Different providers for router vs planner
-  python -m computer_use_test.evaluator.civ6.turn_runner \\
-      --router-provider gemini --router-model gemini-3.0-flash-preview \\
-      --planner-provider claude --planner-model claude-sonnet-4-20250514
-
-Available providers: {", ".join(provider_choices)}
-        """,
+    parser = configargparse.ArgumentParser(
+        description="Run Civilization VI AI Agent",
+        # 기본적으로 읽을 설정 파일 지정
+        default_config_files=["config.yaml"],
+        # YAML 파서 명시 (YAML 문법 지원)
+        config_file_parser_class=configargparse.YAMLConfigFileParser,
+        formatter_class=configargparse.RawDescriptionHelpFormatter,
+        epilog="Use python -m computer_use_test.agent.turn_runner --help to see full options.",
     )
 
-    # Shared default provider/model
-    parser.add_argument(
-        "--provider",
-        "-p",
-        default=None,
-        choices=provider_choices,
-        help="Default VLM provider for both router and planner",
-    )
-    parser.add_argument(
-        "--model",
-        "-m",
-        default=None,
-        help="Default model for both router and planner",
+    # 설정 파일 경로를 직접 지정할 수 있는 옵션 (--config my_config.yaml)
+    parser.add_argument("--config", is_config_file=True, help="Path to configuration file")
+
+    # --- Group 1: Provider Settings ---
+    provider_group = parser.add_argument_group("LLM Provider Configuration")
+    provider_group.add_argument("--provider", "-p", choices=provider_choices, help="Default provider")
+    provider_group.add_argument("--model", "-m", help="Default model name")
+    provider_group.add_argument("--router-provider", choices=provider_choices, help="Override provider for routing")
+    provider_group.add_argument("--router-model", help="Override model for routing")
+    provider_group.add_argument("--planner-provider", choices=provider_choices, help="Override provider for planning")
+    provider_group.add_argument("--planner-model", help="Override model for planning")
+
+    # --- Group 2: Execution Settings ---
+    exec_group = parser.add_argument_group("Execution Parameters")
+    exec_group.add_argument("--turns", "-t", type=int, default=1, help="Number of turns")
+    exec_group.add_argument("--range", type=int, default=1000, help="Coordinate normalization range")
+    exec_group.add_argument("--delay-action", type=float, default=0.5, help="Action delay (sec)")
+    exec_group.add_argument("--delay-turn", type=float, default=1.0, help="Turn delay (sec)")
+    exec_group.add_argument(
+        "--debug",
+        default="",
+        help=(
+            "Comma-separated debug features to enable. Options: context (log full context string), "
+            "turns (turn-number validation). Use 'all' to enable everything. Example: --debug context,turns"
+        ),
     )
 
-    # Router-specific overrides
-    parser.add_argument(
-        "--router-provider",
-        default=None,
-        choices=provider_choices,
-        help="VLM provider for routing (overrides --provider)",
-    )
-    parser.add_argument(
-        "--router-model",
-        default=None,
-        help="Model for routing (overrides --model)",
-    )
+    # --- Group 3: Strategy & HITL ---
+    strat_group = parser.add_argument_group("Strategy & Human-in-the-Loop")
+    strat_group.add_argument("--strategy", "-s", help="High-level strategy guidance")
+    strat_group.add_argument("--hitl", action="store_true", help="Enable HITL mode")
+    strat_group.add_argument("--autonomous", action="store_true", help="Enable autonomous mode")
+    strat_group.add_argument("--hitl-mode", choices=["async"], help="Interrupt mode")
+    strat_group.add_argument("--input-mode", choices=["voice", "text", "auto", "chatapp"], default="text")
+    strat_group.add_argument("--stt-provider", choices=["whisper", "google", "openai"], default="whisper")
 
-    # Planner-specific overrides
-    parser.add_argument(
-        "--planner-provider",
-        default=None,
-        choices=provider_choices,
-        help="VLM provider for planning (overrides --provider)",
-    )
-    parser.add_argument(
-        "--planner-model",
-        default=None,
-        help="Model for planning (overrides --model)",
-    )
+    # --- Group 4: Chat App (Discord) ---
+    chat_group = parser.add_argument_group("Chat App Integration")
+    chat_group.add_argument("--chatapp", choices=["discord"], help="Chat platform")
+    chat_group.add_argument("--discord-token", help="Discord bot token")
+    chat_group.add_argument("--discord-channel", help="Discord channel ID")
+    chat_group.add_argument("--discord-user", help="Discord user ID")
+    chat_group.add_argument("--enable-discussion", action="store_true", help="Enable strategy discussion")
 
-    # Execution parameters
-    parser.add_argument(
-        "--turns",
-        "-t",
-        type=int,
-        default=1,
-        help="Number of turns to execute (default: 1)",
-    )
-    parser.add_argument(
-        "--range",
-        type=int,
-        default=1000,
-        help="Coordinate normalization range (default: 1000)",
-    )
-    parser.add_argument(
-        "--delay-action",
-        type=float,
-        default=0.5,
-        help="Delay before executing each action in seconds (default: 0.5)",
-    )
-    parser.add_argument(
-        "--delay-turn",
-        type=float,
-        default=1.0,
-        help="Delay between turns in seconds (default: 1.0)",
-    )
-    parser.add_argument(
-        "--strategy",
-        "-s",
-        default=None,
-        help="Optional high-level strategy to guide action selection (e.g., 'focus on science')",
-    )
+    # --- Group 5: Knowledge ---
+    know_group = parser.add_argument_group("Knowledge Retrieval")
+    know_group.add_argument("--knowledge-index", help="Path to Civopedia JSON")
+    know_group.add_argument("--enable-web-search", action="store_true", help="Enable Tavily web search")
 
-    args = parser.parse_args()
+    # --- Group 6: Status UI ---
+    ui_group = parser.add_argument_group("Status UI")
+    ui_group.add_argument("--status-ui", action="store_true", help="Enable real-time status dashboard")
+    ui_group.add_argument("--status-port", type=int, default=8765, help="Status UI port (default: 8765)")
 
-    # Resolve provider/model for router and planner
-    router_provider_name = args.router_provider or args.provider
+    return parser.parse_args()
+
+
+def setup_providers(args) -> tuple[object, object]:
+    """Router와 Planner Provider 초기화"""
+    router_p_name = args.router_provider or args.provider
     router_model = args.router_model or args.model
-    planner_provider_name = args.planner_provider or args.provider
+    planner_p_name = args.planner_provider or args.provider
     planner_model = args.planner_model or args.model
 
-    if not router_provider_name:
-        parser.error("--provider is required, or specify both --router-provider and --planner-provider")
-    if not planner_provider_name:
-        parser.error("--provider is required, or specify both --router-provider and --planner-provider")
+    if not router_p_name or not planner_p_name:
+        raise ValueError("Provider not specified. Check config.yaml or use --provider CLI arg.")
 
-    # Create providers
-    router_provider = create_provider(
-        provider_name=router_provider_name,
-        model=router_model,
+    # Router 생성
+    router = create_provider(provider_name=router_p_name, model=router_model)
+    logger.info(f"Router initialized: {router.get_provider_name()} ({router.model})")
+
+    # Planner 생성
+    if planner_p_name == router_p_name and planner_model == router_model:
+        planner = router
+        logger.info("Planner: Sharing instance with Router")
+    else:
+        planner = create_provider(provider_name=planner_p_name, model=planner_model)
+        logger.info(f"Planner initialized: {planner.get_provider_name()} ({planner.model})")
+
+    return router, planner
+
+
+def setup_chat_app(args, planner_provider, context_manager):
+    """Discord 앱 초기화"""
+    if args.chatapp != "discord":
+        return None, None, None
+
+    from computer_use_test.agent.modules.hitl import ChatAppInputProvider
+    from computer_use_test.utils.chatapp import create_chat_app
+
+    token = args.discord_token or os.environ.get("DISCORD_BOT_TOKEN", "")
+    if not token:
+        raise ValueError("Discord token missing. Set DISCORD_BOT_TOKEN or check config.yaml")
+
+    # 1. Start App
+    chat_app = create_chat_app(
+        "discord",
+        bot_token=token,
+        allowed_user_ids=[args.discord_user] if args.discord_user else [],
+        allowed_channel_ids=[args.discord_channel] if args.discord_channel else [],
     )
-    logger.info(f"Router:  {router_provider.get_provider_name()} ({router_provider.model})")
+    chat_app.start()
+    logger.info(f"Discord app started (Channel: {args.discord_channel})")
 
-    # Reuse same instance if config is identical
-    if planner_provider_name == router_provider_name and planner_model == router_model:
-        planner_provider = router_provider
-        logger.info("Planner: same as router (shared instance)")
-    else:
-        planner_provider = create_provider(
-            provider_name=planner_provider_name,
-            model=planner_model,
-        )
-        logger.info(f"Planner: {planner_provider.get_provider_name()} ({planner_provider.model})")
+    # 2. Input Provider
+    chatapp_provider = None
+    if args.discord_user:
+        if args.input_mode == "text":
+            args.input_mode = "chatapp"  # Discord 사용자가 지정되면 chatapp 모드 우선
+        chatapp_provider = ChatAppInputProvider(chat_app=chat_app, user_id=args.discord_user, channel_id=args.discord_channel)
 
-    # Run
-    if args.turns == 1:
-        run_one_turn(
-            router_provider=router_provider,
-            planner_provider=planner_provider,
-            normalizing_range=args.range,
-            delay_before_action=args.delay_action,
-            high_level_strategy=args.strategy,
+    # 3. Discussion Engine
+    discussion_engine = None
+    if args.enable_discussion:
+        from computer_use_test.utils.chatapp.discussion import DiscordDiscussionHandler, StrategyDiscussion
+
+        discussion_engine = StrategyDiscussion(vlm_provider=planner_provider, context_manager=context_manager)
+        DiscordDiscussionHandler(chat_app=chat_app, discussion_engine=discussion_engine)
+
+    return chat_app, chatapp_provider, discussion_engine
+
+
+def setup_knowledge(args, vlm_provider):
+    """지식 검색 모듈 초기화"""
+    if not (args.knowledge_index or args.enable_web_search):
+        return None
+
+    from computer_use_test.agent.modules.knowledge import DocumentRetriever, KnowledgeManager, WebSearchRetriever
+
+    doc_retriever = DocumentRetriever(Path(args.knowledge_index)) if args.knowledge_index else None
+
+    web_retriever = None
+    if args.enable_web_search:
+        web_retriever = WebSearchRetriever(search_provider="tavily")
+        if not web_retriever.is_available():
+            logger.warning("Web search disabled: API key missing")
+            web_retriever = None
+
+    km = KnowledgeManager(
+        document_retriever=doc_retriever,
+        web_retriever=web_retriever,
+        vlm_provider=vlm_provider,
+    )
+    logger.info("KnowledgeManager initialized")
+    return km
+
+
+def main():
+    # 1. Parse Arguments (YAML + CLI)
+    try:
+        args = parse_args()
+    except SystemExit:
+        return
+
+    # 2. Setup Components
+    try:
+        router_provider, planner_provider = setup_providers(args)
+        ctx = ContextManager.get_instance()
+
+        chat_app, chatapp_input_provider, discussion_engine = setup_chat_app(args, planner_provider, ctx)
+
+        strategy_planner = None
+        if args.hitl or args.autonomous:
+            from computer_use_test.agent.modules.strategy import StrategyPlanner
+
+            strategy_planner = StrategyPlanner(
+                vlm_provider=planner_provider,
+                hitl_mode=(args.hitl and not args.autonomous),
+                input_mode=args.input_mode,
+                stt_provider=args.stt_provider,
+                chatapp_provider=chatapp_input_provider,
+                discussion_engine=discussion_engine,
+            )
+
+        knowledge_manager = setup_knowledge(args, planner_provider)
+
+    except ValueError as e:
+        logger.error(f"Configuration Error: {e}")
+        if "chat_app" in locals() and chat_app:
+            chat_app.stop()
+        return
+
+    # 3. Command Queue + Queue Listener (Phase 1)
+    command_queue = CommandQueue()
+    queue_listener = None
+    if args.hitl_mode == "async":
+        from computer_use_test.agent.modules.hitl import HITLInputManager
+
+        input_manager = HITLInputManager(
+            input_mode=args.input_mode,
+            stt_provider=args.stt_provider,
+            chatapp_provider=chatapp_input_provider,
         )
-    else:
-        run_multi_turn(
-            router_provider=router_provider,
-            planner_provider=planner_provider,
-            num_turns=args.turns,
-            normalizing_range=args.range,
-            delay_between_turns=args.delay_turn,
-            delay_before_action=args.delay_action,
-            high_level_strategy=args.strategy,
-        )
+        queue_listener = QueueListener(command_queue, input_manager)
+        queue_listener.start()
+
+    # 4. Macro-Turn Manager (Phase 2)
+    macro_turn_manager = None
+    try:
+        from computer_use_test.agent.modules.context.macro_turn_manager import MacroTurnManager
+
+        macro_turn_manager = MacroTurnManager(ctx, planner_provider)
+        logger.info("MacroTurnManager initialized")
+    except Exception as e:
+        logger.warning(f"MacroTurnManager init failed: {e}")
+
+    # 4b. Context Updater (background game-state analysis)
+    context_updater = None
+    try:
+        from computer_use_test.agent.modules.context.context_updater import ContextUpdater
+
+        context_updater = ContextUpdater(ctx, router_provider)
+        context_updater.start()
+        logger.info("ContextUpdater background worker started")
+    except Exception as e:
+        logger.warning(f"ContextUpdater init failed: {e}")
+
+    # 5. Status UI (Phase 3)
+    state_bridge = None
+    status_server = None
+    if args.status_ui:
+        try:
+            from computer_use_test.agent.modules.status_ui.server import StatusServer
+            from computer_use_test.agent.modules.status_ui.state_bridge import AgentStateBridge
+
+            state_bridge = AgentStateBridge(ctx, command_queue)
+            status_server = StatusServer(state_bridge, command_queue, port=args.status_port)
+            status_server.start()
+            logger.info(f"Status UI available at http://localhost:{args.status_port}")
+        except ImportError:
+            logger.warning("Status UI requires fastapi and uvicorn. Install with: pip install 'computer-use-test[ui]'")
+        except Exception as e:
+            logger.warning(f"Status UI init failed: {e}")
+
+    # 6. Execution
+    debug_options = DebugOptions.from_str(getattr(args, "debug", ""))
+    if debug_options.any_enabled():
+        logger.info(f"Debug features enabled: {debug_options}")
+
+    logger.info(f"Starting execution for {args.turns} turn(s)...")
+    try:
+        runner_kwargs = {
+            "router_provider": router_provider,
+            "planner_provider": planner_provider,
+            "normalizing_range": args.range,
+            "delay_before_action": args.delay_action,
+            "high_level_strategy": args.strategy,
+            "context_manager": ctx,
+            "strategy_planner": strategy_planner,
+            "knowledge_manager": knowledge_manager,
+        }
+
+        if args.turns == 1:
+            run_one_turn(
+                **runner_kwargs,
+                macro_turn_manager=macro_turn_manager,
+                state_bridge=state_bridge,
+                context_updater=context_updater,
+                debug_options=debug_options,
+            )
+        else:
+            run_multi_turn(
+                num_turns=args.turns,
+                delay_between_turns=args.delay_turn,
+                hitl_mode=args.hitl_mode,
+                command_queue=command_queue,
+                macro_turn_manager=macro_turn_manager,
+                state_bridge=state_bridge,
+                context_updater=context_updater,
+                debug_options=debug_options,
+                **runner_kwargs,
+            )
+    finally:
+        if context_updater:
+            context_updater.stop()
+        if queue_listener:
+            queue_listener.stop()
+        if status_server:
+            status_server.stop()
+        if chat_app:
+            chat_app.stop()
+            logger.info("Chat app stopped")
 
 
 if __name__ == "__main__":

@@ -45,9 +45,7 @@ class GeminiVLMProvider(BaseVLMProvider):
 
             self.client = genai.Client(api_key=os.getenv("GENAI_API_KEY"))
         except ImportError as e:
-            raise ImportError(
-                "google-generativeai package not installed. Install with: pip install google-generativeai"
-            ) from e
+            raise ImportError("google-generativeai package not installed. Install with: pip install google-generativeai") from e
 
     # ==================== Abstract method implementations ====================
 
@@ -103,10 +101,7 @@ class GeminiVLMProvider(BaseVLMProvider):
                 finish_reason = raw_reason.name if hasattr(raw_reason, "name") else str(raw_reason)
 
             if finish_reason == "MAX_TOKENS":
-                self.logger.warning(
-                    f"Gemini response TRUNCATED (finish_reason={finish_reason}). "
-                    f"Output likely incomplete. Consider increasing max_tokens."
-                )
+                self.logger.warning(f"Gemini response TRUNCATED (finish_reason={finish_reason}). Output likely incomplete. Consider increasing max_tokens.")
 
             return VLMResponse(
                 content=response_text,

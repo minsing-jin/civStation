@@ -12,7 +12,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from computer_use_test.agent.models.schema import AgentPlan
-from computer_use_test.utils.prompts.action_prompt import get_system_prompt
+from computer_use_test.utils.llm_provider.parser import (
+    AgentAction,
+    parse_action_json,
+    parse_to_agent_plan,
+    validate_action,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -27,25 +32,6 @@ class VLMResponse:
     tokens_used: int | None = None
     cost: float | None = None
     finish_reason: str | None = None  # "stop", "max_tokens", "length" etc.
-
-
-@dataclass
-class AgentAction:
-    """
-    Single action from VLM using normalized coordinates (0-1000).
-
-    Supports: click, double_click, drag, press, type
-    """
-
-    action: str = ""  # "click", "double_click", "drag", "press", "type"
-    x: int = 0  # Normalized x (0-1000)
-    y: int = 0  # Normalized y (0-1000)
-    end_x: int = 0  # Drag end x (0-1000)
-    end_y: int = 0  # Drag end y (0-1000)
-    button: str = "left"  # "left" or "right"
-    key: str = ""  # Key name for "press"
-    text: str = ""  # Text for "type"
-    reasoning: str = ""
 
 
 class BaseVLMProvider(ABC):
@@ -126,62 +112,6 @@ class BaseVLMProvider(ABC):
         content_parts.append(self._build_text_content(prompt))
         return self._send_to_api(content_parts, temperature, max_tokens)
 
-    def parse_to_agent_plan(self, response: VLMResponse, primitive_name: str) -> AgentPlan:
-        """Parse VLM response into AgentPlan (for static evaluation)."""
-        from computer_use_test.agent.models.schema import ClickAction, DragAction, KeyPressAction
-
-        content = self._strip_markdown(response.content)
-
-        try:
-            data = json.loads(content)
-            actions = []
-
-            for ad in data.get("actions", []):
-                action_type = ad.get("type")
-                if action_type == "click":
-                    actions.append(
-                        ClickAction(
-                            type="click",
-                            x=ad["x"],
-                            y=ad["y"],
-                            button=ad.get("button", "left"),
-                            description=ad.get("description"),
-                        )
-                    )
-                elif action_type == "press":
-                    actions.append(
-                        KeyPressAction(
-                            type="press",
-                            keys=ad["keys"],
-                            interval=ad.get("interval", 0.1),
-                            description=ad.get("description"),
-                        )
-                    )
-                elif action_type == "drag":
-                    actions.append(
-                        DragAction(
-                            type="drag",
-                            start_x=ad["start_x"],
-                            start_y=ad["start_y"],
-                            end_x=ad["end_x"],
-                            end_y=ad["end_y"],
-                            duration=ad.get("duration", 0.5),
-                            button=ad.get("button", "left"),
-                            description=ad.get("description"),
-                        )
-                    )
-
-            return AgentPlan(
-                primitive_name=primitive_name,
-                reasoning=data.get("reasoning", ""),
-                actions=actions,
-            )
-        except (json.JSONDecodeError, KeyError) as e:
-            self.logger.error(f"Failed to parse VLM response: {e}")
-            self.logger.error(f"Raw response content:\n{response.content}")
-            self.logger.error(f"After markdown stripping:\n{content}")
-            raise ValueError(f"Failed to parse VLM response: {e}") from e
-
     def call_and_parse(
         self,
         prompt: str,
@@ -192,9 +122,11 @@ class BaseVLMProvider(ABC):
     ) -> AgentPlan:
         """Convenience: call VLM and parse response in one step."""
         response = self.call_vlm(prompt, image_path, temperature, max_tokens)
-        return self.parse_to_agent_plan(response, primitive_name)
+        return parse_to_agent_plan(response.content, primitive_name)
 
     # ==================== Live Agent (PIL image, normalized coords) ====================
+
+    MAX_RETRIES: int = 3
 
     def analyze(
         self,
@@ -206,121 +138,54 @@ class BaseVLMProvider(ABC):
         Analyze PIL image and return next action with normalized coordinates.
 
         Uses the same _send_to_api() core as call_vlm() to avoid duplication.
+        The instruction should already contain JSON format instructions
+        (via JSON_FORMAT_INSTRUCTION from primitive_prompt.py).
+
+        Retries up to MAX_RETRIES times on parse/validation failure.
 
         Args:
             pil_image: PIL Image (screenshot)
-            instruction: User goal
-            normalizing_range: Coordinate range (default: 1000)
+            instruction: Complete prompt with JSON format instructions included
+            normalizing_range: Coordinate normalization range (default: 1000)
 
         Returns:
-            AgentAction with normalized coordinates, or None
+            AgentAction with normalized coordinates, or None after all retries exhausted
         """
-        prompt = get_system_prompt(instruction, normalizing_range)
-
         content_parts = [
             self._build_pil_image_content(pil_image),
-            self._build_text_content(prompt),
+            self._build_text_content(instruction),
         ]
 
-        try:
-            # TODO: For long-horizon tasks, reduce max_tokens and remove "reasoning"
-            #       field from action JSON format to save tokens.
-            response = self._send_to_api(content_parts, temperature=0.3, max_tokens=8192)
+        for attempt in range(1, self.MAX_RETRIES + 1):
+            try:
+                # TODO: For long-horizon tasks, reduce max_tokens and remove "reasoning"
+                #       field from action JSON format to save tokens.
+                response = self._send_to_api(content_parts, temperature=0.3, max_tokens=8192)
 
-            if response.finish_reason in ("max_tokens", "length", "MAX_TOKENS"):
-                self.logger.warning(
-                    f"Action response TRUNCATED (finish_reason={response.finish_reason}). "
-                    f"JSON will likely be incomplete."
-                )
+                if response.finish_reason in ("max_tokens", "length", "MAX_TOKENS"):
+                    self.logger.warning(f"[Attempt {attempt}/{self.MAX_RETRIES}] Response TRUNCATED (finish_reason={response.finish_reason})")
 
-            return self._parse_action_json(response.content)
-        except Exception as e:
-            self.logger.error(f"analyze() failed: {e}")
-            return None
+                action = parse_action_json(response.content)
+                if action is None:
+                    self.logger.warning(f"[Attempt {attempt}/{self.MAX_RETRIES}] Parse failed, retrying...")
+                    continue
 
-    # ==================== Shared Utilities ====================
+                errors = validate_action(action, normalizing_range)
+                if errors:
+                    for err in errors:
+                        self.logger.warning(f"[Attempt {attempt}/{self.MAX_RETRIES}] Validation: {err}")
+                    self.logger.warning(f"[Attempt {attempt}/{self.MAX_RETRIES}] Validation failed, retrying...")
+                    continue
 
-    @staticmethod
-    def _strip_markdown(text: str) -> str:
-        """
-        Strip markdown code block wrappers from response text.
+                if attempt > 1:
+                    self.logger.info(f"Action succeeded on attempt {attempt}/{self.MAX_RETRIES}")
+                return action
 
-        Handles various markdown formats:
-        - ```json...```
-        - ```...```
-        - Multiple closing ```
-        - Extra whitespace
-        """
-        import re
+            except Exception as e:
+                self.logger.error(f"[Attempt {attempt}/{self.MAX_RETRIES}] API error: {e}")
 
-        content = text.strip()
-
-        # Remove opening fence
-        if content.startswith("```json"):
-            content = content[7:].lstrip()
-        elif content.startswith("```"):
-            content = content[3:].lstrip()
-
-        # Remove all closing fences (handle multiple ``` with possible newlines)
-        # Use regex to remove trailing ``` blocks
-        content = re.sub(r"(\n```)+\s*$", "", content)
-        if content.endswith("```"):
-            content = content[:-3]
-
-        return content.strip()
-
-    def _parse_action_json(self, response_text: str) -> AgentAction | None:
-        """Parse VLM response into AgentAction (for live agent)."""
-        try:
-            content = self._strip_markdown(response_text)
-
-            # Log the stripped content for debugging
-            self.logger.debug(f"Stripped content for parsing:\n{content}")
-
-            data = json.loads(content)
-
-            # Handle list response
-            if isinstance(data, list):
-                if not data:
-                    self.logger.error("VLM returned empty list")
-                    return None
-                self.logger.info(f"List response: using first of {len(data)} items")
-                data = data[0]
-
-            # Validate required action field
-            action_value = data.get("action", "")
-            if not action_value:
-                self.logger.error("Missing or empty 'action' field in VLM response")
-                self.logger.error(f"Parsed JSON data: {data}")
-                self.logger.error(f"Raw response:\n{response_text}")
-                return None
-
-            valid_actions = ["click", "double_click", "drag", "press", "type"]
-            if action_value not in valid_actions:
-                self.logger.error(f"Invalid action type: '{action_value}'. Must be one of: {valid_actions}")
-                self.logger.error(f"Parsed JSON data: {data}")
-                return None
-
-            agent_action = AgentAction(
-                action=action_value,
-                x=int(data.get("x", 0)),
-                y=int(data.get("y", 0)),
-                end_x=int(data.get("end_x", 0)),
-                end_y=int(data.get("end_y", 0)),
-                button=data.get("button", "left"),
-                key=data.get("key", ""),
-                text=data.get("text", ""),
-                reasoning=data.get("reasoning", ""),
-            )
-
-            self.logger.debug(f"Successfully parsed action: {agent_action}")
-            return agent_action
-
-        except (json.JSONDecodeError, KeyError, TypeError) as e:
-            self.logger.error(f"Failed to parse action JSON: {e}")
-            self.logger.error(f"Raw response text:\n{response_text}")
-            self.logger.error(f"After markdown stripping:\n{content if 'content' in locals() else 'N/A'}")
-            return None
+        self.logger.error(f"analyze() failed after {self.MAX_RETRIES} attempts")
+        return None
 
 
 class MockVLMProvider(BaseVLMProvider):

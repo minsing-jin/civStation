@@ -24,9 +24,17 @@ from computer_use_test.utils.llm_provider.base import (
 from computer_use_test.utils.llm_provider.claude import ClaudeVLMProvider
 from computer_use_test.utils.llm_provider.gemini import GeminiVLMProvider
 from computer_use_test.utils.llm_provider.gpt import GPTVLMProvider
+from computer_use_test.utils.llm_provider.parser import (
+    AgentAction,
+    parse_action_json,
+    parse_to_agent_plan,
+    strip_markdown,
+    validate_action,
+)
 from computer_use_test.utils.utils import load_env_variable
 
 __all__ = [
+    "AgentAction",
     "BaseVLMProvider",
     "VLMResponse",
     "ClaudeVLMProvider",
@@ -35,6 +43,10 @@ __all__ = [
     "MockVLMProvider",
     "create_provider",
     "get_available_providers",
+    "parse_action_json",
+    "parse_to_agent_plan",
+    "strip_markdown",
+    "validate_action",
 ]
 
 load_dotenv()
