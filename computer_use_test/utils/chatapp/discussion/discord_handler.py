@@ -101,9 +101,7 @@ class DiscordDiscussionHandler:
         channel_id = message.channel_id
 
         if not content:
-            self._send_response(
-                channel_id, message.is_dm, user_id, "토론할 내용을 입력해주세요. 예: `!discuss 과학 승리로 갈까?`"
-            )
+            self._send_response(channel_id, message.is_dm, user_id, "토론할 내용을 입력해주세요. 예: `!discuss 과학 승리로 갈까?`")
             return
 
         session = self._engine.get_active_session(user_id)
@@ -149,9 +147,7 @@ class DiscordDiscussionHandler:
 
         session = self._engine.get_active_session(user_id)
         if not session:
-            self._send_response(
-                channel_id, message.is_dm, user_id, "확정할 활성 세션이 없습니다. `!strategy`로 새 세션을 시작하세요."
-            )
+            self._send_response(channel_id, message.is_dm, user_id, "확정할 활성 세션이 없습니다. `!strategy`로 새 세션을 시작하세요.")
             return
 
         strategy = self._engine.finalize_session(session.session_id)

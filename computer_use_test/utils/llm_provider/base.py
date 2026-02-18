@@ -163,10 +163,7 @@ class BaseVLMProvider(ABC):
                 response = self._send_to_api(content_parts, temperature=0.3, max_tokens=8192)
 
                 if response.finish_reason in ("max_tokens", "length", "MAX_TOKENS"):
-                    self.logger.warning(
-                        f"[Attempt {attempt}/{self.MAX_RETRIES}] Response TRUNCATED "
-                        f"(finish_reason={response.finish_reason})"
-                    )
+                    self.logger.warning(f"[Attempt {attempt}/{self.MAX_RETRIES}] Response TRUNCATED (finish_reason={response.finish_reason})")
 
                 action = parse_action_json(response.content)
                 if action is None:

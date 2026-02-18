@@ -102,10 +102,7 @@ class GPTVLMProvider(BaseVLMProvider):
             finish_reason = response.choices[0].finish_reason  # "stop" or "length"
 
             if finish_reason == "length":
-                self.logger.warning(
-                    f"GPT response TRUNCATED (finish_reason={finish_reason}). "
-                    f"Output likely incomplete. Consider increasing max_tokens."
-                )
+                self.logger.warning(f"GPT response TRUNCATED (finish_reason={finish_reason}). Output likely incomplete. Consider increasing max_tokens.")
 
             return VLMResponse(
                 content=response_text,

@@ -103,10 +103,7 @@ class ClaudeVLMProvider(BaseVLMProvider):
             finish_reason = response.stop_reason  # "end_turn" or "max_tokens"
 
             if finish_reason == "max_tokens":
-                self.logger.warning(
-                    f"Claude response TRUNCATED (stop_reason={finish_reason}). "
-                    f"Output likely incomplete. Consider increasing max_tokens."
-                )
+                self.logger.warning(f"Claude response TRUNCATED (stop_reason={finish_reason}). Output likely incomplete. Consider increasing max_tokens.")
 
             return VLMResponse(
                 content=response_text,
