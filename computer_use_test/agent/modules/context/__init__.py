@@ -8,13 +8,18 @@ Provides a unified context manager that maintains:
 """
 
 from computer_use_test.agent.modules.context.context_manager import ContextManager
+from computer_use_test.agent.modules.context.context_updater import ContextUpdater
 from computer_use_test.agent.modules.context.global_context import GlobalContext
 from computer_use_test.agent.modules.context.high_level_context import HighLevelContext
+from computer_use_test.agent.modules.context.macro_turn_manager import MacroTurnManager, MacroTurnSummary
 from computer_use_test.agent.modules.context.primitive_context import PrimitiveContext
 
 __all__ = [
     "ContextManager",
+    "ContextUpdater",
     "GlobalContext",
     "HighLevelContext",
+    "MacroTurnManager",
+    "MacroTurnSummary",
     "PrimitiveContext",
 ]
