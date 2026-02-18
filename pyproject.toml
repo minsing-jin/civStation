@@ -84,6 +84,7 @@ skip_empty = true
 
 [tool.ruff]
 line-length = 180
+lint.ignore = ["E501"]
 
 [tool.ruff.lint]
 select = [
