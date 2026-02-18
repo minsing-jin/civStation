@@ -14,12 +14,13 @@ model: gemini-3-flash-preview
 # --- 2. Execution Parameters ---
 turns: 10
 range: 10000
+debug: "all"   # comma-separated: context | turns | all
 
 # --- 3. Strategy & HITL ---
 strategy: "과학 승리에 집중하고 정찰을 강화해."
 hitl: true
 autonomous: true
-input-mode: voice     # voice, text, auto, chatapp
+input-mode: text     # voice, text, auto, chatapp
 hitl-mode: async
 stt-provider: whisper
 
