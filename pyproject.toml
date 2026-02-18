@@ -41,6 +41,11 @@ voice = [
 chatapp = [
     "discord.py>=2.3.0",
 ]
+# Real-time status dashboard
+ui = [
+    "fastapi>=0.115.0",
+    "uvicorn>=0.34.0",
+]
 test = [
     "coverage", # testing
     "pytest", # testing
