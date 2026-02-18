@@ -83,10 +83,9 @@ skip_empty = true
 # rules.TY015 = "warn"  # For invalid-argument-type, warn instead of error.
 
 [tool.ruff]
-line-length = 500
+line-length = 180
 
 [tool.ruff.lint]
-ignore = ["E501"]
 
 select = [
     "E", # pycodestyle errors
