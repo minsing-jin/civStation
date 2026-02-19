@@ -18,6 +18,7 @@ dependencies = [
     "anthropic>=0.77.0",
     "configargparse>=1.7.1",
     "dotenv>=0.9.9",
+    "fastapi>=0.129.0",
     "google-genai>=1.60.0",
     "openai>=2.16.0",
     "pillow>=12.1.0",
@@ -28,6 +29,7 @@ dependencies = [
     "soundfile>=0.13.1",
     "speechrecognition>=3.14.5",
     "typer",
+    "uvicorn>=0.40.0",
 ]
 
 [project.optional-dependencies]

@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from computer_use_test.agent.modules.context import ContextManager
@@ -49,6 +50,7 @@ from computer_use_test.utils.screen import capture_screen_pil, execute_action
 if TYPE_CHECKING:
     from computer_use_test.agent.modules.context.context_updater import ContextUpdater
     from computer_use_test.agent.modules.context.macro_turn_manager import MacroTurnManager
+    from computer_use_test.agent.modules.hitl.agent_gate import AgentGate
     from computer_use_test.agent.modules.knowledge import KnowledgeManager
     from computer_use_test.agent.modules.status_ui.state_bridge import AgentStateBridge
     from computer_use_test.agent.modules.strategy import StrategyPlanner
@@ -72,6 +74,80 @@ def _get_turn_validator() -> TurnValidator:
     if _turn_validator is None:
         _turn_validator = TurnValidator()
     return _turn_validator
+
+
+@dataclass
+class QueueCheckResult:
+    """Result of checking the CommandQueue for mid-turn interrupts."""
+
+    should_stop: bool = False
+    override_action: AgentAction | None = field(default=None)
+    strategy_override: str | None = None
+
+
+def _check_queue_for_interrupt(
+    command_queue: CommandQueue | None,
+    agent_gate: AgentGate | None = None,
+) -> QueueCheckResult:
+    """
+    Check CommandQueue for user directives before VLM planning.
+
+    Priority: STOP > PRIMITIVE_OVERRIDE > PAUSE > CHANGE_STRATEGY
+    """
+    if not command_queue or not command_queue.has_pending():
+        return QueueCheckResult()
+
+    result = QueueCheckResult()
+    directives = command_queue.drain()
+
+    for d in directives:
+        if d.directive_type == DirectiveType.STOP:
+            if agent_gate:
+                from computer_use_test.agent.modules.hitl.agent_gate import AgentState
+
+                agent_gate.set_state(AgentState.STOPPED)
+            result.should_stop = True
+            return result
+
+        elif d.directive_type == DirectiveType.PRIMITIVE_OVERRIDE:
+            try:
+                payload = json.loads(d.payload) if isinstance(d.payload, str) else d.payload
+                result.override_action = AgentAction(
+                    action=payload.get("action", "click"),
+                    x=int(payload.get("x", 0)),
+                    y=int(payload.get("y", 0)),
+                    end_x=int(payload.get("end_x", 0)),
+                    end_y=int(payload.get("end_y", 0)),
+                    button=payload.get("button", "left"),
+                    key=payload.get("key", ""),
+                    text=payload.get("text", ""),
+                    reasoning=f"[HITL Override] {payload.get('reasoning', 'User command')}",
+                )
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.warning(f"Invalid primitive override payload: {e}")
+
+        elif d.directive_type == DirectiveType.PAUSE:
+            logger.info("PAUSE directive received mid-turn. Waiting for RESUME...")
+            if agent_gate:
+                from computer_use_test.agent.modules.hitl.agent_gate import AgentState
+
+                agent_gate.set_state(AgentState.PAUSED)
+            command_queue.wait(timeout=None)
+            if agent_gate:
+                agent_gate.set_state(AgentState.RUNNING)
+            for rd in command_queue.drain():
+                if rd.directive_type == DirectiveType.STOP:
+                    if agent_gate:
+                        agent_gate.set_state(AgentState.STOPPED)
+                    result.should_stop = True
+                    return result
+                elif rd.directive_type == DirectiveType.CHANGE_STRATEGY:
+                    result.strategy_override = rd.payload
+
+        elif d.directive_type == DirectiveType.CHANGE_STRATEGY:
+            result.strategy_override = d.payload
+
+    return result
 
 
 def route_primitive(
@@ -210,6 +286,8 @@ def run_one_turn(
     state_bridge: AgentStateBridge | None = None,
     context_updater: ContextUpdater | None = None,
     debug_options: DebugOptions | None = None,
+    command_queue: CommandQueue | None = None,
+    agent_gate: AgentGate | None = None,
 ) -> TurnSummary | None:
     """
     Execute one full game turn.
@@ -305,69 +383,93 @@ def run_one_turn(
     # Update context with current primitive
     ctx.set_current_primitive(primitive_name)
 
-    # Step 3: Planning with context
-    # NOTE: get_context_for_primitive() reads the *latest* context, which may
-    # already include updates from the background ContextUpdater.
-    logger.info(f"[3/6] Planning: generating action for {primitive_name}...")
-
-    context_string = ctx.get_context_for_primitive(primitive_name)
-
-    if dbg.log_context:
-        log_context(primitive_name, strategy_string, context_string)
-    else:
-        logger.debug(f"Context for primitive:\n{context_string}")
-
-    # Optionally augment with knowledge
-    if knowledge_manager and knowledge_manager.is_available():
-        query = f"{primitive_name} 전략 가이드"
-        try:
-            knowledge_result = knowledge_manager.query(query, top_k=2)
-            if not knowledge_result.is_empty():
-                knowledge_section = knowledge_result.to_prompt_string(max_chunks=2, max_tokens=300)
-                context_string = f"{context_string}\n\n{knowledge_section}"
-                logger.info(f"  Added {len(knowledge_result.chunks)} knowledge chunks")
-        except Exception as e:
-            logger.warning(f"Knowledge retrieval failed: {e}")
-
-    action = plan_action(
-        planner_provider,
-        pil_image,
-        primitive_name,
-        normalizing_range,
-        high_level_strategy=strategy_string,
-        context_string=context_string,
-    )
-
-    if action is None:
-        logger.error("  VLM returned no action. Turn aborted.")
-        ctx.record_action(
-            action_type="none",
-            primitive=primitive_name,
-            result="failed",
-            error_message="VLM returned no action",
-        )
-        return TurnSummary(
-            turn_number=turn_number,
-            primitive=primitive_name,
-            action_type="none",
-            success=False,
-            error_message="VLM returned no action",
-        )
-
-    logger.info(f"  Action: {action.action}")
-    logger.info(f"  Coords: ({action.x}, {action.y})")
-    if action.action == "drag":
-        logger.info(f"  End coords: ({action.end_x}, {action.end_y})")
-    if action.key:
-        logger.info(f"  Key: {action.key}")
-    if action.text:
-        logger.info(f"  Text: {action.text}")
-    logger.info(f"  Reasoning: {action.reasoning}")
-
-    # Update state bridge with current action info
+    # Step 2c: Check queue for mid-turn user directives (before VLM call)
     if state_bridge:
-        action_desc = f"{action.action} ({action.x}, {action.y})"
-        state_bridge.update_current_action(primitive_name, action_desc, action.reasoning or "")
+        state_bridge.broadcast_agent_phase("명령 확인 중...")
+
+    queue_result = _check_queue_for_interrupt(command_queue, agent_gate=agent_gate)
+
+    if queue_result.should_stop:
+        logger.info("STOP directive received mid-turn. Aborting.")
+        return None
+
+    if queue_result.strategy_override:
+        strategy_string = f"[SYSTEM: 사용자 최우선 전략 지시] - {queue_result.strategy_override}\n\n{strategy_string or ''}"
+        logger.info(f"Strategy overridden by user: {queue_result.strategy_override[:80]}...")
+
+    if queue_result.override_action:
+        # Skip VLM planning — execute user's primitive override directly
+        action = queue_result.override_action
+        logger.info(f"[HITL] Primitive override: {action.action} ({action.x}, {action.y})")
+        if state_bridge:
+            state_bridge.update_current_action(primitive_name, f"[HITL] {action.action} ({action.x}, {action.y})", action.reasoning)
+            state_bridge.broadcast_agent_phase("사용자 명령 실행 중")
+    else:
+        # Step 3: Planning with context (normal VLM flow)
+        # NOTE: get_context_for_primitive() reads the *latest* context, which may
+        # already include updates from the background ContextUpdater.
+        if state_bridge:
+            state_bridge.broadcast_agent_phase("추론 중...")
+        logger.info(f"[3/6] Planning: generating action for {primitive_name}...")
+
+        context_string = ctx.get_context_for_primitive(primitive_name)
+
+        if dbg.log_context:
+            log_context(primitive_name, strategy_string, context_string)
+        else:
+            logger.debug(f"Context for primitive:\n{context_string}")
+
+        # Optionally augment with knowledge
+        if knowledge_manager and knowledge_manager.is_available():
+            query = f"{primitive_name} 전략 가이드"
+            try:
+                knowledge_result = knowledge_manager.query(query, top_k=2)
+                if not knowledge_result.is_empty():
+                    knowledge_section = knowledge_result.to_prompt_string(max_chunks=2, max_tokens=300)
+                    context_string = f"{context_string}\n\n{knowledge_section}"
+                    logger.info(f"  Added {len(knowledge_result.chunks)} knowledge chunks")
+            except Exception as e:
+                logger.warning(f"Knowledge retrieval failed: {e}")
+
+        action = plan_action(
+            planner_provider,
+            pil_image,
+            primitive_name,
+            normalizing_range,
+            high_level_strategy=strategy_string,
+            context_string=context_string,
+        )
+
+        if action is None:
+            logger.error("  VLM returned no action. Turn aborted.")
+            ctx.record_action(
+                action_type="none",
+                primitive=primitive_name,
+                result="failed",
+                error_message="VLM returned no action",
+            )
+            return TurnSummary(
+                turn_number=turn_number,
+                primitive=primitive_name,
+                action_type="none",
+                success=False,
+                error_message="VLM returned no action",
+            )
+
+        logger.info(f"  Action: {action.action}")
+        logger.info(f"  Coords: ({action.x}, {action.y})")
+        if action.action == "drag":
+            logger.info(f"  End coords: ({action.end_x}, {action.end_y})")
+        if action.key:
+            logger.info(f"  Key: {action.key}")
+        if action.text:
+            logger.info(f"  Text: {action.text}")
+        logger.info(f"  Reasoning: {action.reasoning}")
+
+        # Update state bridge with current action info
+        if state_bridge:
+            action_desc = f"{action.action} ({action.x}, {action.y})"
+            state_bridge.update_current_action(primitive_name, action_desc, action.reasoning or "")
 
     # Step 4: Execution
     if delay_before_action > 0:
@@ -440,6 +542,7 @@ def run_multi_turn(
     state_bridge: AgentStateBridge | None = None,
     context_updater: ContextUpdater | None = None,
     debug_options: DebugOptions | None = None,
+    agent_gate: AgentGate | None = None,
 ) -> None:
     """
     Execute multiple consecutive turns.
@@ -491,6 +594,12 @@ def run_multi_turn(
             if state_bridge:
                 state_bridge.update_micro_turn(turn)
 
+            # Sync gate state at turn start
+            if agent_gate:
+                from computer_use_test.agent.modules.hitl.agent_gate import AgentState
+
+                agent_gate.set_state(AgentState.RUNNING)
+
             summary = run_one_turn(
                 router_provider=router_provider,
                 planner_provider=planner_provider,
@@ -505,6 +614,8 @@ def run_multi_turn(
                 state_bridge=state_bridge,
                 context_updater=context_updater,
                 debug_options=debug_options,
+                command_queue=command_queue,
+                agent_gate=agent_gate,
             )
 
             if summary is None or not summary.success:
@@ -518,14 +629,22 @@ def run_multi_turn(
                 for d in directives:
                     if d.directive_type == DirectiveType.STOP:
                         logger.info("STOP directive received from command queue.")
+                        if agent_gate:
+                            agent_gate.set_state(AgentState.STOPPED)
                         stop_requested = True
                         break
                     elif d.directive_type == DirectiveType.PAUSE:
                         logger.info("PAUSE directive received. Waiting for RESUME...")
+                        if agent_gate:
+                            agent_gate.set_state(AgentState.PAUSED)
                         command_queue.wait(timeout=None)
+                        if agent_gate:
+                            agent_gate.set_state(AgentState.RUNNING)
                         # After wake-up, drain again to consume RESUME
                         for rd in command_queue.drain():
                             if rd.directive_type == DirectiveType.STOP:
+                                if agent_gate:
+                                    agent_gate.set_state(AgentState.STOPPED)
                                 stop_requested = True
                                 break
                             elif rd.directive_type == DirectiveType.CHANGE_STRATEGY:

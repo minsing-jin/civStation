@@ -93,6 +93,19 @@ def parse_args() -> configargparse.Namespace:
     ui_group = parser.add_argument_group("Status UI")
     ui_group.add_argument("--status-ui", action="store_true", help="Enable real-time status dashboard")
     ui_group.add_argument("--status-port", type=int, default=8765, help="Status UI port (default: 8765)")
+    ui_group.add_argument(
+        "--wait-for-start",
+        action="store_true",
+        help="Wait for external start signal via API before running (requires --status-ui)",
+    )
+
+    # --- Group 7: Relay ---
+    relay_group = parser.add_argument_group("Relay (remote HITL via external relay server)")
+    relay_group.add_argument("--relay-url", help="WebSocket URL of the relay server (wss://...)")
+    relay_group.add_argument(
+        "--relay-token",
+        help="Auth token for the relay server (or set RELAY_TOKEN env var)",
+    )
 
     return parser.parse_args()
 
@@ -257,27 +270,95 @@ def main():
     except Exception as e:
         logger.warning(f"ContextUpdater init failed: {e}")
 
-    # 5. Status UI (Phase 3)
+    # 5. Agent Gate + Status UI (Phase 3)
+    agent_gate = None
     state_bridge = None
     status_server = None
+
+    from computer_use_test.agent.modules.hitl.agent_gate import AgentGate
+
+    agent_gate = AgentGate(command_queue)
+
+    relay_client = None
     if args.status_ui:
         try:
             from computer_use_test.agent.modules.status_ui.server import StatusServer
             from computer_use_test.agent.modules.status_ui.state_bridge import AgentStateBridge
+            from computer_use_test.agent.modules.status_ui.websocket_manager import WebSocketManager
 
-            state_bridge = AgentStateBridge(ctx, command_queue)
-            status_server = StatusServer(state_bridge, command_queue, port=args.status_port)
+            ws_manager = WebSocketManager()
+
+            # Relay client (optional — only if --relay-url is provided)
+            relay_url = getattr(args, "relay_url", None)
+            if relay_url:
+                from computer_use_test.agent.modules.relay import RelayClient
+
+                relay_token = getattr(args, "relay_token", None) or os.environ.get("RELAY_TOKEN", "")
+                relay_client = RelayClient(
+                    url=relay_url,
+                    token=relay_token,
+                    agent_gate=agent_gate,
+                    command_queue=command_queue,
+                )
+                relay_client.start()
+                logger.info(f"RelayClient started → {relay_url}")
+
+            state_bridge = AgentStateBridge(
+                ctx,
+                command_queue,
+                ws_manager=ws_manager,
+                agent_gate=agent_gate,
+                relay_client=relay_client,
+            )
+            status_server = StatusServer(state_bridge, command_queue, ws_manager=ws_manager, agent_gate=agent_gate, port=args.status_port)
             status_server.start()
             logger.info(f"Status UI available at http://localhost:{args.status_port}")
         except ImportError:
             logger.warning("Status UI requires fastapi and uvicorn. Install with: pip install 'computer-use-test[ui]'")
         except Exception as e:
             logger.warning(f"Status UI init failed: {e}")
+    elif getattr(args, "relay_url", None):
+        # Relay without status UI (headless mode)
+        try:
+            from computer_use_test.agent.modules.relay import RelayClient
+            from computer_use_test.agent.modules.status_ui.state_bridge import AgentStateBridge
+
+            relay_token = getattr(args, "relay_token", None) or os.environ.get("RELAY_TOKEN", "")
+            relay_client = RelayClient(
+                url=args.relay_url,
+                token=relay_token,
+                agent_gate=agent_gate,
+                command_queue=command_queue,
+            )
+            relay_client.start()
+            state_bridge = AgentStateBridge(ctx, command_queue, agent_gate=agent_gate, relay_client=relay_client)
+            logger.info(f"RelayClient (headless) started → {args.relay_url}")
+        except Exception as e:
+            logger.warning(f"Relay init failed: {e}")
 
     # 6. Execution
     debug_options = DebugOptions.from_str(getattr(args, "debug", ""))
     if debug_options.any_enabled():
         logger.info(f"Debug features enabled: {debug_options}")
+
+    # Wait for external start signal if requested
+    if args.wait_for_start:
+        if not args.status_ui:
+            logger.warning("--wait-for-start requires --status-ui. Starting immediately.")
+        else:
+            logger.info("Agent ready. Waiting for external start signal (POST /api/agent/start)...")
+            if state_bridge:
+                state_bridge.broadcast_agent_phase("대기 중 — 시작 신호 대기")
+            agent_gate.wait_for_start()
+            if agent_gate.is_stopped:
+                logger.info("STOP received before start. Exiting.")
+                return
+            logger.info("Start signal received. Beginning execution.")
+    else:
+        # Auto-start: set gate to running immediately
+        from computer_use_test.agent.modules.hitl.agent_gate import AgentState
+
+        agent_gate.set_state(AgentState.RUNNING)
 
     logger.info(f"Starting execution for {args.turns} turn(s)...")
     try:
@@ -299,6 +380,8 @@ def main():
                 state_bridge=state_bridge,
                 context_updater=context_updater,
                 debug_options=debug_options,
+                command_queue=command_queue,
+                agent_gate=agent_gate,
             )
         else:
             run_multi_turn(
@@ -310,15 +393,22 @@ def main():
                 state_bridge=state_bridge,
                 context_updater=context_updater,
                 debug_options=debug_options,
+                agent_gate=agent_gate,
                 **runner_kwargs,
             )
     finally:
+        if agent_gate:
+            from computer_use_test.agent.modules.hitl.agent_gate import AgentState
+
+            agent_gate.set_state(AgentState.STOPPED)
         if context_updater:
             context_updater.stop()
         if queue_listener:
             queue_listener.stop()
         if status_server:
             status_server.stop()
+        if relay_client:
+            relay_client.stop()
         if chat_app:
             chat_app.stop()
             logger.info("Chat app stopped")

@@ -9,5 +9,6 @@ Provides a FastAPI-based web interface showing:
 """
 
 from computer_use_test.agent.modules.status_ui.state_bridge import AgentStateBridge, AgentStatus
+from computer_use_test.agent.modules.status_ui.websocket_manager import WebSocketManager
 
-__all__ = ["AgentStateBridge", "AgentStatus"]
+__all__ = ["AgentStateBridge", "AgentStatus", "WebSocketManager"]

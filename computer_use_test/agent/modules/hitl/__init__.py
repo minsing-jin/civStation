@@ -27,6 +27,7 @@ Example:
     user_input = manager.get_input()
 """
 
+from computer_use_test.agent.modules.hitl.agent_gate import AgentGate, AgentState
 from computer_use_test.agent.modules.hitl.base_input import BaseInputProvider, InputMode
 from computer_use_test.agent.modules.hitl.chatapp_input import ChatAppInputProvider
 from computer_use_test.agent.modules.hitl.command_queue import CommandQueue, Directive, DirectiveType
@@ -42,6 +43,8 @@ from computer_use_test.agent.modules.hitl.turn_checkpoint import (
 from computer_use_test.agent.modules.hitl.voice_input import VoiceInputProvider
 
 __all__ = [
+    "AgentGate",
+    "AgentState",
     "CommandQueue",
     "Directive",
     "DirectiveType",
