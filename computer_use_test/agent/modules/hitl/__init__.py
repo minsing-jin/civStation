@@ -1,15 +1,13 @@
 """
-HITL (Human-in-the-Loop) Input Module.
+HITL (Human-in-the-Loop) Module.
 
-Provides voice and text input capabilities for human-in-the-loop
-strategy refinement in the Civilization VI agent.
-
-Components:
-- InputMode: Enum for input modes (voice, text, auto)
-- BaseInputProvider: Abstract base class for input providers
-- TextInputProvider: Terminal-based text input
-- VoiceInputProvider: Microphone + STT voice input
-- HITLInputManager: Unified input manager with fallback support
+Provides human-in-the-loop capabilities for the Civilization VI agent:
+- Input providers (voice, text, chatapp)
+- Command queue and queue listener
+- Agent gate (lifecycle state machine)
+- Turn checkpoints
+- Status UI (real-time web dashboard)
+- Relay client (remote HITL via external relay server)
 
 Example:
     from computer_use_test.agent.modules.hitl import HITLInputManager, InputMode
@@ -33,6 +31,9 @@ from computer_use_test.agent.modules.hitl.chatapp_input import ChatAppInputProvi
 from computer_use_test.agent.modules.hitl.command_queue import CommandQueue, Directive, DirectiveType
 from computer_use_test.agent.modules.hitl.input_manager import HITLInputManager
 from computer_use_test.agent.modules.hitl.queue_listener import QueueListener
+from computer_use_test.agent.modules.hitl.relay.relay_client import RelayClient
+from computer_use_test.agent.modules.hitl.status_ui.state_bridge import AgentStateBridge, AgentStatus
+from computer_use_test.agent.modules.hitl.status_ui.websocket_manager import WebSocketManager
 from computer_use_test.agent.modules.hitl.text_input import TextInputProvider
 from computer_use_test.agent.modules.hitl.turn_checkpoint import (
     CheckpointDecision,
@@ -45,6 +46,8 @@ from computer_use_test.agent.modules.hitl.voice_input import VoiceInputProvider
 __all__ = [
     "AgentGate",
     "AgentState",
+    "AgentStateBridge",
+    "AgentStatus",
     "CommandQueue",
     "Directive",
     "DirectiveType",
@@ -55,8 +58,10 @@ __all__ = [
     "HITLInputManager",
     "InterruptMonitor",
     "QueueListener",
+    "RelayClient",
     "TextInputProvider",
     "TurnCheckpoint",
     "TurnSummary",
     "VoiceInputProvider",
+    "WebSocketManager",
 ]

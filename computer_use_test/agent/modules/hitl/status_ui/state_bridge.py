@@ -16,8 +16,8 @@ if TYPE_CHECKING:
     from computer_use_test.agent.modules.context.context_manager import ContextManager
     from computer_use_test.agent.modules.hitl.agent_gate import AgentGate
     from computer_use_test.agent.modules.hitl.command_queue import CommandQueue
-    from computer_use_test.agent.modules.relay.relay_client import RelayClient
-    from computer_use_test.agent.modules.status_ui.websocket_manager import WebSocketManager
+    from computer_use_test.agent.modules.hitl.relay.relay_client import RelayClient
+    from computer_use_test.agent.modules.hitl.status_ui.websocket_manager import WebSocketManager
 
 
 @dataclass

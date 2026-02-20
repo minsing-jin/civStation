@@ -282,16 +282,16 @@ def main():
     relay_client = None
     if args.status_ui:
         try:
-            from computer_use_test.agent.modules.status_ui.server import StatusServer
-            from computer_use_test.agent.modules.status_ui.state_bridge import AgentStateBridge
-            from computer_use_test.agent.modules.status_ui.websocket_manager import WebSocketManager
+            from computer_use_test.agent.modules.hitl.status_ui.server import StatusServer
+            from computer_use_test.agent.modules.hitl.status_ui.state_bridge import AgentStateBridge
+            from computer_use_test.agent.modules.hitl.status_ui.websocket_manager import WebSocketManager
 
             ws_manager = WebSocketManager()
 
             # Relay client (optional — only if --relay-url is provided)
             relay_url = getattr(args, "relay_url", None)
             if relay_url:
-                from computer_use_test.agent.modules.relay import RelayClient
+                from computer_use_test.agent.modules.hitl.relay import RelayClient
 
                 relay_token = getattr(args, "relay_token", None) or os.environ.get("RELAY_TOKEN", "")
                 relay_client = RelayClient(
@@ -320,8 +320,8 @@ def main():
     elif getattr(args, "relay_url", None):
         # Relay without status UI (headless mode)
         try:
-            from computer_use_test.agent.modules.relay import RelayClient
-            from computer_use_test.agent.modules.status_ui.state_bridge import AgentStateBridge
+            from computer_use_test.agent.modules.hitl.relay import RelayClient
+            from computer_use_test.agent.modules.hitl.status_ui.state_bridge import AgentStateBridge
 
             relay_token = getattr(args, "relay_token", None) or os.environ.get("RELAY_TOKEN", "")
             relay_client = RelayClient(

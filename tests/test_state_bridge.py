@@ -2,7 +2,7 @@
 
 from computer_use_test.agent.modules.context.context_manager import ContextManager
 from computer_use_test.agent.modules.hitl.command_queue import CommandQueue, Directive, DirectiveType
-from computer_use_test.agent.modules.status_ui.state_bridge import AgentStateBridge
+from computer_use_test.agent.modules.hitl.status_ui.state_bridge import AgentStateBridge
 
 
 class TestAgentStateBridge:
@@ -57,6 +57,7 @@ class TestAgentStateBridge:
         status = self.bridge.get_status()
         d = status.to_dict()
         expected_keys = {
+            "agent_state",
             "current_strategy",
             "victory_goal",
             "game_phase",

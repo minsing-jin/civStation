@@ -51,8 +51,8 @@ if TYPE_CHECKING:
     from computer_use_test.agent.modules.context.context_updater import ContextUpdater
     from computer_use_test.agent.modules.context.macro_turn_manager import MacroTurnManager
     from computer_use_test.agent.modules.hitl.agent_gate import AgentGate
+    from computer_use_test.agent.modules.hitl.status_ui.state_bridge import AgentStateBridge
     from computer_use_test.agent.modules.knowledge import KnowledgeManager
-    from computer_use_test.agent.modules.status_ui.state_bridge import AgentStateBridge
     from computer_use_test.agent.modules.strategy import StrategyPlanner
 
 logger = logging.getLogger(__name__)
@@ -243,6 +243,7 @@ def plan_action(
     normalizing_range: int = 1000,
     high_level_strategy: str | None = None,
     context_string: str | None = None,
+    hitl_directive: str | None = None,
 ) -> AgentAction | None:
     """
     Use VLM to generate the next action for the selected primitive.
@@ -254,6 +255,7 @@ def plan_action(
         normalizing_range: Coordinate normalization range
         high_level_strategy: Optional high-level strategy/goal to guide action selection
         context_string: Optional context string from ContextManager
+        hitl_directive: Optional micro-level HITL directive (e.g., "병영을 최우선 선택")
 
     Returns:
         AgentAction with normalized coordinates, or None on failure
@@ -263,6 +265,7 @@ def plan_action(
         normalizing_range,
         high_level_strategy=high_level_strategy,
         context=context_string or "현재 게임 상태 정보 없음",
+        hitl_directive=hitl_directive,
     )
 
     return provider.analyze(
@@ -393,8 +396,20 @@ def run_one_turn(
         logger.info("STOP directive received mid-turn. Aborting.")
         return None
 
+    primitive_hint = ""
     if queue_result.strategy_override:
-        strategy_string = f"[SYSTEM: 사용자 최우선 전략 지시] - {queue_result.strategy_override}\n\n{strategy_string or ''}"
+        if strategy_planner:
+            try:
+                refined = strategy_planner.refine_strategy(queue_result.strategy_override, ctx)
+                ctx.set_strategy(refined)
+                strategy_string = refined.to_prompt_string()
+                primitive_hint = refined.primitive_hint
+                logger.info(f"Strategy refined from HITL: {refined.victory_goal.value}")
+            except Exception as e:
+                logger.warning(f"HITL strategy refinement failed: {e}, using raw override")
+                strategy_string = f"[사용자 최우선 지시] {queue_result.strategy_override}\n\n{strategy_string or ''}"
+        else:
+            strategy_string = f"[사용자 최우선 지시] {queue_result.strategy_override}\n\n{strategy_string or ''}"
         logger.info(f"Strategy overridden by user: {queue_result.strategy_override[:80]}...")
 
     if queue_result.override_action:
@@ -438,6 +453,7 @@ def run_one_turn(
             normalizing_range,
             high_level_strategy=strategy_string,
             context_string=context_string,
+            hitl_directive=primitive_hint if primitive_hint else None,
         )
 
         if action is None:

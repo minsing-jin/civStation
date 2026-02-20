@@ -19,7 +19,6 @@ from computer_use_test.utils.llm_provider.parser import (
     validate_action,
 )
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -160,7 +159,9 @@ class BaseVLMProvider(ABC):
             try:
                 # TODO: For long-horizon tasks, reduce max_tokens and remove "reasoning"
                 #       field from action JSON format to save tokens.
-                response = self._send_to_api(content_parts, temperature=0.3, max_tokens=8192)
+                # max_tokens must be large enough to cover thinking tokens (Gemini)
+                # plus the actual JSON response (~200 tokens).
+                response = self._send_to_api(content_parts, temperature=0.3, max_tokens=16384)
 
                 if response.finish_reason in ("max_tokens", "length", "MAX_TOKENS"):
                     self.logger.warning(f"[Attempt {attempt}/{self.MAX_RETRIES}] Response TRUNCATED (finish_reason={response.finish_reason})")

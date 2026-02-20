@@ -48,6 +48,7 @@ class StructuredStrategy:
     text: str = ""
     victory_goal: VictoryType = VictoryType.SCIENCE
     current_phase: str = "early_expansion"
+    primitive_hint: str = ""  # micro-level behavioral directive from HITL
 
     def to_prompt_string(self) -> str:
         """
@@ -144,4 +145,5 @@ def parse_strategy_json(raw_json: str) -> StructuredStrategy:
         text=text,
         victory_goal=victory_goal,
         current_phase=data.get("current_phase", "early_expansion"),
+        primitive_hint=data.get("primitive_hint", ""),
     )

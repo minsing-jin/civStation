@@ -8,7 +8,7 @@ Provides a FastAPI-based web interface showing:
 - Micro/macro turn tracking
 """
 
-from computer_use_test.agent.modules.status_ui.state_bridge import AgentStateBridge, AgentStatus
-from computer_use_test.agent.modules.status_ui.websocket_manager import WebSocketManager
+from computer_use_test.agent.modules.hitl.status_ui.state_bridge import AgentStateBridge, AgentStatus
+from computer_use_test.agent.modules.hitl.status_ui.websocket_manager import WebSocketManager
 
 __all__ = ["AgentStateBridge", "AgentStatus", "WebSocketManager"]

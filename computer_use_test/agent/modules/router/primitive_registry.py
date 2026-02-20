@@ -150,6 +150,7 @@ def get_primitive_prompt(
     normalizing_range: int = 1000,
     high_level_strategy: str | None = None,
     context: str | None = None,
+    hitl_directive: str | None = None,
     **kwargs,
 ) -> str:
     """
@@ -163,7 +164,8 @@ def get_primitive_prompt(
         context: Primitive-specific information like statics, current state.
                ex) "city population: 5, production: 10, food: 8, science: 12.
                     Current turn: 150. Current Production Items: ..."
-
+        hitl_directive: Optional micro-level HITL directive (e.g., "병영을 최우선 선택").
+                       Injected into the prompt with highest priority.
 
     Returns:
         Prompt string for the primitive with formatted JSON instructions
@@ -174,9 +176,13 @@ def get_primitive_prompt(
     if primitive_name not in PRIMITIVE_REGISTRY:
         raise ValueError(f"Unknown primitive: {primitive_name}. Available: {PRIMITIVE_NAMES}")
 
-    # TODO: Replace with actual high-level strategy from strategy planner
     if high_level_strategy is None:
         high_level_strategy = "과학 승리를 목표로 함"
+
+    # Build hitl_directive section (empty string if no directive)
+    hitl_directive_section = ""
+    if hitl_directive:
+        hitl_directive_section = hitl_directive
 
     json_instruction = JSON_FORMAT_INSTRUCTION.format(normalizing_range=normalizing_range)
     prompt_template = PRIMITIVE_REGISTRY[primitive_name]["prompt"]
@@ -184,5 +190,6 @@ def get_primitive_prompt(
         json_instruction=json_instruction,
         high_level_strategy=high_level_strategy,
         context=context,
+        hitl_directive=hitl_directive_section,
         **kwargs,
     )

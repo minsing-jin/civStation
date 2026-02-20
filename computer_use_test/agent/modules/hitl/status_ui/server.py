@@ -20,12 +20,12 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from computer_use_test.agent.modules.hitl.command_queue import CommandQueue, Directive, DirectiveType
-from computer_use_test.agent.modules.status_ui.dashboard import DASHBOARD_HTML
-from computer_use_test.agent.modules.status_ui.websocket_manager import WebSocketManager
+from computer_use_test.agent.modules.hitl.status_ui.dashboard import DASHBOARD_HTML
+from computer_use_test.agent.modules.hitl.status_ui.websocket_manager import WebSocketManager
 
 if TYPE_CHECKING:
     from computer_use_test.agent.modules.hitl.agent_gate import AgentGate
-    from computer_use_test.agent.modules.status_ui.state_bridge import AgentStateBridge
+    from computer_use_test.agent.modules.hitl.status_ui.state_bridge import AgentStateBridge
 
 logger = logging.getLogger(__name__)
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from computer_use_test.agent.modules.hitl.command_queue import CommandQueue, DirectiveType
-from computer_use_test.agent.modules.relay.relay_client import RelayClient
+from computer_use_test.agent.modules.hitl.relay.relay_client import RelayClient
 
 
 def _make_client(agent_gate=None, command_queue=None) -> RelayClient:
