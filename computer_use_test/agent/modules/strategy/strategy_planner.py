@@ -9,7 +9,7 @@ import json
 import logging
 from typing import TYPE_CHECKING
 
-from computer_use_test.agent.modules.hitl import HITLInputManager, InputMode
+from computer_use_test.agent.modules.hitl import HITLInputManager
 from computer_use_test.agent.modules.strategy.base_strategy import BaseStrategyPlanner
 from computer_use_test.agent.modules.strategy.prompts.strategy_prompts import (
     AUTONOMOUS_STRATEGY_PROMPT,
@@ -39,19 +39,14 @@ class StrategyPlanner(BaseStrategyPlanner):
     a structured strategy. In autonomous mode, generates strategy
     purely from game context.
 
-    Supports multiple input modes for HITL:
-    - text: Terminal-based text input
-    - voice: Microphone + STT (Speech-to-Text)
-    - auto: Try voice first, fallback to text
+    Input is received exclusively via the configured chat-app provider
+    (Discord, WhatsApp, etc.).  Local voice/text/auto modes have been removed.
     """
 
     def __init__(
         self,
         vlm_provider: "BaseVLMProvider",
         hitl_mode: bool = True,
-        input_mode: InputMode | str = InputMode.TEXT,
-        stt_provider: str = "whisper",
-        voice_timeout: float = 10.0,
         chatapp_provider=None,
         discussion_engine=None,
     ):
@@ -60,28 +55,19 @@ class StrategyPlanner(BaseStrategyPlanner):
 
         Args:
             vlm_provider: VLM provider instance for LLM calls
-            hitl_mode: If True, requires human input; if False, autonomous
-            input_mode: HITL input mode ("voice", "text", "auto", or "chatapp")
-            stt_provider: STT provider for voice input ("whisper", "google", "openai")
-            voice_timeout: Maximum seconds to wait for voice input
+            hitl_mode: If True, requires human input via chatapp; if False, autonomous
             chatapp_provider: Optional ChatAppInputProvider for chat app input
             discussion_engine: Optional StrategyDiscussion engine for multi-turn discussions
         """
         self.provider = vlm_provider
         self.hitl_mode = hitl_mode
-        self.input_mode = InputMode(input_mode) if isinstance(input_mode, str) else input_mode
         self.logger = logger
         self.discussion_engine = discussion_engine
 
         # Initialize HITL input manager if in HITL mode
         self._input_manager: HITLInputManager | None = None
         if hitl_mode:
-            self._input_manager = HITLInputManager(
-                input_mode=self.input_mode,
-                stt_provider=stt_provider,
-                voice_timeout=voice_timeout,
-                chatapp_provider=chatapp_provider,
-            )
+            self._input_manager = HITLInputManager(chatapp_provider=chatapp_provider)
 
     def get_human_input(self, prompt: str = "전략을 입력하세요: ") -> str:
         """
@@ -243,11 +229,7 @@ class StrategyPlanner(BaseStrategyPlanner):
         """Call the VLM with a text-only prompt."""
         content_parts = [self.provider._build_text_content(prompt)]
 
-        response = self.provider._send_to_api(
-            content_parts,
-            temperature=0.3,
-            max_tokens=2048,
-        )
+        response = self.provider._send_to_api(content_parts, temperature=0.3)
 
         return response.content
 

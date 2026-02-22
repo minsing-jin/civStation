@@ -14,6 +14,7 @@ from enum import Enum
 class ChatAppPlatform(str, Enum):
     """Supported chat application platforms."""
 
+    ORIGINAL = "original"  # Built-in status UI / no external bot
     DISCORD = "discord"
     WHATSAPP = "whatsapp"
 

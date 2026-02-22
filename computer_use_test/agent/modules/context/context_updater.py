@@ -170,7 +170,7 @@ class ContextUpdater:
             self._vlm._build_text_content(_CONTEXT_EXTRACTION_PROMPT),
         ]
 
-        response = self._vlm._send_to_api(content_parts, temperature=0.1, max_tokens=1024)
+        response = self._vlm._send_to_api(content_parts, temperature=0.1)
         content = strip_markdown(response.content)
 
         try:

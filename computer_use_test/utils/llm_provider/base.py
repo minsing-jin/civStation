@@ -19,7 +19,6 @@ from computer_use_test.utils.llm_provider.parser import (
     validate_action,
 )
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -59,7 +58,7 @@ class BaseVLMProvider(ABC):
         self,
         content_parts: list,
         temperature: float = 0.7,
-        max_tokens: int = 4096,
+        max_tokens: int = 8192,
     ) -> VLMResponse:
         """
         Send content parts to the VLM API and return raw response.
@@ -103,7 +102,7 @@ class BaseVLMProvider(ABC):
         prompt: str,
         image_path: str | Path | None = None,
         temperature: float = 0.7,
-        max_tokens: int = 4096,
+        max_tokens: int = 8192,
     ) -> VLMResponse:
         """Call VLM with text prompt + optional image file."""
         content_parts = []
@@ -118,7 +117,7 @@ class BaseVLMProvider(ABC):
         image_path: str | Path | None,
         primitive_name: str,
         temperature: float = 0.7,
-        max_tokens: int = 4096,
+        max_tokens: int = 8192,
     ) -> AgentPlan:
         """Convenience: call VLM and parse response in one step."""
         response = self.call_vlm(prompt, image_path, temperature, max_tokens)
@@ -160,7 +159,9 @@ class BaseVLMProvider(ABC):
             try:
                 # TODO: For long-horizon tasks, reduce max_tokens and remove "reasoning"
                 #       field from action JSON format to save tokens.
-                response = self._send_to_api(content_parts, temperature=0.3, max_tokens=8192)
+                # max_tokens must be large enough to cover thinking tokens (Gemini)
+                # plus the actual JSON response (~200 tokens).
+                response = self._send_to_api(content_parts, temperature=0.3, max_tokens=16384)
 
                 if response.finish_reason in ("max_tokens", "length", "MAX_TOKENS"):
                     self.logger.warning(f"[Attempt {attempt}/{self.MAX_RETRIES}] Response TRUNCATED (finish_reason={response.finish_reason})")

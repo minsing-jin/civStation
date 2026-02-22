@@ -35,6 +35,7 @@ class DebugOptions:
 
     log_context: bool = False
     validate_turns: bool = False
+    verbose_logging: bool = False
 
     # ---------------------------------------------------------------------------
     # Factory helpers
@@ -66,6 +67,7 @@ class DebugOptions:
             "context": "log_context",
             "turns": "validate_turns",
             "turn": "validate_turns",
+            "verbose": "verbose_logging",
         }
 
         kwargs: dict[str, bool] = {}

@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 # Keywords that map to directive types
 _STOP_KEYWORDS = {"stop", "quit", "exit", "중지", "종료"}
 _PAUSE_KEYWORDS = {"pause", "일시정지", "멈춰"}
-_RESUME_KEYWORDS = {"resume", "계속", "재개"}
+_RESUME_KEYWORDS = {"resume", "start", "start agent", "계속", "재개", "시작", "에이전트 시작"}
 
 
 class QueueListener:
@@ -46,6 +46,9 @@ class QueueListener:
     def start(self) -> None:
         """Start the listener daemon thread."""
         if self._thread and self._thread.is_alive():
+            return
+        if not self._input_manager.is_available():
+            logger.info("QueueListener not started: no active input provider")
             return
         self._running = True
         self._thread = threading.Thread(target=self._listen_loop, daemon=True, name="QueueListener")

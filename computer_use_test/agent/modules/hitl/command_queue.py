@@ -26,6 +26,7 @@ class DirectiveType(str, Enum):
     PAUSE = "pause"
     RESUME = "resume"
     CUSTOM = "custom"
+    PRIMITIVE_OVERRIDE = "primitive_override"
 
 
 @dataclass

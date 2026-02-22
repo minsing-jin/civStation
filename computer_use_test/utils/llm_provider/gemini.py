@@ -53,7 +53,7 @@ class GeminiVLMProvider(BaseVLMProvider):
         self,
         content_parts: list,
         temperature: float = 0.7,
-        max_tokens: int = 4096,
+        max_tokens: int = 8192,
         response_json_schema: dict | None = None,
         use_thinking: bool = True,
     ) -> VLMResponse:

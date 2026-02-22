@@ -22,6 +22,10 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
+# Suppress noisy third-party loggers
+for _noisy in ("httpx", "httpcore", "urllib3", "asyncio", "websockets"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 
 
@@ -73,15 +77,20 @@ def parse_args() -> configargparse.Namespace:
     strat_group.add_argument("--hitl", action="store_true", help="Enable HITL mode")
     strat_group.add_argument("--autonomous", action="store_true", help="Enable autonomous mode")
     strat_group.add_argument("--hitl-mode", choices=["async"], help="Interrupt mode")
-    strat_group.add_argument("--input-mode", choices=["voice", "text", "auto", "chatapp"], default="text")
-    strat_group.add_argument("--stt-provider", choices=["whisper", "google", "openai"], default="whisper")
 
-    # --- Group 4: Chat App (Discord) ---
+    # --- Group 4: Chat App ---
     chat_group = parser.add_argument_group("Chat App Integration")
-    chat_group.add_argument("--chatapp", choices=["discord"], help="Chat platform")
+    chat_group.add_argument(
+        "--chatapp",
+        choices=["original", "discord", "whatsapp"],
+        help="Chat platform for HITL input: 'original' (built-in status UI), 'discord', or 'whatsapp'",
+    )
     chat_group.add_argument("--discord-token", help="Discord bot token")
     chat_group.add_argument("--discord-channel", help="Discord channel ID")
     chat_group.add_argument("--discord-user", help="Discord user ID")
+    chat_group.add_argument("--whatsapp-token", help="WhatsApp bot token")
+    chat_group.add_argument("--whatsapp-phone-number-id", help="WhatsApp phone number ID")
+    chat_group.add_argument("--whatsapp-user", help="WhatsApp user ID to receive messages from")
     chat_group.add_argument("--enable-discussion", action="store_true", help="Enable strategy discussion")
 
     # --- Group 5: Knowledge ---
@@ -89,10 +98,24 @@ def parse_args() -> configargparse.Namespace:
     know_group.add_argument("--knowledge-index", help="Path to Civopedia JSON")
     know_group.add_argument("--enable-web-search", action="store_true", help="Enable Tavily web search")
 
-    # --- Group 6: Status UI ---
-    ui_group = parser.add_argument_group("Status UI")
-    ui_group.add_argument("--status-ui", action="store_true", help="Enable real-time status dashboard")
-    ui_group.add_argument("--status-port", type=int, default=8765, help="Status UI port (default: 8765)")
+    # --- Group 6: Control API & Status UI ---
+    ui_group = parser.add_argument_group("Control API & Status UI")
+    ui_group.add_argument("--status-ui", action="store_true", help="Enable real-time status dashboard (includes control API)")
+    ui_group.add_argument("--control-api", action="store_true", help="Enable start/pause/resume/stop API server")
+    ui_group.add_argument("--status-port", type=int, default=8765, help="Control API / Status UI port (default: 8765)")
+    ui_group.add_argument(
+        "--wait-for-start",
+        action="store_true",
+        help="Wait for external start signal via API before running (requires --control-api/--status-ui or --relay-url)",
+    )
+
+    # --- Group 7: Relay ---
+    relay_group = parser.add_argument_group("Relay (remote HITL via external relay server)")
+    relay_group.add_argument("--relay-url", help="WebSocket URL of the relay server (wss://...)")
+    relay_group.add_argument(
+        "--relay-token",
+        help="Auth token for the relay server (or set RELAY_TOKEN env var)",
+    )
 
     return parser.parse_args()
 
@@ -123,35 +146,63 @@ def setup_providers(args) -> tuple[object, object]:
 
 
 def setup_chat_app(args, planner_provider, context_manager):
-    """Discord 앱 초기화"""
-    if args.chatapp != "discord":
+    """채팅 앱 초기화 (original / discord / whatsapp)"""
+    platform = getattr(args, "chatapp", None)
+
+    if not platform or platform == "original":
+        # Built-in mode: no external bot, HITL handled via status UI / command queue
         return None, None, None
 
     from computer_use_test.agent.modules.hitl import ChatAppInputProvider
     from computer_use_test.utils.chatapp import create_chat_app
 
-    token = args.discord_token or os.environ.get("DISCORD_BOT_TOKEN", "")
-    if not token:
-        raise ValueError("Discord token missing. Set DISCORD_BOT_TOKEN or check config.yaml")
+    if platform == "discord":
+        token = args.discord_token or os.environ.get("DISCORD_BOT_TOKEN", "")
+        if not token:
+            raise ValueError("Discord token missing. Set DISCORD_BOT_TOKEN or --discord-token")
 
-    # 1. Start App
-    chat_app = create_chat_app(
-        "discord",
-        bot_token=token,
-        allowed_user_ids=[args.discord_user] if args.discord_user else [],
-        allowed_channel_ids=[args.discord_channel] if args.discord_channel else [],
-    )
-    chat_app.start()
-    logger.info(f"Discord app started (Channel: {args.discord_channel})")
+        chat_app = create_chat_app(
+            "discord",
+            bot_token=token,
+            allowed_user_ids=[args.discord_user] if args.discord_user else [],
+            allowed_channel_ids=[args.discord_channel] if args.discord_channel else [],
+        )
+        chat_app.start()
+        logger.info(f"Discord app started (Channel: {args.discord_channel})")
 
-    # 2. Input Provider
-    chatapp_provider = None
-    if args.discord_user:
-        if args.input_mode == "text":
-            args.input_mode = "chatapp"  # Discord 사용자가 지정되면 chatapp 모드 우선
-        chatapp_provider = ChatAppInputProvider(chat_app=chat_app, user_id=args.discord_user, channel_id=args.discord_channel)
+        chatapp_provider = None
+        if args.discord_user:
+            chatapp_provider = ChatAppInputProvider(
+                chat_app=chat_app,
+                user_id=args.discord_user,
+                channel_id=args.discord_channel,
+            )
 
-    # 3. Discussion Engine
+    elif platform == "whatsapp":
+        token = args.whatsapp_token or os.environ.get("WHATSAPP_BOT_TOKEN", "")
+        if not token:
+            raise ValueError("WhatsApp token missing. Set WHATSAPP_BOT_TOKEN or --whatsapp-token")
+
+        chat_app = create_chat_app(
+            "whatsapp",
+            bot_token=token,
+            phone_number_id=getattr(args, "whatsapp_phone_number_id", "") or "",
+            allowed_user_ids=[args.whatsapp_user] if getattr(args, "whatsapp_user", None) else [],
+        )
+        chat_app.start()
+        logger.info("WhatsApp app started")
+
+        chatapp_provider = None
+        if getattr(args, "whatsapp_user", None):
+            chatapp_provider = ChatAppInputProvider(
+                chat_app=chat_app,
+                user_id=args.whatsapp_user,
+            )
+
+    else:
+        raise ValueError(f"Unknown chatapp platform: {platform}")
+
+    # Discussion Engine (platform-agnostic)
     discussion_engine = None
     if args.enable_discussion:
         from computer_use_test.utils.chatapp.discussion import DiscordDiscussionHandler, StrategyDiscussion
@@ -208,8 +259,6 @@ def main():
             strategy_planner = StrategyPlanner(
                 vlm_provider=planner_provider,
                 hitl_mode=(args.hitl and not args.autonomous),
-                input_mode=args.input_mode,
-                stt_provider=args.stt_provider,
                 chatapp_provider=chatapp_input_provider,
                 discussion_engine=discussion_engine,
             )
@@ -228,11 +277,7 @@ def main():
     if args.hitl_mode == "async":
         from computer_use_test.agent.modules.hitl import HITLInputManager
 
-        input_manager = HITLInputManager(
-            input_mode=args.input_mode,
-            stt_provider=args.stt_provider,
-            chatapp_provider=chatapp_input_provider,
-        )
+        input_manager = HITLInputManager(chatapp_provider=chatapp_input_provider)
         queue_listener = QueueListener(command_queue, input_manager)
         queue_listener.start()
 
@@ -257,27 +302,144 @@ def main():
     except Exception as e:
         logger.warning(f"ContextUpdater init failed: {e}")
 
-    # 5. Status UI (Phase 3)
+    # 5. Agent Gate + Status UI (Phase 3)
+    agent_gate = None
     state_bridge = None
     status_server = None
-    if args.status_ui:
-        try:
-            from computer_use_test.agent.modules.status_ui.server import StatusServer
-            from computer_use_test.agent.modules.status_ui.state_bridge import AgentStateBridge
 
-            state_bridge = AgentStateBridge(ctx, command_queue)
-            status_server = StatusServer(state_bridge, command_queue, port=args.status_port)
+    from computer_use_test.agent.modules.hitl.agent_gate import AgentGate
+
+    agent_gate = AgentGate(command_queue)
+
+    relay_client = None
+    enable_control_api = bool(args.status_ui or getattr(args, "control_api", False))
+
+    if enable_control_api:
+        try:
+            from computer_use_test.agent.modules.hitl.status_ui.server import StatusServer
+            from computer_use_test.agent.modules.hitl.status_ui.state_bridge import AgentStateBridge
+            from computer_use_test.agent.modules.hitl.status_ui.websocket_manager import WebSocketManager
+
+            ws_manager = WebSocketManager()
+
+            # Relay client (optional — only if --relay-url is provided)
+            relay_url = getattr(args, "relay_url", None)
+            if relay_url:
+                from computer_use_test.agent.modules.hitl.relay import RelayClient
+
+                relay_token = getattr(args, "relay_token", None) or os.environ.get("RELAY_TOKEN", "")
+                relay_client = RelayClient(
+                    url=relay_url,
+                    token=relay_token,
+                    agent_gate=agent_gate,
+                    command_queue=command_queue,
+                )
+                relay_client.start()
+                logger.info(f"RelayClient started → {relay_url}")
+
+            state_bridge = AgentStateBridge(
+                ctx,
+                command_queue,
+                ws_manager=ws_manager,
+                agent_gate=agent_gate,
+                relay_client=relay_client,
+            )
+            status_server = StatusServer(state_bridge, command_queue, ws_manager=ws_manager, agent_gate=agent_gate, port=args.status_port)
             status_server.start()
-            logger.info(f"Status UI available at http://localhost:{args.status_port}")
+            if args.status_ui:
+                logger.info(f"Status UI available at http://localhost:{args.status_port}")
+            else:
+                logger.info(f"Control API available at http://localhost:{args.status_port}")
         except ImportError:
-            logger.warning("Status UI requires fastapi and uvicorn. Install with: pip install 'computer-use-test[ui]'")
+            logger.warning("Control API requires fastapi and uvicorn. Install with: pip install 'computer-use-test[ui]'")
         except Exception as e:
-            logger.warning(f"Status UI init failed: {e}")
+            logger.warning(f"Control API init failed: {e}")
+    elif getattr(args, "relay_url", None):
+        # Relay without status UI (headless mode)
+        try:
+            from computer_use_test.agent.modules.hitl.relay import RelayClient
+            from computer_use_test.agent.modules.hitl.status_ui.state_bridge import AgentStateBridge
+
+            relay_token = getattr(args, "relay_token", None) or os.environ.get("RELAY_TOKEN", "")
+            relay_client = RelayClient(
+                url=args.relay_url,
+                token=relay_token,
+                agent_gate=agent_gate,
+                command_queue=command_queue,
+            )
+            relay_client.start()
+            state_bridge = AgentStateBridge(ctx, command_queue, agent_gate=agent_gate, relay_client=relay_client)
+            logger.info(f"RelayClient (headless) started → {args.relay_url}")
+        except Exception as e:
+            logger.warning(f"Relay init failed: {e}")
 
     # 6. Execution
     debug_options = DebugOptions.from_str(getattr(args, "debug", ""))
     if debug_options.any_enabled():
         logger.info(f"Debug features enabled: {debug_options}")
+
+    # Wait for external start signal.
+    # In async HITL mode, default to waiting to prevent unintended autonomous execution.
+    should_wait_for_start = bool(args.wait_for_start)
+    if not should_wait_for_start and args.hitl_mode == "async":
+        should_wait_for_start = True
+        logger.info("Async HITL mode detected: auto-waiting for external start signal.")
+
+    if should_wait_for_start:
+        has_status_control = bool(enable_control_api or getattr(args, "relay_url", None))
+        has_chatapp_control = bool(chatapp_input_provider is not None)
+
+        if not (has_status_control or has_chatapp_control):
+            logger.error("Manual start required, but no control channel is enabled. Use --control-api/--status-ui, --relay-url, or chatapp input provider.")
+            return
+        elif has_status_control:
+            logger.info("Agent ready. Waiting for external start signal (POST /api/agent/start)...")
+            if state_bridge:
+                state_bridge.broadcast_agent_phase("대기 중 — 시작 신호 대기")
+            agent_gate.wait_for_start()
+            if agent_gate.is_stopped:
+                logger.info("STOP received before start. Exiting.")
+                return
+            logger.info("Start signal received. Beginning execution.")
+        else:
+            from computer_use_test.agent.modules.hitl.agent_gate import AgentState
+            from computer_use_test.agent.modules.hitl.command_queue import DirectiveType
+
+            logger.info("Agent ready. Waiting for chatapp start command (resume/start)...")
+            if state_bridge:
+                state_bridge.broadcast_agent_phase("대기 중 — chatapp 시작 신호 대기")
+
+            while True:
+                command_queue.wait(timeout=None)
+                pending = command_queue.drain()
+                should_start = False
+                should_stop = False
+                keep: list = []
+
+                for d in pending:
+                    if d.directive_type == DirectiveType.STOP:
+                        should_stop = True
+                    elif d.directive_type == DirectiveType.RESUME:
+                        should_start = True
+                    else:
+                        keep.append(d)
+
+                # Keep non-control directives so they can be processed after start.
+                for d in keep:
+                    command_queue.push(d)
+
+                if should_stop:
+                    logger.info("STOP received before start. Exiting.")
+                    return
+                if should_start:
+                    agent_gate.set_state(AgentState.RUNNING)
+                    logger.info("Chatapp start signal received. Beginning execution.")
+                    break
+    else:
+        # Auto-start: set gate to running immediately
+        from computer_use_test.agent.modules.hitl.agent_gate import AgentState
+
+        agent_gate.set_state(AgentState.RUNNING)
 
     logger.info(f"Starting execution for {args.turns} turn(s)...")
     try:
@@ -299,6 +461,8 @@ def main():
                 state_bridge=state_bridge,
                 context_updater=context_updater,
                 debug_options=debug_options,
+                command_queue=command_queue,
+                agent_gate=agent_gate,
             )
         else:
             run_multi_turn(
@@ -310,15 +474,22 @@ def main():
                 state_bridge=state_bridge,
                 context_updater=context_updater,
                 debug_options=debug_options,
+                agent_gate=agent_gate,
                 **runner_kwargs,
             )
     finally:
+        if agent_gate:
+            from computer_use_test.agent.modules.hitl.agent_gate import AgentState
+
+            agent_gate.set_state(AgentState.STOPPED)
         if context_updater:
             context_updater.stop()
         if queue_listener:
             queue_listener.stop()
         if status_server:
             status_server.stop()
+        if relay_client:
+            relay_client.stop()
         if chat_app:
             chat_app.stop()
             logger.info("Chat app stopped")
