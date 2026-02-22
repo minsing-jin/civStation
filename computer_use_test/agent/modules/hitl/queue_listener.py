@@ -47,6 +47,9 @@ class QueueListener:
         """Start the listener daemon thread."""
         if self._thread and self._thread.is_alive():
             return
+        if not self._input_manager.is_available():
+            logger.info("QueueListener not started: no active input provider")
+            return
         self._running = True
         self._thread = threading.Thread(target=self._listen_loop, daemon=True, name="QueueListener")
         self._thread.start()

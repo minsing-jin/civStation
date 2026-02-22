@@ -22,6 +22,10 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
+# Suppress noisy third-party loggers
+for _noisy in ("httpx", "httpcore", "urllib3", "asyncio", "websockets"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 
 
@@ -73,15 +77,20 @@ def parse_args() -> configargparse.Namespace:
     strat_group.add_argument("--hitl", action="store_true", help="Enable HITL mode")
     strat_group.add_argument("--autonomous", action="store_true", help="Enable autonomous mode")
     strat_group.add_argument("--hitl-mode", choices=["async"], help="Interrupt mode")
-    strat_group.add_argument("--input-mode", choices=["voice", "text", "auto", "chatapp"], default="text")
-    strat_group.add_argument("--stt-provider", choices=["whisper", "google", "openai"], default="whisper")
 
-    # --- Group 4: Chat App (Discord) ---
+    # --- Group 4: Chat App ---
     chat_group = parser.add_argument_group("Chat App Integration")
-    chat_group.add_argument("--chatapp", choices=["discord"], help="Chat platform")
+    chat_group.add_argument(
+        "--chatapp",
+        choices=["original", "discord", "whatsapp"],
+        help="Chat platform for HITL input: 'original' (built-in status UI), 'discord', or 'whatsapp'",
+    )
     chat_group.add_argument("--discord-token", help="Discord bot token")
     chat_group.add_argument("--discord-channel", help="Discord channel ID")
     chat_group.add_argument("--discord-user", help="Discord user ID")
+    chat_group.add_argument("--whatsapp-token", help="WhatsApp bot token")
+    chat_group.add_argument("--whatsapp-phone-number-id", help="WhatsApp phone number ID")
+    chat_group.add_argument("--whatsapp-user", help="WhatsApp user ID to receive messages from")
     chat_group.add_argument("--enable-discussion", action="store_true", help="Enable strategy discussion")
 
     # --- Group 5: Knowledge ---
@@ -136,35 +145,63 @@ def setup_providers(args) -> tuple[object, object]:
 
 
 def setup_chat_app(args, planner_provider, context_manager):
-    """Discord 앱 초기화"""
-    if args.chatapp != "discord":
+    """채팅 앱 초기화 (original / discord / whatsapp)"""
+    platform = getattr(args, "chatapp", None)
+
+    if not platform or platform == "original":
+        # Built-in mode: no external bot, HITL handled via status UI / command queue
         return None, None, None
 
     from computer_use_test.agent.modules.hitl import ChatAppInputProvider
     from computer_use_test.utils.chatapp import create_chat_app
 
-    token = args.discord_token or os.environ.get("DISCORD_BOT_TOKEN", "")
-    if not token:
-        raise ValueError("Discord token missing. Set DISCORD_BOT_TOKEN or check config.yaml")
+    if platform == "discord":
+        token = args.discord_token or os.environ.get("DISCORD_BOT_TOKEN", "")
+        if not token:
+            raise ValueError("Discord token missing. Set DISCORD_BOT_TOKEN or --discord-token")
 
-    # 1. Start App
-    chat_app = create_chat_app(
-        "discord",
-        bot_token=token,
-        allowed_user_ids=[args.discord_user] if args.discord_user else [],
-        allowed_channel_ids=[args.discord_channel] if args.discord_channel else [],
-    )
-    chat_app.start()
-    logger.info(f"Discord app started (Channel: {args.discord_channel})")
+        chat_app = create_chat_app(
+            "discord",
+            bot_token=token,
+            allowed_user_ids=[args.discord_user] if args.discord_user else [],
+            allowed_channel_ids=[args.discord_channel] if args.discord_channel else [],
+        )
+        chat_app.start()
+        logger.info(f"Discord app started (Channel: {args.discord_channel})")
 
-    # 2. Input Provider
-    chatapp_provider = None
-    if args.discord_user:
-        if args.input_mode == "text":
-            args.input_mode = "chatapp"  # Discord 사용자가 지정되면 chatapp 모드 우선
-        chatapp_provider = ChatAppInputProvider(chat_app=chat_app, user_id=args.discord_user, channel_id=args.discord_channel)
+        chatapp_provider = None
+        if args.discord_user:
+            chatapp_provider = ChatAppInputProvider(
+                chat_app=chat_app,
+                user_id=args.discord_user,
+                channel_id=args.discord_channel,
+            )
 
-    # 3. Discussion Engine
+    elif platform == "whatsapp":
+        token = args.whatsapp_token or os.environ.get("WHATSAPP_BOT_TOKEN", "")
+        if not token:
+            raise ValueError("WhatsApp token missing. Set WHATSAPP_BOT_TOKEN or --whatsapp-token")
+
+        chat_app = create_chat_app(
+            "whatsapp",
+            bot_token=token,
+            phone_number_id=getattr(args, "whatsapp_phone_number_id", "") or "",
+            allowed_user_ids=[args.whatsapp_user] if getattr(args, "whatsapp_user", None) else [],
+        )
+        chat_app.start()
+        logger.info("WhatsApp app started")
+
+        chatapp_provider = None
+        if getattr(args, "whatsapp_user", None):
+            chatapp_provider = ChatAppInputProvider(
+                chat_app=chat_app,
+                user_id=args.whatsapp_user,
+            )
+
+    else:
+        raise ValueError(f"Unknown chatapp platform: {platform}")
+
+    # Discussion Engine (platform-agnostic)
     discussion_engine = None
     if args.enable_discussion:
         from computer_use_test.utils.chatapp.discussion import DiscordDiscussionHandler, StrategyDiscussion
@@ -221,8 +258,6 @@ def main():
             strategy_planner = StrategyPlanner(
                 vlm_provider=planner_provider,
                 hitl_mode=(args.hitl and not args.autonomous),
-                input_mode=args.input_mode,
-                stt_provider=args.stt_provider,
                 chatapp_provider=chatapp_input_provider,
                 discussion_engine=discussion_engine,
             )
@@ -241,11 +276,7 @@ def main():
     if args.hitl_mode == "async":
         from computer_use_test.agent.modules.hitl import HITLInputManager
 
-        input_manager = HITLInputManager(
-            input_mode=args.input_mode,
-            stt_provider=args.stt_provider,
-            chatapp_provider=chatapp_input_provider,
-        )
+        input_manager = HITLInputManager(chatapp_provider=chatapp_input_provider)
         queue_listener = QueueListener(command_queue, input_manager)
         queue_listener.start()
 

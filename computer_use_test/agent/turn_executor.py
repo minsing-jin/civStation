@@ -45,6 +45,7 @@ from computer_use_test.agent.modules.router.primitive_registry import (
 from computer_use_test.utils.debug import DebugOptions, TurnValidator, log_context
 from computer_use_test.utils.llm_provider.base import BaseVLMProvider
 from computer_use_test.utils.llm_provider.parser import AgentAction, strip_markdown
+from computer_use_test.utils.rich_logger import RichLogger
 from computer_use_test.utils.screen import capture_screen_pil, execute_action
 
 if TYPE_CHECKING:
@@ -127,7 +128,7 @@ def _check_queue_for_interrupt(
                 logger.warning(f"Invalid primitive override payload: {e}")
 
         elif d.directive_type == DirectiveType.PAUSE:
-            logger.info("PAUSE directive received mid-turn. Waiting for RESUME...")
+            RichLogger.get().hitl_event("PAUSE", "Waiting for RESUME...")
             if agent_gate:
                 from computer_use_test.agent.modules.hitl.agent_gate import AgentState
 
@@ -213,11 +214,10 @@ def route_primitive(
         if observed_turn is not None:
             if _last_observed_turn is not None and observed_turn > _last_observed_turn:
                 is_new_turn = True
-                logger.info(f"New game turn detected: {_last_observed_turn} → {observed_turn}")
+                logger.debug(f"New game turn detected: {_last_observed_turn} → {observed_turn}")
             _last_observed_turn = observed_turn
 
-        logger.info(f"Router selected: {selected} (turn={observed_turn}, new={is_new_turn})")
-        logger.info(f"Router reasoning: {reasoning}")
+        logger.debug(f"Router selected: {selected} (turn={observed_turn}, new={is_new_turn})")
 
         return RouterResult(
             primitive=selected,
@@ -322,9 +322,7 @@ def run_one_turn(
     Returns:
         TurnSummary with turn result details, or None on critical failure
     """
-    logger.info("=" * 50)
-    logger.info("Starting one-turn execution")
-    logger.info("=" * 50)
+    rl = RichLogger.get()
 
     # Get or create context manager singleton
     ctx = context_manager or ContextManager.get_instance()
@@ -340,7 +338,7 @@ def run_one_turn(
             )
             ctx.set_strategy(structured_strategy)
             strategy_string = structured_strategy.to_prompt_string()
-            logger.info(f"Strategy refined: {structured_strategy.victory_goal.value} victory")
+            rl.strategy_update(structured_strategy.victory_goal.value, strategy_string or "")
         except Exception as e:
             logger.warning(f"Strategy generation failed: {e}, using fallback")
             strategy_string = high_level_strategy
@@ -350,16 +348,13 @@ def run_one_turn(
         strategy_string = ctx.get_strategy_string()
 
     # Step 1: Observation
-    logger.info("[1/6] Capturing screenshot...")
     pil_image, screen_w, screen_h = capture_screen_pil()
-    logger.info(f"  Screen: {screen_w}x{screen_h} (logical)")
 
     # Step 2: Routing (also reads turn number from screen)
-    logger.info("[2/6] Routing: analyzing game state...")
     router_result = route_primitive(router_provider, pil_image)
     primitive_name = router_result.primitive
     macro_turn = macro_turn_manager.macro_turn_number if macro_turn_manager else 1
-    logger.info(f"  Selected primitive: {primitive_name} | game_turn={router_result.observed_turn} | macro_turn={macro_turn} | micro_turn={turn_number}")
+    rl.route_result(primitive_name, router_result.reasoning, router_result.observed_turn, macro_turn, turn_number)
 
     # Step 2a: Turn-number validation
     if dbg.validate_turns:
@@ -379,7 +374,7 @@ def run_one_turn(
     # Handle game-turn transition detected by router
     if router_result.is_new_turn and macro_turn_manager:
         macro_summary = macro_turn_manager.handle_macro_turn_end()
-        logger.info(f"Macro-turn {macro_summary.macro_turn_number} ended (turn {router_result.observed_turn}): {macro_summary.llm_summary[:80]}...")
+        logger.debug(f"Macro-turn {macro_summary.macro_turn_number} ended (turn {router_result.observed_turn}): {macro_summary.llm_summary[:80]}...")
         if state_bridge:
             state_bridge.update_macro_turn(macro_summary.macro_turn_number + 1)
 
@@ -393,7 +388,7 @@ def run_one_turn(
     queue_result = _check_queue_for_interrupt(command_queue, agent_gate=agent_gate)
 
     if queue_result.should_stop:
-        logger.info("STOP directive received mid-turn. Aborting.")
+        rl.hitl_event("STOP", "Directive received mid-turn. Aborting.")
         return None
 
     primitive_hint = ""
@@ -404,18 +399,18 @@ def run_one_turn(
                 ctx.set_strategy(refined)
                 strategy_string = refined.to_prompt_string()
                 primitive_hint = refined.primitive_hint
-                logger.info(f"Strategy refined from HITL: {refined.victory_goal.value}")
+                rl.strategy_update(refined.victory_goal.value, queue_result.strategy_override or "")
             except Exception as e:
                 logger.warning(f"HITL strategy refinement failed: {e}, using raw override")
                 strategy_string = f"[사용자 최우선 지시] {queue_result.strategy_override}\n\n{strategy_string or ''}"
         else:
             strategy_string = f"[사용자 최우선 지시] {queue_result.strategy_override}\n\n{strategy_string or ''}"
-        logger.info(f"Strategy overridden by user: {queue_result.strategy_override[:80]}...")
+        logger.debug(f"Strategy overridden by user: {queue_result.strategy_override[:80]}...")
 
     if queue_result.override_action:
         # Skip VLM planning — execute user's primitive override directly
         action = queue_result.override_action
-        logger.info(f"[HITL] Primitive override: {action.action} ({action.x}, {action.y})")
+        rl.hitl_event("OVERRIDE", f"{action.action} ({action.x}, {action.y})")
         if state_bridge:
             state_bridge.update_current_action(primitive_name, f"[HITL] {action.action} ({action.x}, {action.y})", action.reasoning)
             state_bridge.broadcast_agent_phase("사용자 명령 실행 중")
@@ -425,7 +420,7 @@ def run_one_turn(
         # already include updates from the background ContextUpdater.
         if state_bridge:
             state_bridge.broadcast_agent_phase("추론 중...")
-        logger.info(f"[3/6] Planning: generating action for {primitive_name}...")
+        logger.debug(f"Planning: generating action for {primitive_name}...")
 
         context_string = ctx.get_context_for_primitive(primitive_name)
 
@@ -442,7 +437,7 @@ def run_one_turn(
                 if not knowledge_result.is_empty():
                     knowledge_section = knowledge_result.to_prompt_string(max_chunks=2, max_tokens=300)
                     context_string = f"{context_string}\n\n{knowledge_section}"
-                    logger.info(f"  Added {len(knowledge_result.chunks)} knowledge chunks")
+                    logger.debug(f"Added {len(knowledge_result.chunks)} knowledge chunks")
             except Exception as e:
                 logger.warning(f"Knowledge retrieval failed: {e}")
 
@@ -472,15 +467,19 @@ def run_one_turn(
                 error_message="VLM returned no action",
             )
 
-        logger.info(f"  Action: {action.action}")
-        logger.info(f"  Coords: ({action.x}, {action.y})")
+        extra = {}
         if action.action == "drag":
-            logger.info(f"  End coords: ({action.end_x}, {action.end_y})")
+            extra["End Coords"] = f"({action.end_x}, {action.end_y})"
         if action.key:
-            logger.info(f"  Key: {action.key}")
+            extra["Key"] = action.key
         if action.text:
-            logger.info(f"  Text: {action.text}")
-        logger.info(f"  Reasoning: {action.reasoning}")
+            extra["Text"] = action.text
+        rl.action_result(
+            action_type=action.action,
+            coords=(action.x, action.y),
+            reasoning=action.reasoning or "",
+            extra=extra or None,
+        )
 
         # Update state bridge with current action info
         if state_bridge:
@@ -489,22 +488,19 @@ def run_one_turn(
 
     # Step 4: Execution
     if delay_before_action > 0:
-        logger.info(f"  Waiting {delay_before_action}s before execution...")
         time.sleep(delay_before_action)
 
-    logger.info("[4/6] Executing action...")
     try:
         execute_action(action, screen_w, screen_h, normalizing_range)
-        logger.info("  Action executed.")
+        rl.execution_status(True)
         execution_result = "success"
         error_message = ""
     except Exception as e:
-        logger.error(f"  Action execution failed: {e}")
+        rl.execution_status(False, str(e))
         execution_result = "failed"
         error_message = str(e)
 
     # Step 5: Record action in context
-    logger.info("[5/6] Recording action in context...")
     ctx.record_action(
         action_type=action.action,
         primitive=primitive_name,
@@ -519,17 +515,16 @@ def run_one_turn(
     )
 
     # Step 6: Macro-turn tracking (fallback: keyword-based detection from old flow)
-    logger.info("[6/6] Tracking macro-turn...")
     if macro_turn_manager:
         macro_turn_manager.record_micro_turn(primitive_name, action.reasoning or "")
         # Keyword-based fallback detection (supplements router-based detection above)
         if not router_result.is_new_turn and macro_turn_manager.is_next_turn_action(primitive_name, action):
             macro_summary = macro_turn_manager.handle_macro_turn_end()
-            logger.info(f"Macro-turn {macro_summary.macro_turn_number} ended (keyword fallback): {macro_summary.llm_summary[:80]}...")
+            logger.debug(f"Macro-turn {macro_summary.macro_turn_number} ended (keyword fallback): {macro_summary.llm_summary[:80]}...")
             if state_bridge:
                 state_bridge.update_macro_turn(macro_summary.macro_turn_number + 1)
 
-    logger.info("Turn complete.")
+    rl.turn_summary(turn_number, primitive_name, action.action, execution_result == "success")
     return TurnSummary(
         turn_number=turn_number,
         primitive=primitive_name,
@@ -589,6 +584,7 @@ def run_multi_turn(
         checkpoint = TurnCheckpoint()
         interrupt_monitor.start()
 
+    rl = RichLogger.get()
     logger.info(
         f"Running {num_turns} turn(s) with router={router_provider.get_provider_name()}/{router_provider.model}, "
         f"planner={planner_provider.get_provider_name()}/{planner_provider.model}"
@@ -598,9 +594,7 @@ def run_multi_turn(
 
     try:
         for turn in range(1, num_turns + 1):
-            logger.info(f"\n{'=' * 60}")
-            logger.info(f"TURN {turn}/{num_turns}")
-            logger.info(f"{'=' * 60}")
+            rl.turn_header(turn, num_turns)
 
             # Pass strategy on first turn or when it was changed at a checkpoint
             turn_strategy = high_level_strategy if (turn == 1 or strategy_changed) else None
@@ -644,13 +638,13 @@ def run_multi_turn(
                 directives = command_queue.drain()
                 for d in directives:
                     if d.directive_type == DirectiveType.STOP:
-                        logger.info("STOP directive received from command queue.")
+                        rl.hitl_event("STOP", "Directive received from command queue.")
                         if agent_gate:
                             agent_gate.set_state(AgentState.STOPPED)
                         stop_requested = True
                         break
                     elif d.directive_type == DirectiveType.PAUSE:
-                        logger.info("PAUSE directive received. Waiting for RESUME...")
+                        rl.hitl_event("PAUSE", "Waiting for RESUME...")
                         if agent_gate:
                             agent_gate.set_state(AgentState.PAUSED)
                         command_queue.wait(timeout=None)
@@ -666,11 +660,11 @@ def run_multi_turn(
                             elif rd.directive_type == DirectiveType.CHANGE_STRATEGY:
                                 high_level_strategy = rd.payload
                                 strategy_changed = True
-                                logger.info(f"Strategy changed to: {rd.payload}")
+                                rl.strategy_update("User Override", rd.payload or "")
                     elif d.directive_type == DirectiveType.CHANGE_STRATEGY:
                         high_level_strategy = d.payload
                         strategy_changed = True
-                        logger.info(f"Strategy changed to: {d.payload}")
+                        rl.strategy_update("User Override", d.payload or "")
             if stop_requested:
                 break
 
@@ -679,25 +673,24 @@ def run_multi_turn(
                 decision = checkpoint.prompt(summary)
 
                 if decision == CheckpointDecision.STOP:
-                    logger.info("User requested stop at checkpoint.")
+                    rl.hitl_event("STOP", "User requested stop at checkpoint.")
                     break
                 elif decision == CheckpointDecision.CHANGE_STRATEGY:
                     new_strategy = checkpoint.prompt_new_strategy()
                     if new_strategy:
                         high_level_strategy = new_strategy
                         strategy_changed = True
-                        logger.info(f"Strategy changed to: {new_strategy}")
+                        rl.strategy_update("User Override", new_strategy)
                     else:
-                        logger.info("No strategy provided, continuing with current strategy.")
+                        logger.debug("No strategy provided, continuing with current strategy.")
 
                 interrupt_monitor.reset()
 
             if turn < num_turns:
-                logger.info(f"Waiting {delay_between_turns}s before next turn...")
                 time.sleep(delay_between_turns)
     finally:
         if interrupt_monitor:
             interrupt_monitor.stop()
 
-    logger.info("\nAll turns completed.")
-    logger.info(f"Context summary: {ctx}")
+    rl.console.print("[bold green]All turns completed.[/bold green]")
+    logger.debug(f"Context summary: {ctx}")

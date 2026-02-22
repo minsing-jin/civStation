@@ -11,9 +11,6 @@ from enum import Enum
 class InputMode(str, Enum):
     """Input modes for HITL interaction."""
 
-    VOICE = "voice"
-    TEXT = "text"
-    AUTO = "auto"  # Try voice first, fallback to text
     CHATAPP = "chatapp"
 
 

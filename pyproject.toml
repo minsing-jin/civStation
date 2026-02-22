@@ -26,6 +26,7 @@ dependencies = [
     "pyaudio>=0.2.14",
     "pyautogui>=0.9.54",
     "pyyaml>=6.0.3",
+    "rich>=13.0",
     "soundfile>=0.13.1",
     "speechrecognition>=3.14.5",
     "typer",

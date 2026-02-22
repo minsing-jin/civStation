@@ -1,17 +1,17 @@
 """
-HITL Input Manager - Unified input handling for Human-in-the-Loop.
+HITL Input Manager - Chat-app-based input handling for Human-in-the-Loop.
 
-Manages both voice and text input providers with automatic fallback support.
+Input is always routed through an external chat application
+(Discord, WhatsApp, etc.).  Local voice/text/auto modes have been removed
+because those are now handled inside the third-party apps themselves.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from computer_use_test.agent.modules.hitl.base_input import InputMode
-from computer_use_test.agent.modules.hitl.text_input import TextInputProvider
-from computer_use_test.agent.modules.hitl.voice_input import STTProvider, VoiceInputProvider
 
 if TYPE_CHECKING:
     from computer_use_test.agent.modules.hitl.chatapp_input import ChatAppInputProvider
@@ -21,170 +21,58 @@ logger = logging.getLogger(__name__)
 
 class HITLInputManager:
     """
-    Unified HITL input manager.
+    HITL input manager that delegates to a chat-app provider.
 
-    Handles input from voice or text sources with automatic fallback
-    from voice to text when voice input is unavailable or fails.
+    Raises RuntimeError if get_input() is called without a connected
+    chatapp_provider (i.e. --chatapp original with no interactive input).
     """
 
     def __init__(
         self,
-        input_mode: InputMode | str = InputMode.TEXT,
-        stt_provider: STTProvider = "whisper",
-        language: str = "ko",
-        voice_timeout: float = 10.0,
-        default_text_prompt: str = "전략을 입력하세요: ",
         chatapp_provider: ChatAppInputProvider | None = None,
     ):
-        """
-        Initialize the HITL input manager.
-
-        Args:
-            input_mode: Input mode ("voice", "text", "auto", or "chatapp")
-            stt_provider: STT provider for voice input ("whisper", "google", "openai")
-            language: Language code for STT
-            voice_timeout: Maximum seconds to wait for voice input
-            default_text_prompt: Default prompt for text input
-            chatapp_provider: Optional ChatAppInputProvider for chat app input
-        """
-        # Convert string to enum if needed
-        if isinstance(input_mode, str):
-            self.input_mode = InputMode(input_mode)
-        else:
-            self.input_mode = input_mode
-
-        # Initialize providers
-        self._text_provider = TextInputProvider(default_prompt=default_text_prompt)
-        self._voice_provider = VoiceInputProvider(
-            stt_provider=stt_provider,
-            language=language,
-            timeout=voice_timeout,
-        )
+        self.input_mode = InputMode.CHATAPP
         self._chatapp_provider = chatapp_provider
 
-        logger.info(f"HITLInputManager initialized: mode={self.input_mode.value}, stt={stt_provider}, voice_available={self._voice_provider.is_available()}")
+        if chatapp_provider is not None:
+            logger.info("HITLInputManager initialized: chatapp provider connected")
+        else:
+            logger.info("HITLInputManager initialized: no chatapp provider (original mode)")
 
     def get_input(self, prompt: str = "") -> str:
         """
-        Get input based on configured mode.
-
-        In AUTO mode, tries voice first and falls back to text on failure.
+        Get input via the configured chat-app provider.
 
         Args:
-            prompt: Optional prompt to display
+            prompt: Prompt text to send to the user
 
         Returns:
             User input as string
+
+        Raises:
+            RuntimeError: If no chatapp provider is connected
         """
-        if self.input_mode == InputMode.CHATAPP:
-            return self._get_chatapp_input(prompt)
-
-        elif self.input_mode == InputMode.VOICE:
-            return self._get_voice_input_with_fallback(prompt)
-
-        elif self.input_mode == InputMode.AUTO:
-            return self._get_auto_input(prompt)
-
-        else:  # TEXT
-            return self._text_provider.get_input(prompt)
-
-    def _get_voice_input_with_fallback(self, prompt: str) -> str:
-        """Get voice input, falling back to text if unavailable."""
-        if self._voice_provider.is_available():
-            try:
-                return self._voice_provider.get_input(prompt)
-            except RuntimeError as e:
-                logger.warning(f"Voice input failed: {e}, falling back to text")
-                print(f"⚠️ 음성 입력 실패: {e}")
-                print("📝 텍스트 입력으로 전환합니다.")
-                return self._text_provider.get_input(prompt)
-        else:
-            logger.warning("Voice input unavailable, falling back to text")
-            print("⚠️ 음성 입력을 사용할 수 없습니다. 텍스트로 입력해주세요.")
-            return self._text_provider.get_input(prompt)
-
-    def _get_auto_input(self, prompt: str) -> str:
-        """Try voice first, fallback to text on failure."""
-        if self._voice_provider.is_available():
-            try:
-                print("🔊 AUTO 모드: 음성 입력을 시도합니다...")
-                return self._voice_provider.get_input(prompt)
-            except RuntimeError as e:
-                logger.warning(f"Voice input failed in AUTO mode: {e}")
-                print(f"⚠️ 음성 입력 실패: {e}")
-                print("📝 텍스트 입력으로 전환합니다.")
-                return self._text_provider.get_input(prompt)
-        else:
-            # Voice not available, use text directly
-            return self._text_provider.get_input(prompt)
-
-    def _get_chatapp_input(self, prompt: str) -> str:
-        """Get input from chat app, falling back to text if unavailable."""
         if self._chatapp_provider and self._chatapp_provider.is_available():
             try:
                 return self._chatapp_provider.get_input(prompt)
             except RuntimeError as e:
-                logger.warning(f"Chat app input failed: {e}, falling back to text")
-                print(f"Chat app input failed: {e}")
-                print("Falling back to text input.")
-                return self._text_provider.get_input(prompt)
-        else:
-            logger.warning("Chat app input unavailable, falling back to text")
-            print("Chat app is not connected. Falling back to text input.")
-            return self._text_provider.get_input(prompt)
+                logger.warning(f"Chat app input failed: {e}")
+                raise
 
-    def is_voice_available(self) -> bool:
-        """
-        Check if voice input is available.
+        raise RuntimeError("No chat app provider connected. Set --chatapp discord or --chatapp whatsapp with proper credentials.")
 
-        Returns:
-            True if voice input can be used
-        """
-        return self._voice_provider.is_available()
+    def is_available(self) -> bool:
+        """Return True if a chatapp provider is connected."""
+        return self._chatapp_provider is not None and self._chatapp_provider.is_available()
 
     def get_current_mode(self) -> InputMode:
-        """
-        Get the current input mode.
-
-        Returns:
-            Current InputMode
-        """
         return self.input_mode
 
-    def set_mode(self, mode: InputMode | str) -> None:
+    def get_effective_mode(self) -> str:
         """
-        Change the input mode.
-
-        Args:
-            mode: New input mode ("voice", "text", or "auto")
-        """
-        if isinstance(mode, str):
-            self.input_mode = InputMode(mode)
-        else:
-            self.input_mode = mode
-        logger.info(f"Input mode changed to: {self.input_mode.value}")
-
-    def get_effective_mode(self) -> Literal["voice", "text", "chatapp"]:
-        """
-        Get the effective mode that will be used for input.
-
-        For AUTO mode, returns the mode that would actually be used
-        based on voice availability.
+        Backward-compatible mode accessor used by QueueListener.
 
         Returns:
-            "voice", "text", or "chatapp"
+            String mode label (e.g. "chatapp")
         """
-        if self.input_mode == InputMode.CHATAPP:
-            if self._chatapp_provider and self._chatapp_provider.is_available():
-                return "chatapp"
-            return "text"
-        elif self.input_mode == InputMode.TEXT:
-            return "text"
-        elif self.input_mode == InputMode.VOICE:
-            if self._voice_provider.is_available():
-                return "voice"
-            return "text"
-        else:  # AUTO
-            if self._voice_provider.is_available():
-                return "voice"
-            return "text"
+        return self.input_mode.value

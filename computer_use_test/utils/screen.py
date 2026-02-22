@@ -77,7 +77,7 @@ def execute_action(
         if len(action) == 0:
             logger.warning("Empty action list")
             return
-        logger.info(f"List input detected, using first of {len(action)} items")
+        logger.debug(f"List input detected, using first of {len(action)} items")
         action = action[0]
 
     # Handle dict input (legacy compatibility)
@@ -86,7 +86,7 @@ def execute_action(
 
     action_type = action.action
     reasoning = action.reasoning
-    logger.info(f"Action: {action_type} | Reasoning: {reasoning}")
+    logger.debug(f"Action: {action_type} | Reasoning: {reasoning}")
 
     # Validate action type
     if not action_type or action_type not in ["click", "double_click", "drag", "press", "type"]:
@@ -99,7 +99,7 @@ def execute_action(
         real_x = norm_to_real(action.x, screen_w, normalizing_range)
         real_y = norm_to_real(action.y, screen_h, normalizing_range)
 
-        logger.info(f"Click: normalized({action.x}, {action.y}) → real({real_x}, {real_y}) - {action.button}")
+        logger.debug(f"Click: normalized({action.x}, {action.y}) → real({real_x}, {real_y}) - {action.button}")
         pyautogui.moveTo(real_x, real_y, duration=0.5)
         pyautogui.click(button=action.button)
 
@@ -107,7 +107,7 @@ def execute_action(
         real_x = norm_to_real(action.x, screen_w, normalizing_range)
         real_y = norm_to_real(action.y, screen_h, normalizing_range)
 
-        logger.info(f"Double-click: normalized({action.x}, {action.y}) → real({real_x}, {real_y}) - {action.button}")
+        logger.debug(f"Double-click: normalized({action.x}, {action.y}) → real({real_x}, {real_y}) - {action.button}")
         pyautogui.moveTo(real_x, real_y, duration=0.5)
         pyautogui.doubleClick(button=action.button)
 
@@ -117,7 +117,7 @@ def execute_action(
         end_x = norm_to_real(action.end_x, screen_w, normalizing_range)
         end_y = norm_to_real(action.end_y, screen_h, normalizing_range)
 
-        logger.info(f"Drag: ({action.x},{action.y})→({action.end_x},{action.end_y}) real ({start_x},{start_y})→({end_x},{end_y})")
+        logger.debug(f"Drag: ({action.x},{action.y})→({action.end_x},{action.end_y}) real ({start_x},{start_y})→({end_x},{end_y})")
 
         # Move to start position
         pyautogui.moveTo(start_x, start_y, duration=0.3)
@@ -131,7 +131,7 @@ def execute_action(
     elif action_type == "press":
         key = action.key
         if key:
-            logger.info(f"Press key: {key}")
+            logger.debug(f"Press key: {key}")
             pyautogui.press(key)
         else:
             logger.error(f"Press action missing 'key' field. Full action: {action}")
@@ -139,7 +139,7 @@ def execute_action(
     elif action_type == "type":
         text = action.text
         if text:
-            logger.info(f"Type text: {text}")
+            logger.debug(f"Type text: {text}")
             pyautogui.write(text, interval=0.1)
         else:
             logger.error(f"Type action missing 'text' field. Full action: {action}")
