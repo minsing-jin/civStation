@@ -58,7 +58,7 @@ class BaseVLMProvider(ABC):
         self,
         content_parts: list,
         temperature: float = 0.7,
-        max_tokens: int = 4096,
+        max_tokens: int = 8192,
     ) -> VLMResponse:
         """
         Send content parts to the VLM API and return raw response.
@@ -102,7 +102,7 @@ class BaseVLMProvider(ABC):
         prompt: str,
         image_path: str | Path | None = None,
         temperature: float = 0.7,
-        max_tokens: int = 4096,
+        max_tokens: int = 8192,
     ) -> VLMResponse:
         """Call VLM with text prompt + optional image file."""
         content_parts = []
@@ -117,7 +117,7 @@ class BaseVLMProvider(ABC):
         image_path: str | Path | None,
         primitive_name: str,
         temperature: float = 0.7,
-        max_tokens: int = 4096,
+        max_tokens: int = 8192,
     ) -> AgentPlan:
         """Convenience: call VLM and parse response in one step."""
         response = self.call_vlm(prompt, image_path, temperature, max_tokens)

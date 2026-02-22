@@ -229,11 +229,7 @@ class StrategyPlanner(BaseStrategyPlanner):
         """Call the VLM with a text-only prompt."""
         content_parts = [self.provider._build_text_content(prompt)]
 
-        response = self.provider._send_to_api(
-            content_parts,
-            temperature=0.3,
-            max_tokens=2048,
-        )
+        response = self.provider._send_to_api(content_parts, temperature=0.3)
 
         return response.content
 

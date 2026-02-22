@@ -74,7 +74,7 @@ class GPTVLMProvider(BaseVLMProvider):
         self,
         content_parts: list,
         temperature: float = 0.7,
-        max_tokens: int = 4096,
+        max_tokens: int = 8192,
     ) -> VLMResponse:
         """Send content parts to OpenAI Chat Completions API."""
         try:
