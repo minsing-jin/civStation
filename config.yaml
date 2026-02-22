@@ -21,6 +21,7 @@ strategy: "과학 승리에 집중하고 정찰을 강화해."
 hitl: true
 autonomous: true
 hitl-mode: async
+# wait-for-start: true
 
 # --- 4. Chat App Integration ---
 chatapp: original   # original | discord | whatsapp
@@ -35,3 +36,8 @@ chatapp: original   # original | discord | whatsapp
 # --- 5. Knowledge Retrieval ---
 # knowledge-index: "./data/civopedia.json"
 # enable-web-search: false
+
+# --- 6. Control API / Status UI ---
+control-api: true   # start/pause/resume/stop API only
+status-ui: true     # dashboard + control API
+# status-port: 8765

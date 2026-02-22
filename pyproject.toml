@@ -20,6 +20,7 @@ dependencies = [
     "dotenv>=0.9.9",
     "fastapi>=0.129.0",
     "google-genai>=1.60.0",
+    "mss>=9.0.0",
     "openai>=2.16.0",
     "pillow>=12.1.0",
     "pre-commit>=4.5.1",

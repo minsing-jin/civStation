@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 # Keywords that map to directive types
 _STOP_KEYWORDS = {"stop", "quit", "exit", "중지", "종료"}
 _PAUSE_KEYWORDS = {"pause", "일시정지", "멈춰"}
-_RESUME_KEYWORDS = {"resume", "계속", "재개"}
+_RESUME_KEYWORDS = {"resume", "start", "start agent", "계속", "재개", "시작", "에이전트 시작"}
 
 
 class QueueListener:

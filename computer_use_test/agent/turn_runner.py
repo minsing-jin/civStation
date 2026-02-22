@@ -98,14 +98,15 @@ def parse_args() -> configargparse.Namespace:
     know_group.add_argument("--knowledge-index", help="Path to Civopedia JSON")
     know_group.add_argument("--enable-web-search", action="store_true", help="Enable Tavily web search")
 
-    # --- Group 6: Status UI ---
-    ui_group = parser.add_argument_group("Status UI")
-    ui_group.add_argument("--status-ui", action="store_true", help="Enable real-time status dashboard")
-    ui_group.add_argument("--status-port", type=int, default=8765, help="Status UI port (default: 8765)")
+    # --- Group 6: Control API & Status UI ---
+    ui_group = parser.add_argument_group("Control API & Status UI")
+    ui_group.add_argument("--status-ui", action="store_true", help="Enable real-time status dashboard (includes control API)")
+    ui_group.add_argument("--control-api", action="store_true", help="Enable start/pause/resume/stop API server")
+    ui_group.add_argument("--status-port", type=int, default=8765, help="Control API / Status UI port (default: 8765)")
     ui_group.add_argument(
         "--wait-for-start",
         action="store_true",
-        help="Wait for external start signal via API before running (requires --status-ui)",
+        help="Wait for external start signal via API before running (requires --control-api/--status-ui or --relay-url)",
     )
 
     # --- Group 7: Relay ---
@@ -311,7 +312,9 @@ def main():
     agent_gate = AgentGate(command_queue)
 
     relay_client = None
-    if args.status_ui:
+    enable_control_api = bool(args.status_ui or getattr(args, "control_api", False))
+
+    if enable_control_api:
         try:
             from computer_use_test.agent.modules.hitl.status_ui.server import StatusServer
             from computer_use_test.agent.modules.hitl.status_ui.state_bridge import AgentStateBridge
@@ -343,11 +346,14 @@ def main():
             )
             status_server = StatusServer(state_bridge, command_queue, ws_manager=ws_manager, agent_gate=agent_gate, port=args.status_port)
             status_server.start()
-            logger.info(f"Status UI available at http://localhost:{args.status_port}")
+            if args.status_ui:
+                logger.info(f"Status UI available at http://localhost:{args.status_port}")
+            else:
+                logger.info(f"Control API available at http://localhost:{args.status_port}")
         except ImportError:
-            logger.warning("Status UI requires fastapi and uvicorn. Install with: pip install 'computer-use-test[ui]'")
+            logger.warning("Control API requires fastapi and uvicorn. Install with: pip install 'computer-use-test[ui]'")
         except Exception as e:
-            logger.warning(f"Status UI init failed: {e}")
+            logger.warning(f"Control API init failed: {e}")
     elif getattr(args, "relay_url", None):
         # Relay without status UI (headless mode)
         try:
@@ -372,11 +378,21 @@ def main():
     if debug_options.any_enabled():
         logger.info(f"Debug features enabled: {debug_options}")
 
-    # Wait for external start signal if requested
-    if args.wait_for_start:
-        if not args.status_ui:
-            logger.warning("--wait-for-start requires --status-ui. Starting immediately.")
-        else:
+    # Wait for external start signal.
+    # In async HITL mode, default to waiting to prevent unintended autonomous execution.
+    should_wait_for_start = bool(args.wait_for_start)
+    if not should_wait_for_start and args.hitl_mode == "async":
+        should_wait_for_start = True
+        logger.info("Async HITL mode detected: auto-waiting for external start signal.")
+
+    if should_wait_for_start:
+        has_status_control = bool(enable_control_api or getattr(args, "relay_url", None))
+        has_chatapp_control = bool(chatapp_input_provider is not None)
+
+        if not (has_status_control or has_chatapp_control):
+            logger.error("Manual start required, but no control channel is enabled. Use --control-api/--status-ui, --relay-url, or chatapp input provider.")
+            return
+        elif has_status_control:
             logger.info("Agent ready. Waiting for external start signal (POST /api/agent/start)...")
             if state_bridge:
                 state_bridge.broadcast_agent_phase("대기 중 — 시작 신호 대기")
@@ -385,6 +401,40 @@ def main():
                 logger.info("STOP received before start. Exiting.")
                 return
             logger.info("Start signal received. Beginning execution.")
+        else:
+            from computer_use_test.agent.modules.hitl.agent_gate import AgentState
+            from computer_use_test.agent.modules.hitl.command_queue import DirectiveType
+
+            logger.info("Agent ready. Waiting for chatapp start command (resume/start)...")
+            if state_bridge:
+                state_bridge.broadcast_agent_phase("대기 중 — chatapp 시작 신호 대기")
+
+            while True:
+                command_queue.wait(timeout=None)
+                pending = command_queue.drain()
+                should_start = False
+                should_stop = False
+                keep: list = []
+
+                for d in pending:
+                    if d.directive_type == DirectiveType.STOP:
+                        should_stop = True
+                    elif d.directive_type == DirectiveType.RESUME:
+                        should_start = True
+                    else:
+                        keep.append(d)
+
+                # Keep non-control directives so they can be processed after start.
+                for d in keep:
+                    command_queue.push(d)
+
+                if should_stop:
+                    logger.info("STOP received before start. Exiting.")
+                    return
+                if should_start:
+                    agent_gate.set_state(AgentState.RUNNING)
+                    logger.info("Chatapp start signal received. Beginning execution.")
+                    break
     else:
         # Auto-start: set gate to running immediately
         from computer_use_test.agent.modules.hitl.agent_gate import AgentState

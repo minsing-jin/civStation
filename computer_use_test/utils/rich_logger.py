@@ -53,7 +53,7 @@ class RichLogger:
         table.add_row("Primitive", f"[green]{primitive}[/green]")
         table.add_row("Game Turn", str(game_turn) if game_turn is not None else "-")
         table.add_row("Turns", f"macro={macro_turn}  micro={micro_turn}")
-        table.add_row("Reasoning", reasoning[:120] if reasoning else "-")
+        table.add_row("Reasoning", reasoning if reasoning else "-")
 
         self.console.print(table)
 
@@ -72,7 +72,7 @@ class RichLogger:
         table.add_row("Type", f"[cyan]{action_type}[/cyan]")
         if coords:
             table.add_row("Coords", f"({coords[0]}, {coords[1]})")
-        table.add_row("Reasoning", reasoning[:120] if reasoning else "-")
+        table.add_row("Reasoning", reasoning if reasoning else "-")
 
         if extra:
             for k, v in extra.items():
@@ -91,7 +91,7 @@ class RichLogger:
         """Display strategy change notification."""
         self.console.print(
             Panel(
-                f"[bold]{victory_goal}[/bold]\n{summary[:120]}",
+                f"[bold]{victory_goal}[/bold]\n{summary}",
                 title="Strategy Update",
                 style="magenta",
                 expand=False,

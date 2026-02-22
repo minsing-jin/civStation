@@ -21,6 +21,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 from computer_use_test.agent.modules.hitl.command_queue import CommandQueue, Directive, DirectiveType
 from computer_use_test.agent.modules.hitl.status_ui.dashboard import DASHBOARD_HTML
+from computer_use_test.agent.modules.hitl.status_ui.screen_streamer import ScreenStreamer
 from computer_use_test.agent.modules.hitl.status_ui.websocket_manager import WebSocketManager
 
 if TYPE_CHECKING:
@@ -72,6 +73,7 @@ class StatusServer:
         self._port = port
         self._thread: threading.Thread | None = None
         self._server = None
+        self._screen_streamer = ScreenStreamer(self._ws_manager)
 
     def _create_app(self):
         """Build the FastAPI application."""
@@ -159,6 +161,8 @@ class StatusServer:
                 status_code=200 if ok else 409,
             )
 
+        screen_streamer = self._screen_streamer
+
         @app.websocket("/ws")
         async def websocket_endpoint(ws: WebSocket):
             client = ws.client
@@ -166,6 +170,10 @@ class StatusServer:
 
             await ws_manager.connect(ws)
             logger.info(f"WS connected from {client_str}")
+
+            # Auto-start screen streamer when first client connects
+            if not screen_streamer.is_running:
+                screen_streamer.start()
 
             # Send initial status snapshot
             try:
@@ -325,6 +333,7 @@ class StatusServer:
 
     def stop(self) -> None:
         """Signal the server to shut down."""
+        self._screen_streamer.stop()
         if self._server:
             self._server.should_exit = True
         logger.info("StatusServer stop requested")
