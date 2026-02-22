@@ -10,6 +10,7 @@ Endpoints:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import socket
@@ -27,6 +28,7 @@ from computer_use_test.agent.modules.hitl.status_ui.websocket_manager import Web
 if TYPE_CHECKING:
     from computer_use_test.agent.modules.hitl.agent_gate import AgentGate
     from computer_use_test.agent.modules.hitl.status_ui.state_bridge import AgentStateBridge
+    from computer_use_test.utils.chatapp.discussion.discussion_engine import StrategyDiscussion
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +64,7 @@ class StatusServer:
         command_queue: CommandQueue,
         ws_manager: WebSocketManager | None = None,
         agent_gate: AgentGate | None = None,
+        discussion_engine: StrategyDiscussion | None = None,
         host: str = "0.0.0.0",
         port: int = 8765,
     ) -> None:
@@ -69,6 +72,7 @@ class StatusServer:
         self._queue = command_queue
         self._ws_manager = ws_manager or WebSocketManager()
         self._agent_gate = agent_gate
+        self._discussion_engine = discussion_engine
         self._host = host
         self._port = port
         self._thread: threading.Thread | None = None
@@ -159,6 +163,78 @@ class StatusServer:
             return JSONResponse(
                 content={"ok": ok, "state": controller.state.value},
                 status_code=200 if ok else 409,
+            )
+
+        # --- Discussion endpoints ---
+        discussion = self._discussion_engine
+
+        @app.post("/api/discuss")
+        async def discuss(body: dict):
+            if not discussion:
+                return JSONResponse(content={"error": "discussion engine not initialized"}, status_code=503)
+
+            user_id = body.get("user_id", "web_user")
+            message = body.get("message", "").strip()
+            mode_str = body.get("mode", "in_game")
+            language = body.get("language", "ko")
+
+            if not message:
+                return JSONResponse(content={"error": "empty message"}, status_code=400)
+
+            # Get or create session
+            session = discussion.get_active_session(user_id)
+            if not session:
+                from computer_use_test.utils.chatapp.discussion.discussion_schemas import DiscussionMode
+
+                mode_map = {"pre_game": DiscussionMode.PRE_GAME, "in_game": DiscussionMode.IN_GAME, "post_turn": DiscussionMode.POST_TURN}
+                mode = mode_map.get(mode_str, DiscussionMode.IN_GAME)
+                session_id = discussion.create_session(user_id, mode)
+            else:
+                session_id = session.session_id
+
+            # Run VLM call in thread pool to avoid blocking the event loop
+            loop = asyncio.get_running_loop()
+            response = await loop.run_in_executor(None, discussion.process_message, session_id, message, language)
+
+            session = discussion._sessions.get(session_id)
+            msg_count = len(session.messages) if session else 0
+
+            return JSONResponse(content={"session_id": session_id, "response": response, "message_count": msg_count})
+
+        @app.post("/api/discuss/finalize")
+        async def discuss_finalize(body: dict):
+            if not discussion:
+                return JSONResponse(content={"error": "discussion engine not initialized"}, status_code=503)
+
+            user_id = body.get("user_id", "web_user")
+            session = discussion.get_active_session(user_id)
+            if not session:
+                return JSONResponse(content={"error": "no active session"}, status_code=404)
+
+            loop = asyncio.get_running_loop()
+            strategy = await loop.run_in_executor(None, discussion.finalize_session, session.session_id)
+
+            strategy_str = str(strategy) if strategy else None
+            return JSONResponse(content={"ok": True, "strategy": strategy_str})
+
+        @app.get("/api/discuss/status")
+        async def discuss_status(user_id: str = "web_user"):
+            if not discussion:
+                return JSONResponse(content={"error": "discussion engine not initialized"}, status_code=503)
+
+            session = discussion.get_active_session(user_id)
+            if not session:
+                return JSONResponse(content={"active": False, "messages": []})
+
+            messages = [{"role": m.role, "content": m.content} for m in session.messages]
+            return JSONResponse(
+                content={
+                    "active": True,
+                    "session_id": session.session_id,
+                    "mode": session.mode.value,
+                    "message_count": len(messages),
+                    "messages": messages,
+                }
             )
 
         screen_streamer = self._screen_streamer

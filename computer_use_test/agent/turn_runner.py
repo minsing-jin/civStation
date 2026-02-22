@@ -344,7 +344,14 @@ def main():
                 agent_gate=agent_gate,
                 relay_client=relay_client,
             )
-            status_server = StatusServer(state_bridge, command_queue, ws_manager=ws_manager, agent_gate=agent_gate, port=args.status_port)
+            # Create discussion engine for web-based strategy discussion
+            web_discussion_engine = discussion_engine
+            if not web_discussion_engine:
+                from computer_use_test.utils.chatapp.discussion import StrategyDiscussion
+
+                web_discussion_engine = StrategyDiscussion(vlm_provider=planner_provider, context_manager=ctx)
+
+            status_server = StatusServer(state_bridge, command_queue, ws_manager=ws_manager, agent_gate=agent_gate, discussion_engine=web_discussion_engine, port=args.status_port)
             status_server.start()
             if args.status_ui:
                 logger.info(f"Status UI available at http://localhost:{args.status_port}")

@@ -18,6 +18,7 @@ from computer_use_test.utils.chatapp.discussion.discussion_schemas import (
 )
 from computer_use_test.utils.chatapp.discussion.prompts.discussion_prompts import (
     DISCUSSION_FINALIZE_PROMPT,
+    DISCUSSION_LANGUAGE_INSTRUCTION,
     DISCUSSION_SYSTEM_PROMPT,
     DISCUSSION_TURN_FEEDBACK_PROMPT,
 )
@@ -91,7 +92,7 @@ class StrategyDiscussion:
                 return session
         return None
 
-    def process_message(self, session_id: str, user_message: str) -> str:
+    def process_message(self, session_id: str, user_message: str, language: str = "ko") -> str:
         """
         Process a user message in a discussion session.
 
@@ -101,6 +102,7 @@ class StrategyDiscussion:
         Args:
             session_id: Session ID to add the message to
             user_message: User's message text
+            language: Response language code (ko, en, ja, zh). Defaults to "ko".
 
         Returns:
             LLM response string
@@ -120,8 +122,9 @@ class StrategyDiscussion:
         if self.context_manager:
             context_str = f"현재 게임 상태:\n{self.context_manager.get_combined_context()}"
 
-        # Build conversation prompt
-        system_prompt = DISCUSSION_SYSTEM_PROMPT.format(context=context_str)
+        # Build conversation prompt with language instruction
+        lang_instruction = DISCUSSION_LANGUAGE_INSTRUCTION.get(language, DISCUSSION_LANGUAGE_INSTRUCTION["ko"])
+        system_prompt = DISCUSSION_SYSTEM_PROMPT.format(context=context_str, language_instruction=lang_instruction)
 
         # Build conversation as a single prompt (since we use _send_to_api with text content)
         conversation_text = system_prompt + "\n\n"

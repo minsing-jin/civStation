@@ -16,7 +16,7 @@ DISCUSSION_SYSTEM_PROMPT = """\
 - 우선순위, 집중 분야, 즉각적 목표를 구체적으로 논의합니다
 
 대화 규칙:
-- 한국어로 대화합니다
+- {language_instruction}
 - 간결하고 실용적인 조언을 합니다
 - 플레이어의 의견을 존중하되, 더 나은 대안이 있으면 제안합니다
 - 구체적인 건물, 기술, 유닛 이름을 사용합니다
@@ -49,6 +49,13 @@ text 작성 가이드:
 
 토론에서 논의된 내용을 충실히 반영하고, 명시적으로 논의되지 않은 부분은 합리적으로 추론하세요.
 """
+
+DISCUSSION_LANGUAGE_INSTRUCTION = {
+    "ko": "한국어로 대화합니다.",
+    "en": "You MUST respond in English only.",
+    "ja": "日本語で会話してください。",
+    "zh": "请用中文回答。",
+}
 
 DISCUSSION_TURN_FEEDBACK_PROMPT = """\
 턴이 완료되었습니다. 결과를 분석하고 전략 조정이 필요한지 조언해주세요.
