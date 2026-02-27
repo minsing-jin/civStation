@@ -2,7 +2,7 @@
 
 from computer_use_test.agent.modules.primitive.base_primitive import BasePrimitive
 from computer_use_test.agent.modules.router.base_router import PrimitiveRouter
-from computer_use_test.evaluator.civ6.static_eval.interfaces import (
+from computer_use_test.evaluation.evaluator.action_eval.interfaces import (
     BaseEvaluator,
     EvalResult,
     GroundTruth,

@@ -5,7 +5,7 @@ This module re-exports base classes and provides helper utilities
 for action comparison with coordinate tolerance.
 """
 
-from computer_use_test.evaluator.civ6.static_eval.base_static_primitive_evaluator import (
+from computer_use_test.evaluation.evaluator.action_eval.base_static_primitive_evaluator import (
     BaseEvaluator,
     EvalResult,
     GroundTruth,

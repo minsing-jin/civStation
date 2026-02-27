@@ -28,10 +28,10 @@ from computer_use_test.agent.modules.primitive.primitives import (
     UnitOpsPrimitive,
 )
 from computer_use_test.agent.modules.router.router import Civ6MockRouter
-from computer_use_test.evaluator.civ6.static_eval.civ6_eval.civ6_impl import (
+from computer_use_test.evaluation.evaluator.action_eval.civ6_eval.civ6_impl import (
     Civ6StaticEvaluator,
 )
-from computer_use_test.evaluator.civ6.static_eval.interfaces import GroundTruth
+from computer_use_test.evaluation.evaluator.action_eval.interfaces import GroundTruth
 from computer_use_test.utils.llm_provider import create_provider, get_available_providers
 from computer_use_test.utils.llm_provider.base import BaseVLMProvider
 

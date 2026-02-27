@@ -1,7 +1,7 @@
 from computer_use_test.agent.models.civ6_models import AgentPlan, ClickAction, KeyPressAction
 from computer_use_test.agent.modules.primitive.base_primitive import BasePrimitive
 from computer_use_test.agent.modules.router.router import Civ6Router
-from computer_use_test.evaluator.civ6.static_eval.base_static_primitive_evaluator import (
+from computer_use_test.evaluation.evaluator.action_eval.base_static_primitive_evaluator import (
     BaseEvaluator,
     EvalResult,
     GroundTruth,

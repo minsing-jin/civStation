@@ -8,7 +8,7 @@ with the specified tolerance for different action types.
 import pytest
 
 from computer_use_test.agent.models.schema import ClickAction, DragAction, KeyPressAction
-from computer_use_test.evaluator.civ6.static_eval.civ6_eval.civ6_impl import Civ6StaticEvaluator
+from computer_use_test.evaluation.evaluator.action_eval.civ6_eval.civ6_impl import Civ6StaticEvaluator
 
 
 @pytest.fixture

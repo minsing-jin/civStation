@@ -14,7 +14,7 @@ from computer_use_test.agent.models.schema import (
     DragAction,
     KeyPressAction,
 )
-from computer_use_test.evaluator.civ6.static_eval.interfaces import (
+from computer_use_test.evaluation.evaluator.action_eval.interfaces import (
     BaseEvaluator,
     EvalResult,
     GroundTruth,
