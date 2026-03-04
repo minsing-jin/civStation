@@ -91,7 +91,9 @@ def run_evaluation(
                 logger.info(f"  -> ERROR: {result.error}")
             elif result.best_sequence:
                 seq = result.best_sequence
-                logger.info(f"  -> success={seq.strict_success}, prefix={seq.prefix_len}, accuracy={seq.step_accuracy:.2f}")
+                logger.info(
+                    f"  -> success={seq.strict_success}, prefix={seq.prefix_len}, accuracy={seq.step_accuracy:.2f}"
+                )
 
     aggregate = aggregate_results(results)
 

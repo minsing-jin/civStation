@@ -248,7 +248,9 @@ class TestEvaluationPipeline:
 
         # Calculate metrics
         primitive_accuracy = sum(r.primitive_match for r in results) / len(results)
-        _ = sum(r.action_sequence_match for r in results) / len(results)  # TODO: action_accuracy unused. It will be implemented later.
+        _ = sum(r.action_sequence_match for r in results) / len(
+            results
+        )  # TODO: action_accuracy unused. It will be implemented later.
 
         # Primitive routing should be 100% with mock router (keyword-based)
         assert primitive_accuracy == 1.0, "Keyword-based routing should be 100% accurate"

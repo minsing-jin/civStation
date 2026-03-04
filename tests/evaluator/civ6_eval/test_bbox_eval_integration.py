@@ -48,7 +48,9 @@ class PerfectAgentRunner(BaseAgentRunner):
             elif isinstance(gt, GTDragAction):
                 sx, sy = gt.start_bbox.center()
                 ex, ey = gt.end_bbox.center()
-                pred_actions.append(DragAction(type="drag", start_x=int(sx), start_y=int(sy), end_x=int(ex), end_y=int(ey)))
+                pred_actions.append(
+                    DragAction(type="drag", start_x=int(sx), start_y=int(sy), end_x=int(ex), end_y=int(ey))
+                )
             elif isinstance(gt, GTKeyPressAction):
                 pred_actions.append(KeyPressAction(type="press", keys=gt.keys))
             elif isinstance(gt, GTWaitAction):
@@ -63,7 +65,9 @@ class TestEvaluateCase:
             instruction="Click",
             screenshot_path="test.png",
             image_size=ImageSize(width=1000, height=1000),
-            action_sets=[GTActionSet(actions=[GTClickAction(target_bbox=BBox(x_min=80, y_min=180, x_max=120, y_max=220))])],
+            action_sets=[
+                GTActionSet(actions=[GTClickAction(target_bbox=BBox(x_min=80, y_min=180, x_max=120, y_max=220))])
+            ],
         )
 
         class ClickCenterRunner(BaseAgentRunner):
@@ -81,7 +85,9 @@ class TestEvaluateCase:
             instruction="Click",
             screenshot_path="test.png",
             image_size=ImageSize(width=1000, height=1000),
-            action_sets=[GTActionSet(actions=[GTClickAction(target_bbox=BBox(x_min=80, y_min=180, x_max=120, y_max=220))])],
+            action_sets=[
+                GTActionSet(actions=[GTClickAction(target_bbox=BBox(x_min=80, y_min=180, x_max=120, y_max=220))])
+            ],
         )
 
         class ErrorRunner(BaseAgentRunner):

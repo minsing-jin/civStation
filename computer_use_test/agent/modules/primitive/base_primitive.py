@@ -11,5 +11,8 @@ class BasePrimitive(ABC):
 
     @abstractmethod
     def generate_plan_and_action(self, screenshot_path: str) -> AgentPlan:
-        """스크린샷을 받아 구체적인 행동(Action Set)을 반환"""
+        """Generate a concrete action set from a screenshot.
+
+        (스크린샷을 받아 구체적인 행동(Action Set)을 반환)
+        """
         pass

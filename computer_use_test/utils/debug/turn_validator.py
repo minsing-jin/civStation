@@ -55,16 +55,20 @@ class TurnValidator:
             macro_turn: Current macro-turn counter from MacroTurnManager.
         """
         logger.info(_SEP)
+        screen = observed_turn if observed_turn is not None else "N/A"
         logger.info(
-            f"[TurnValidator] micro={micro_turn} | macro_turn=#{macro_turn} | screen_turn={observed_turn if observed_turn is not None else 'N/A'} | new_turn_flag={is_new_turn}"
+            f"[TurnValidator] micro={micro_turn} | macro_turn=#{macro_turn}"
+            f" | screen_turn={screen} | new_turn_flag={is_new_turn}"
         )
 
         # --- Case: turn number not detected ---
         if observed_turn is None:
             self._undetected_streak += 1
             if self._undetected_streak >= 3:
+                streak = self._undetected_streak
                 logger.warning(
-                    f"[TurnValidator] ⚠ Turn number undetected for {self._undetected_streak} consecutive micro-turns. Router may be struggling to read the top-right HUD."
+                    f"[TurnValidator] ⚠ Turn number undetected for {streak} consecutive"
+                    " micro-turns. Router may be struggling to read the top-right HUD."
                 )
             logger.info(_SEP)
             return
@@ -89,14 +93,23 @@ class TurnValidator:
             logger.info(f"[TurnValidator] ✓ Turn advanced normally: {self._last_observed} → {observed_turn}")
 
         elif diff > 1:
-            logger.warning(f"[TurnValidator] ⚠ Turn JUMP: {self._last_observed} → {observed_turn} (Δ={diff}). Possible missed 'Next Turn' detection or save-loaded.")
+            logger.warning(
+                f"[TurnValidator] ⚠ Turn JUMP: {self._last_observed} → {observed_turn}"
+                f" (Δ={diff}). Possible missed 'Next Turn' detection or save-loaded."
+            )
 
         else:  # diff < 0
-            logger.warning(f"[TurnValidator] ⚠ Turn BACKWARDS: {self._last_observed} → {observed_turn}. Possible OCR mis-read or game reloaded.")
+            logger.warning(
+                f"[TurnValidator] ⚠ Turn BACKWARDS: {self._last_observed} → {observed_turn}."
+                " Possible OCR mis-read or game reloaded."
+            )
 
         # --- Macro-turn alignment ---
         if is_new_turn:
-            logger.info(f"[TurnValidator] 🔔 Macro-turn boundary: game turn {self._last_observed} → {observed_turn}. Now on macro-turn #{macro_turn}.")
+            logger.info(
+                f"[TurnValidator] 🔔 Macro-turn boundary: game turn {self._last_observed}"
+                f" → {observed_turn}. Now on macro-turn #{macro_turn}."
+            )
 
         self._last_observed = observed_turn
         logger.info(_SEP)

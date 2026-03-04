@@ -296,7 +296,9 @@ def aggregate_results(cases: list[CaseResult]) -> AggregateMetrics:
     per_action = []
     for atype, stats in sorted(type_stats.items()):
         acc = stats["correct"] / stats["total"] if stats["total"] > 0 else 0.0
-        per_action.append(PerActionTypeMetric(action_type=atype, total=stats["total"], correct=stats["correct"], accuracy=acc))
+        per_action.append(
+            PerActionTypeMetric(action_type=atype, total=stats["total"], correct=stats["correct"], accuracy=acc)
+        )
 
     return AggregateMetrics(
         total_cases=total,

@@ -1,12 +1,12 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-from computer_use_test.agent.models.civ6_models import Action, AgentPlan
+from computer_use_test.agent.models.schema import Action, AgentPlan
 from computer_use_test.agent.modules.primitive.base_primitive import BasePrimitive
 from computer_use_test.agent.modules.router.base_router import PrimitiveRouter
 
 
-# Ground Truth 데이터 구조
+# Ground truth data structure (Ground Truth 데이터 구조)
 @dataclass
 class GroundTruth:
     screenshot_path: str
@@ -14,17 +14,17 @@ class GroundTruth:
     expected_actions: list[Action]
 
 
-# 평가 결과 데이터 구조
+# Evaluation result data structure (평가 결과 데이터 구조)
 @dataclass
 class EvalResult:
     screenshot_path: str
     selected_primitive: str
     primitive_match: bool
     action_sequence_match: bool
-    levenshtein_distance: int  # Action 순서 유사도 등
+    levenshtein_distance: int  # Action sequence similarity (Action 순서 유사도)
 
 
-# Evaluator 인터페이스 (파이프라인 엔진)
+# Evaluator interface / pipeline engine (Evaluator 인터페이스 / 파이프라인 엔진)
 class BaseEvaluator(ABC):
     def __init__(self, router: PrimitiveRouter, primitives: dict[str, BasePrimitive]):
         self.router = router

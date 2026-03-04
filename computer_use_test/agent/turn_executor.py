@@ -168,13 +168,15 @@ def route_primitive(
     Returns:
         RouterResult with primitive name, reasoning, and turn metadata
     """
-    # TODO: 추후 턴 및 버튼 인식의 정확도와 속도를 높이기 위해,
-    #       단순 VLM 프롬프팅 대신 OCR을 도입하거나 가벼운 Small VLM(sVLM)을
-    #       파인튜닝하여 대체할 것.
+    # TODO: To improve turn/button recognition accuracy and speed,
+    #       consider replacing plain VLM prompting with OCR or a fine-tuned
+    #       small VLM (sVLM).
+    #       (추후 턴 및 버튼 인식의 정확도와 속도를 높이기 위해, OCR 도입 또는 sVLM 파인튜닝 검토)
     global _last_observed_turn  # noqa: PLW0603
 
+    prepared = provider._prepare_pil_image(pil_image)
     content_parts = [
-        provider._build_pil_image_content(pil_image),
+        provider._build_pil_image_content(prepared),
         provider._build_text_content(ROUTER_PROMPT),
     ]
 
@@ -190,7 +192,10 @@ def route_primitive(
 
         # Check for truncation BEFORE attempting JSON parse
         if response.finish_reason in _TRUNCATION_REASONS:
-            logger.warning(f"Router response TRUNCATED (finish_reason={response.finish_reason}). JSON is likely incomplete. Raw response:\n{response.content}")
+            logger.warning(
+                f"Router response TRUNCATED (finish_reason={response.finish_reason}). "
+                f"JSON is likely incomplete. Raw:\n{response.content}"
+            )
 
         content = strip_markdown(response.content)
         data = json.loads(content)
@@ -231,7 +236,10 @@ def route_primitive(
         if response is not None:
             logger.error(f"Raw response:\n{response.content}")
             if response.finish_reason in _TRUNCATION_REASONS:
-                logger.error(f"Response was truncated (finish_reason={response.finish_reason}) -- this is the likely cause of the parse failure.")
+                logger.error(
+                    f"Response was truncated (finish_reason={response.finish_reason})"
+                    " -- this is the likely cause of the parse failure."
+                )
         logger.error("Defaulting to unit_ops_primitive")
         return RouterResult(primitive="unit_ops_primitive")
 
@@ -374,7 +382,9 @@ def run_one_turn(
     # Handle game-turn transition detected by router
     if router_result.is_new_turn and macro_turn_manager:
         macro_summary = macro_turn_manager.handle_macro_turn_end()
-        logger.debug(f"Macro-turn {macro_summary.macro_turn_number} ended (turn {router_result.observed_turn}): {macro_summary.llm_summary[:80]}...")
+        mt_num = macro_summary.macro_turn_number
+        obs_turn = router_result.observed_turn
+        logger.debug(f"Macro-turn {mt_num} ended (turn {obs_turn}): {macro_summary.llm_summary[:80]}...")
         if state_bridge:
             state_bridge.update_macro_turn(macro_summary.macro_turn_number + 1)
 
@@ -412,7 +422,9 @@ def run_one_turn(
         action = queue_result.override_action
         rl.hitl_event("OVERRIDE", f"{action.action} ({action.x}, {action.y})")
         if state_bridge:
-            state_bridge.update_current_action(primitive_name, f"[HITL] {action.action} ({action.x}, {action.y})", action.reasoning)
+            state_bridge.update_current_action(
+                primitive_name, f"[HITL] {action.action} ({action.x}, {action.y})", action.reasoning
+            )
             state_bridge.broadcast_agent_phase("사용자 명령 실행 중")
     else:
         # Step 3: Planning with context (normal VLM flow)
@@ -520,7 +532,8 @@ def run_one_turn(
         # Keyword-based fallback detection (supplements router-based detection above)
         if not router_result.is_new_turn and macro_turn_manager.is_next_turn_action(primitive_name, action):
             macro_summary = macro_turn_manager.handle_macro_turn_end()
-            logger.debug(f"Macro-turn {macro_summary.macro_turn_number} ended (keyword fallback): {macro_summary.llm_summary[:80]}...")
+            mt_num = macro_summary.macro_turn_number
+            logger.debug(f"Macro-turn {mt_num} ended (keyword fallback): {macro_summary.llm_summary[:80]}...")
             if state_bridge:
                 state_bridge.update_macro_turn(macro_summary.macro_turn_number + 1)
 

@@ -169,7 +169,9 @@ class ContextManager:
             # Research needs science output and available techs
             lines.append(f"과학 출력: +{self.global_context.science_per_turn:.1f}/턴")
             if self.global_context.current_research:
-                lines.append(f"연구 중: {self.global_context.current_research} ({self.global_context.research_turns_left}턴)")
+                lines.append(
+                    f"연구 중: {self.global_context.current_research} ({self.global_context.research_turns_left}턴)"
+                )
             if self.global_context.available_techs:
                 lines.append(f"연구 가능: {', '.join(self.global_context.available_techs[:5])}")
 
@@ -177,7 +179,9 @@ class ContextManager:
             # Culture needs culture output and civics
             lines.append(f"문화 출력: +{self.global_context.culture_per_turn:.1f}/턴")
             if self.global_context.current_civic:
-                lines.append(f"사회제도: {self.global_context.current_civic} ({self.global_context.civic_turns_left}턴)")
+                lines.append(
+                    f"사회제도: {self.global_context.current_civic} ({self.global_context.civic_turns_left}턴)"
+                )
             if self.global_context.available_civics:
                 lines.append(f"선택 가능: {', '.join(self.global_context.available_civics[:5])}")
 
@@ -319,7 +323,9 @@ class ContextManager:
         """Update the currently selected unit information."""
         self.primitive_context.update_selected_unit(unit_info)
 
-    def advance_turn(self, primitive_used: str = "", success: bool = True, notes: str = "", flush_actions: bool = False) -> None:
+    def advance_turn(
+        self, primitive_used: str = "", success: bool = True, notes: str = "", flush_actions: bool = False
+    ) -> None:
         """
         Record turn completion and advance to next turn.
 
@@ -429,4 +435,8 @@ class ContextManager:
         }
 
     def __repr__(self) -> str:
-        return f"ContextManager(turn={self.global_context.current_turn}, era={self.global_context.game_era}, strategy={self.high_level_context.current_strategy is not None})"
+        has_strategy = self.high_level_context.current_strategy is not None
+        return (
+            f"ContextManager(turn={self.global_context.current_turn}, "
+            f"era={self.global_context.game_era}, strategy={has_strategy})"
+        )

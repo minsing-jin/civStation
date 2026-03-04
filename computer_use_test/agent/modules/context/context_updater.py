@@ -18,12 +18,15 @@ Write-path safety:
     observation fields, so there is no write–write race.
 """
 
-# TODO: 향후 Model Context Protocol (MCP)를 활용하여 문명 6의 내부 게임 데이터를
-#       직접 뽑아오는 서버를 구축하고, 이 Context Updater에 연결하여
-#       VLM 비전 분석과 게임 네이티브 데이터를 하이브리드로 사용할 것.
-# TODO: 현재는 Unstructured context 형태로 VLM이 모든 정보를 추출하지만, 향후에는 Structured context 형태로 하이브리드 접근 도입
-# TODO: Context Length 관리 — situation_summary 길이 제한, 누적 observations가
-#       HighLevelContext.notes에 쌓일 때 최대 토큰 수 초과하지 않도록 관리할 것.
+# TODO: Build an MCP server to extract native Civ6 game data and combine
+#       it with VLM vision analysis for a hybrid context pipeline.
+#       (MCP를 활용하여 게임 데이터 직접 추출 + VLM 비전 하이브리드)
+# TODO: Migrate from unstructured VLM-extracted context to structured
+#       context with hybrid approach.
+#       (Unstructured → Structured context 하이브리드 접근 도입)
+# TODO: Context length management — cap situation_summary length and
+#       limit cumulative observations so they don't exceed max tokens.
+#       (situation_summary 길이 제한 및 누적 observations 토큰 관리)
 
 from __future__ import annotations
 
@@ -56,12 +59,12 @@ _CONTEXT_EXTRACTION_PROMPT = """\
 {
     "current_turn": 숫자_또는_null,
     "game_era": "시대명_또는_null",
-    "situation_summary": "현재 상황을 전략적으로 2-3줄 요약. 자원 산출량, 연구 진행, 군사 상황 등 포함.",
+    "situation_summary": "2-3줄 전략 요약 (자원, 연구, 군사 상황)",
     "threats": ["위협요소1", "위협요소2"],
     "opportunities": ["기회요소1", "기회요소2"]
 }
 
-situation_summary 예시: "턴 85, 중세시대. 과학 +42/턴, 골드 +15/턴. 대학 연구 중(3턴 남음). 북쪽 국경에 아즈텍 전사 2기 접근 중."
+situation_summary 예시: "턴 85, 중세시대. 과학 +42/턴. 대학 연구 중(3턴). 아즈텍 전사 접근."
 threats 예시: ["아즈텍 전사 2기 북쪽 국경 접근", "골드 수입 낮음 (-3/턴)"]
 opportunities 예시: ["남쪽에 정착 가능한 좋은 위치", "콜로세움 건설 가능"]
 """
@@ -211,4 +214,4 @@ class ContextUpdater:
             threats=threats,
             opportunities=opportunities,
         )
-        logger.debug(f"ContextUpdater wrote observation to high-level context (threats={len(threats)}, opportunities={len(opportunities)})")
+        logger.debug(f"ContextUpdater wrote observation (threats={len(threats)}, opportunities={len(opportunities)})")

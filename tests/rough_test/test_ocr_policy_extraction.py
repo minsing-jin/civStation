@@ -4,9 +4,12 @@ import os
 import shutil  # tempfile 청소용
 import tempfile
 
-import numpy as np
-from paddleocr import PaddleOCR
-from PIL import Image
+import pytest
+
+np = pytest.importorskip("numpy")
+paddleocr = pytest.importorskip("paddleocr")
+from paddleocr import PaddleOCR  # noqa: E402
+from PIL import Image  # noqa: E402
 
 os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
 

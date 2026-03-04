@@ -102,7 +102,10 @@ class GPTVLMProvider(BaseVLMProvider):
             finish_reason = response.choices[0].finish_reason  # "stop" or "length"
 
             if finish_reason == "length":
-                self.logger.warning(f"GPT response TRUNCATED (finish_reason={finish_reason}). Output likely incomplete. Consider increasing max_tokens.")
+                self.logger.warning(
+                    f"GPT response TRUNCATED (finish_reason={finish_reason})."
+                    " Output likely incomplete. Consider increasing max_tokens."
+                )
 
             return VLMResponse(
                 content=response_text,
@@ -124,13 +127,16 @@ class GPTVLMProvider(BaseVLMProvider):
         }
 
     def _build_pil_image_content(self, pil_image) -> object:
-        """Build OpenAI image_url content from PIL image."""
+        """Build OpenAI image_url content from PIL image (JPEG for speed)."""
         import io
 
+        from computer_use_test.utils.screen import VLM_JPEG_QUALITY
+
         buffer = io.BytesIO()
-        pil_image.save(buffer, format="PNG")
+        img = pil_image.convert("RGB") if pil_image.mode != "RGB" else pil_image
+        img.save(buffer, format="JPEG", quality=VLM_JPEG_QUALITY)
         image_data = base64.b64encode(buffer.getvalue()).decode("utf-8")
-        data_url = f"data:image/png;base64,{image_data}"
+        data_url = f"data:image/jpeg;base64,{image_data}"
 
         return {
             "type": "image_url",

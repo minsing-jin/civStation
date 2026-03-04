@@ -46,9 +46,15 @@ class BaseVLMProvider(ABC):
 
     DEFAULT_MODEL: str = ""
 
-    def __init__(self, api_key: str | None = None, model: str | None = None):
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str | None = None,
+        resize_for_vlm: bool = True,
+    ):
         self.api_key = api_key
         self.model = model
+        self.resize_for_vlm = resize_for_vlm
         self.logger = logger
 
     # ==================== Core (implement in subclass) ====================
@@ -94,6 +100,21 @@ class BaseVLMProvider(ABC):
     @abstractmethod
     def get_provider_name(self) -> str:
         pass
+
+    # ==================== Image pre-processing ====================
+
+    def _prepare_pil_image(self, pil_image):
+        """Optionally downscale a PIL image before sending to the VLM.
+
+        When ``self.resize_for_vlm`` is True (the default), the image
+        is resized to a VLM-friendly resolution to reduce token cost
+        and speed up inference.
+        """
+        if self.resize_for_vlm:
+            from computer_use_test.utils.screen import resize_for_vlm
+
+            return resize_for_vlm(pil_image)
+        return pil_image
 
     # ==================== Static Evaluation (file-based) ====================
 
@@ -150,8 +171,9 @@ class BaseVLMProvider(ABC):
         Returns:
             AgentAction with normalized coordinates, or None after all retries exhausted
         """
+        prepared = self._prepare_pil_image(pil_image)
         content_parts = [
-            self._build_pil_image_content(pil_image),
+            self._build_pil_image_content(prepared),
             self._build_text_content(instruction),
         ]
 
@@ -164,7 +186,10 @@ class BaseVLMProvider(ABC):
                 response = self._send_to_api(content_parts, temperature=0.3, max_tokens=16384)
 
                 if response.finish_reason in ("max_tokens", "length", "MAX_TOKENS"):
-                    self.logger.warning(f"[Attempt {attempt}/{self.MAX_RETRIES}] Response TRUNCATED (finish_reason={response.finish_reason})")
+                    self.logger.warning(
+                        f"[Attempt {attempt}/{self.MAX_RETRIES}] Response TRUNCATED"
+                        f" (finish_reason={response.finish_reason})"
+                    )
 
                 action = parse_action_json(response.content)
                 if action is None:

@@ -1,4 +1,4 @@
-from computer_use_test.agent.models.civ6_models import AgentPlan, ClickAction, KeyPressAction
+from computer_use_test.agent.models.schema import AgentPlan, ClickAction, KeyPressAction
 from computer_use_test.agent.modules.primitive.base_primitive import BasePrimitive
 from computer_use_test.agent.modules.router.router import Civ6Router
 from computer_use_test.evaluation.evaluator.action_eval.base_static_primitive_evaluator import (
@@ -7,7 +7,7 @@ from computer_use_test.evaluation.evaluator.action_eval.base_static_primitive_ev
     GroundTruth,
 )
 
-# --- Civ6 Primitives 구현 example---
+# --- Civ6 Primitives implementation example (Civ6 Primitives 구현 예시) ---
 
 
 class Civ6Primitive(BasePrimitive):
@@ -19,11 +19,10 @@ class Civ6Primitive(BasePrimitive):
         return self._name
 
     def generate_plan_and_action(self, screenshot_path: str) -> AgentPlan:
-        # [TODO] 실제 VLM 호출 부분 (여기서는 Mock Return)
-        # prompt = f"Analyze {screenshot_path} for {self.name}..."
-        # response = call_vlm(prompt)
+        # [TODO] Real VLM call goes here (mock return for now)
+        # (실제 VLM 호출 부분 — 여기서는 Mock Return)
 
-        # 예시: 유닛 이동 명령이라고 가정
+        # Example: assume a unit-move command (예시: 유닛 이동 명령)
         return AgentPlan(
             primitive_name=self.name,
             reasoning="Settler needs to move to fresh water.",
@@ -35,23 +34,23 @@ class Civ6Primitive(BasePrimitive):
         )
 
 
-# --- Civ6 Evaluator (비교 로직 포함) ---
+# --- Civ6 Evaluator (includes comparison logic / 비교 로직 포함) ---
 
 
 class Civ6StaticEvaluator(BaseEvaluator):
     def _compare(self, gt: GroundTruth, selected_prim: str, plan: AgentPlan) -> EvalResult:
-        # 1. Primitive 선택 정확도
+        # 1. Primitive selection accuracy (Primitive 선택 정확도)
         prim_match = gt.expected_primitive == selected_prim
 
-        # 2. Action Sequence 정확도 (단순 비교 예시)
-        # 실제로는 좌표의 허용 오차(Tolerance)나 순서의 유사도를 계산해야 함
+        # 2. Action sequence accuracy — simple comparison example
+        # (실제로는 좌표 허용 오차(Tolerance)나 순서 유사도를 계산해야 함)
         actions_match = True
         if len(gt.expected_actions) != len(plan.actions):
             actions_match = False
         else:
             for gt_act, pred_act in zip(gt.expected_actions, plan.actions, strict=False):
-                # Pydantic 모델 비교 (타입과 값이 모두 같아야 함)
-                # 좌표의 경우 ±10 픽셀 정도 여유를 주는 로직 추가 가능
+                # Pydantic model comparison — type and value must match
+                # (좌표의 경우 ±10px 여유를 주는 로직 추가 가능)
                 if gt_act.model_dump(exclude={"description"}) != pred_act.model_dump(exclude={"description"}):
                     actions_match = False
                     break
@@ -61,15 +60,15 @@ class Civ6StaticEvaluator(BaseEvaluator):
             selected_primitive=selected_prim,
             primitive_match=prim_match,
             action_sequence_match=actions_match,
-            levenshtein_distance=0,  # 추후 구현: 편집 거리 알고리즘 적용
+            levenshtein_distance=0,  # TODO: apply edit-distance algorithm (편집 거리 알고리즘 적용)
         )
 
 
-# --- 실행 예시 (Main Loop) ---
+# --- Example runner (실행 예시) ---
 
 
 def run_civ6_evaluation():
-    # 1. Primitives 초기화
+    # 1. Initialize primitives (Primitives 초기화)
     primitives = {
         "unit_ops_primitive": Civ6Primitive("unit_ops_primitive"),
         "country_mayer_primitive": Civ6Primitive("country_mayer_primitive"),
@@ -77,11 +76,11 @@ def run_civ6_evaluation():
         "culture_decision_primitive": Civ6Primitive("culture_decision_primitive"),
     }
 
-    # 2. 파이프라인 생성
+    # 2. Create evaluation pipeline (파이프라인 생성)
     router = Civ6Router()
     evaluator = Civ6StaticEvaluator(router, primitives)
 
-    # 3. Test Set (Ground Truth) 로드 - 실제로는 JSON 파일에서 로드
+    # 3. Load test set — in practice, loaded from JSON (실제로는 JSON 파일에서 로드)
     test_set = [
         GroundTruth(
             screenshot_path="civ6_unit_move_01.png",
@@ -90,14 +89,14 @@ def run_civ6_evaluation():
         )
     ]
 
-    # 4. 루프 실행 (다이어그램의 loop)
+    # 4. Evaluation loop (루프 실행)
     results = []
     for case in test_set:
         print(f"Evaluating {case.screenshot_path}...")
         res = evaluator.evaluate_single(case)
         results.append(res)
 
-    # 5. 최종 Metric 계산
+    # 5. Compute final metrics (최종 Metric 계산)
     accuracy = sum([r.primitive_match and r.action_sequence_match for r in results]) / len(results)
     print(f"Final Accuracy: {accuracy * 100}%")
 

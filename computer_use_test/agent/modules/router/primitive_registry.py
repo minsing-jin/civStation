@@ -1,12 +1,16 @@
 """
 Primitive Registry — Single source of truth for all primitives.
 
-- criteria: Router가 이 primitive를 선택하는 조건 (한국어)
-- prompt: Primitive가 사용하는 action 프롬프트 템플릿
-- priority: Router 프롬프트에서의 판단 우선순위 (낮을수록 먼저 판단)
+Each entry defines:
+- criteria: Condition for the router to select this primitive (Korean, matching game UI)
+  (Router가 이 primitive를 선택하는 조건)
+- prompt: Action prompt template used by the primitive
+  (Primitive가 사용하는 action 프롬프트 템플릿)
+- priority: Evaluation order in the router prompt — lower = checked first
+  (Router 프롬프트에서의 판단 우선순위, 낮을수록 먼저 판단)
 
-새로운 primitive 추가 시 여기에만 추가하면
-ROUTER_PROMPT, PRIMITIVE_NAMES, get_primitive_prompt() 모두 자동 반영됨.
+To add a new primitive, add an entry to PRIMITIVE_REGISTRY below.
+ROUTER_PROMPT, PRIMITIVE_NAMES, and get_primitive_prompt() auto-update.
 """
 
 from dataclasses import dataclass

@@ -10,13 +10,21 @@ Flow:
 3. execute_action() → converts normalized → logical → PyAutoGUI
 """
 
+from __future__ import annotations
+
 import logging
 
 import pyautogui
+from PIL import Image
 
 from computer_use_test.utils.llm_provider.base import AgentAction
 
 logger = logging.getLogger(__name__)
+
+# Default VLM image settings — trade-off between quality and token cost.
+# 1280px long edge keeps game-UI text readable while cutting image tokens ~75%.
+VLM_MAX_LONG_EDGE: int = 1280
+VLM_JPEG_QUALITY: int = 80
 
 
 def capture_screen_pil():
@@ -39,6 +47,37 @@ def capture_screen_pil():
     screenshot = pyautogui.screenshot()
 
     return screenshot, screen_w, screen_h
+
+
+def resize_for_vlm(
+    pil_image: Image.Image,
+    max_long_edge: int = VLM_MAX_LONG_EDGE,
+) -> Image.Image:
+    """Downscale a screenshot so the VLM processes fewer image tokens.
+
+    The aspect ratio is preserved. If the image is already small enough
+    it is returned unchanged.
+
+    Args:
+        pil_image: Original PIL image (e.g. from ``capture_screen_pil``).
+        max_long_edge: Maximum pixels on the longer edge (default 1280).
+
+    Returns:
+        A (possibly resized) PIL image in RGB mode.
+    """
+    w, h = pil_image.size
+    long_edge = max(w, h)
+
+    if long_edge <= max_long_edge:
+        return pil_image.convert("RGB")
+
+    scale = max_long_edge / long_edge
+    new_w = int(w * scale)
+    new_h = int(h * scale)
+
+    resized = pil_image.resize((new_w, new_h), Image.LANCZOS)
+    logger.debug(f"Resized screenshot for VLM: {w}x{h} → {new_w}x{new_h}")
+    return resized.convert("RGB")
 
 
 def norm_to_real(norm_val: int, screen_size: int, normalizing_range: int = 1000) -> int:
@@ -117,7 +156,10 @@ def execute_action(
         end_x = norm_to_real(action.end_x, screen_w, normalizing_range)
         end_y = norm_to_real(action.end_y, screen_h, normalizing_range)
 
-        logger.debug(f"Drag: ({action.x},{action.y})→({action.end_x},{action.end_y}) real ({start_x},{start_y})→({end_x},{end_y})")
+        logger.debug(
+            f"Drag: ({action.x},{action.y})→({action.end_x},{action.end_y}) "
+            f"real ({start_x},{start_y})→({end_x},{end_y})"
+        )
 
         # Move to start position
         pyautogui.moveTo(start_x, start_y, duration=0.3)

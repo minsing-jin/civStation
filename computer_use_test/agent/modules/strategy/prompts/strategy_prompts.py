@@ -48,7 +48,7 @@ primitive_hint 작성 가이드:
 {{
     "victory_goal": "domination",
     "current_phase": "early_expansion",
-    "text": "[군사 전환 전략] 병영 건설을 최우선으로 하고 궁수→성벽으로 방어 인프라 확보. 우선순위: 병영>군사유닛>성벽>캠퍼스. 즉각 목표: 병영, 궁수 2기",
+    "text": "[군사 전환] 병영 최우선, 궁수→성벽 방어 확보. 우선순위: 병영>유닛>성벽>캠퍼스",
     "primitive_hint": "도시 생산 화면이라면 병영을 최우선으로 선택해라"
 }}
 

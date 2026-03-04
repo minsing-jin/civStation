@@ -49,7 +49,10 @@ class DiscordChatApp(BaseChatApp):
         try:
             import discord
         except ImportError as e:
-            raise ImportError("discord.py is required for Discord integration. Install it with: pip install 'computer-use-test[chatapp]'") from e
+            raise ImportError(
+                "discord.py is required for Discord integration. "
+                "Install it with: pip install 'computer-use-test[chatapp]'"
+            ) from e
 
         intents = discord.Intents.default()
         intents.message_content = True

@@ -186,7 +186,11 @@ class StatusServer:
             if not session:
                 from computer_use_test.utils.chatapp.discussion.discussion_schemas import DiscussionMode
 
-                mode_map = {"pre_game": DiscussionMode.PRE_GAME, "in_game": DiscussionMode.IN_GAME, "post_turn": DiscussionMode.POST_TURN}
+                mode_map = {
+                    "pre_game": DiscussionMode.PRE_GAME,
+                    "in_game": DiscussionMode.IN_GAME,
+                    "post_turn": DiscussionMode.POST_TURN,
+                }
                 mode = mode_map.get(mode_str, DiscussionMode.IN_GAME)
                 session_id = discussion.create_session(user_id, mode)
             else:
@@ -311,7 +315,9 @@ class StatusServer:
                             continue
 
                         ok = _control_map[action]()
-                        logger.info(f"WS control '{action}' ({client_str}) → {'ok' if ok else 'rejected: invalid state'}")
+                        logger.info(
+                            f"WS control '{action}' ({client_str}) → {'ok' if ok else 'rejected: invalid state'}"
+                        )
 
                         # Push updated status back immediately
                         try:

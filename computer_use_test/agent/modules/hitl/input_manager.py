@@ -59,7 +59,9 @@ class HITLInputManager:
                 logger.warning(f"Chat app input failed: {e}")
                 raise
 
-        raise RuntimeError("No chat app provider connected. Set --chatapp discord or --chatapp whatsapp with proper credentials.")
+        raise RuntimeError(
+            "No chat app provider connected. Set --chatapp discord or --chatapp whatsapp with proper credentials."
+        )
 
     def is_available(self) -> bool:
         """Return True if a chatapp provider is connected."""
