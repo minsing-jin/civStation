@@ -305,6 +305,24 @@ def main():
     except Exception as e:
         logger.warning(f"ContextUpdater init failed: {e}")
 
+    # 4c. Strategy Updater (background strategy generation)
+    strategy_updater = None
+    if strategy_planner:
+        try:
+            from computer_use_test.agent.modules.strategy.strategy_updater import (
+                StrategyRequest,
+                StrategyTrigger,
+                StrategyUpdater,
+            )
+
+            strategy_updater = StrategyUpdater(ctx, strategy_planner)
+            strategy_updater.start()
+            # Submit initial strategy request
+            strategy_updater.submit(StrategyRequest(StrategyTrigger.INITIAL, human_input=args.strategy))
+            logger.info("StrategyUpdater background worker started")
+        except Exception as e:
+            logger.warning(f"StrategyUpdater init failed: {e}")
+
     # 5. Agent Gate + Status UI (Phase 3)
     agent_gate = None
     state_bridge = None
@@ -474,6 +492,7 @@ def main():
             "context_manager": ctx,
             "strategy_planner": strategy_planner,
             "knowledge_manager": knowledge_manager,
+            "strategy_updater": strategy_updater,
         }
 
         if args.turns == 1:
@@ -504,6 +523,8 @@ def main():
             from computer_use_test.agent.modules.hitl.agent_gate import AgentState
 
             agent_gate.set_state(AgentState.STOPPED)
+        if strategy_updater:
+            strategy_updater.stop()
         if context_updater:
             context_updater.stop()
         if queue_listener:

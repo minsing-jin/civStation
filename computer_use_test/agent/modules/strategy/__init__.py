@@ -18,10 +18,18 @@ from computer_use_test.agent.modules.strategy.strategy_schemas import (
     VictoryType,
     parse_strategy_json,
 )
+from computer_use_test.agent.modules.strategy.strategy_updater import (
+    StrategyRequest,
+    StrategyTrigger,
+    StrategyUpdater,
+)
 
 __all__ = [
     "BaseStrategyPlanner",
     "StrategyPlanner",
+    "StrategyUpdater",
+    "StrategyRequest",
+    "StrategyTrigger",
     "StructuredStrategy",
     "VictoryType",
     "GamePhase",

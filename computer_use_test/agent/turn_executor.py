@@ -55,6 +55,7 @@ if TYPE_CHECKING:
     from computer_use_test.agent.modules.hitl.status_ui.state_bridge import AgentStateBridge
     from computer_use_test.agent.modules.knowledge import KnowledgeManager
     from computer_use_test.agent.modules.strategy import StrategyPlanner
+    from computer_use_test.agent.modules.strategy.strategy_updater import StrategyUpdater
 
 logger = logging.getLogger(__name__)
 
@@ -174,7 +175,12 @@ def route_primitive(
     #       (추후 턴 및 버튼 인식의 정확도와 속도를 높이기 위해, OCR 도입 또는 sVLM 파인튜닝 검토)
     global _last_observed_turn  # noqa: PLW0603
 
-    prepared = provider._prepare_pil_image(pil_image)
+    # Router only classifies the screen — 640px is sufficient and saves ~75% image tokens
+    ROUTER_MAX_LONG_EDGE = 640
+
+    from computer_use_test.utils.screen import resize_for_vlm
+
+    prepared = resize_for_vlm(pil_image, max_long_edge=ROUTER_MAX_LONG_EDGE)
     content_parts = [
         provider._build_pil_image_content(prepared),
         provider._build_text_content(ROUTER_PROMPT),
@@ -299,6 +305,7 @@ def run_one_turn(
     debug_options: DebugOptions | None = None,
     command_queue: CommandQueue | None = None,
     agent_gate: AgentGate | None = None,
+    strategy_updater: StrategyUpdater | None = None,
 ) -> TurnSummary | None:
     """
     Execute one full game turn.
@@ -336,9 +343,16 @@ def run_one_turn(
     ctx = context_manager or ContextManager.get_instance()
     dbg = debug_options or DebugOptions.none()
 
-    # Step 0: Strategy generation/refinement
-    strategy_string = None
-    if strategy_planner:
+    # Step 0: Read strategy (non-blocking when StrategyUpdater is active)
+    if high_level_strategy:
+        # CLI --strategy flag takes top priority
+        strategy_string = high_level_strategy
+    elif strategy_updater:
+        # Background StrategyUpdater keeps ctx updated — just read the latest
+        strategy_string = ctx.get_strategy_string()
+    elif strategy_planner:
+        # Fallback: synchronous VLM call (legacy path when no updater)
+        strategy_string = None
         try:
             structured_strategy = strategy_planner.generate_strategy(
                 context=ctx,
@@ -350,8 +364,6 @@ def run_one_turn(
         except Exception as e:
             logger.warning(f"Strategy generation failed: {e}, using fallback")
             strategy_string = high_level_strategy
-    elif high_level_strategy:
-        strategy_string = high_level_strategy
     else:
         strategy_string = ctx.get_strategy_string()
 
@@ -379,6 +391,13 @@ def run_one_turn(
     if context_updater:
         context_updater.submit(pil_image)
 
+    # Submit strategy triggers based on routing result
+    if strategy_updater and router_result.is_new_turn:
+        from computer_use_test.agent.modules.strategy.strategy_updater import StrategyRequest, StrategyTrigger
+
+        strategy_updater.submit(StrategyRequest(StrategyTrigger.NEW_GAME_TURN))
+        strategy_updater.submit_if_periodic_due()
+
     # Handle game-turn transition detected by router
     if router_result.is_new_turn and macro_turn_manager:
         macro_summary = macro_turn_manager.handle_macro_turn_end()
@@ -403,7 +422,16 @@ def run_one_turn(
 
     primitive_hint = ""
     if queue_result.strategy_override:
-        if strategy_planner:
+        if strategy_updater:
+            # Non-blocking: submit to background worker + apply text override immediately
+            from computer_use_test.agent.modules.strategy.strategy_updater import StrategyRequest, StrategyTrigger
+
+            strategy_updater.submit(
+                StrategyRequest(StrategyTrigger.HITL_CHANGE, human_input=queue_result.strategy_override)
+            )
+            strategy_string = f"[사용자 최우선 지시] {queue_result.strategy_override}\n\n{strategy_string or ''}"
+            rl.strategy_update("HITL Override", queue_result.strategy_override or "")
+        elif strategy_planner:
             try:
                 refined = strategy_planner.refine_strategy(queue_result.strategy_override, ctx)
                 ctx.set_strategy(refined)
@@ -435,6 +463,10 @@ def run_one_turn(
         logger.debug(f"Planning: generating action for {primitive_name}...")
 
         context_string = ctx.get_context_for_primitive(primitive_name)
+
+        # Re-read strategy right before VLM call to pick up background updates
+        if strategy_updater and not high_level_strategy:
+            strategy_string = ctx.get_strategy_string()
 
         if dbg.log_context:
             log_context(primitive_name, strategy_string, context_string)
@@ -567,6 +599,7 @@ def run_multi_turn(
     context_updater: ContextUpdater | None = None,
     debug_options: DebugOptions | None = None,
     agent_gate: AgentGate | None = None,
+    strategy_updater: StrategyUpdater | None = None,
 ) -> None:
     """
     Execute multiple consecutive turns.
@@ -639,6 +672,7 @@ def run_multi_turn(
                 debug_options=debug_options,
                 command_queue=command_queue,
                 agent_gate=agent_gate,
+                strategy_updater=strategy_updater,
             )
 
             if summary is None or not summary.success:
