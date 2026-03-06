@@ -168,8 +168,17 @@ class ContextUpdater:
 
     def _analyze_and_update(self, pil_image) -> None:
         """Call VLM to extract strategic observations and write to high-level context."""
+        import time as _time
+
+        from computer_use_test.utils.screen import resize_for_vlm
+
+        t0 = _time.monotonic()
+
+        # 1280px — same as Planner. High enough for UI text/numbers,
+        # avoids sending raw Retina resolution (3600px+) which wastes tokens.
+        prepared = resize_for_vlm(pil_image, max_long_edge=1280)
         content_parts = [
-            self._vlm._build_pil_image_content(pil_image),
+            self._vlm._build_pil_image_content(prepared),
             self._vlm._build_text_content(_CONTEXT_EXTRACTION_PROMPT),
         ]
 
@@ -181,6 +190,8 @@ class ContextUpdater:
         except json.JSONDecodeError as e:
             logger.warning(f"ContextUpdater: invalid JSON from VLM: {e}")
             return
+
+        elapsed = _time.monotonic() - t0
 
         # --- Minimal GlobalContext update (turn tracking only) ---
         turn_val = data.get("current_turn")
@@ -215,3 +226,14 @@ class ContextUpdater:
             opportunities=opportunities,
         )
         logger.debug(f"ContextUpdater wrote observation (threats={len(threats)}, opportunities={len(opportunities)})")
+
+        # Update Rich dashboard with context results
+        from computer_use_test.utils.rich_logger import RichLogger
+
+        RichLogger.get().update_context(
+            turn=global_updates.get("current_turn"),
+            era=global_updates.get("game_era"),
+            threats=threats,
+            opportunities=opportunities,
+            duration=elapsed,
+        )

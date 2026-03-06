@@ -13,6 +13,8 @@ To add a new primitive, add an entry to PRIMITIVE_REGISTRY below.
 ROUTER_PROMPT, PRIMITIVE_NAMES, and get_primitive_prompt() auto-update.
 """
 
+import logging
+import warnings
 from dataclasses import dataclass
 
 from computer_use_test.utils.prompts.primitive_prompt import (
@@ -22,24 +24,25 @@ from computer_use_test.utils.prompts.primitive_prompt import (
     DIPLOMATIC_PROMPT,
     GOVERNOR_PROMPT,
     JSON_FORMAT_INSTRUCTION,
+    MULTI_ACTION_SEQUENCE_JSON_FORMAT_INSTRUCTION,
     POLICY_PROMPT,
     POPUP_PROMPT,
     RESEARCH_MANAGER_PROMPT,
     UNIT_OPS_PROMPT,
 )
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class RouterResult:
     """Result from the Router's screenshot classification.
 
-    Contains the selected primitive and turn-recognition metadata.
+    Turn detection is handled by TurnDetector (background thread).
     """
 
     primitive: str
     reasoning: str = ""
-    observed_turn: int | None = None  # Turn number read from the screen (top-right)
-    is_new_turn: bool = False  # True when the in-game turn number has incremented
 
 
 # ==============================================================================
@@ -114,26 +117,65 @@ def _build_router_prompt() -> str:
 
     criteria_block = "\n".join(criteria_lines)
 
-    return f"""문명6 스크린샷을 분류하고 우상단 턴 숫자를 읽어라.
+    return f"""문명6 스크린샷을 분류해.
 우선순위 순서대로 판단:
 
 {criteria_block}
 
 해당 없으면 "popup_primitive" (다음 턴).
 JSON만 응답:
-{{"primitive":"카테고리","reasoning":"이유","turn_number":숫자_또는_null}}
+{{"primitive":"카테고리","reasoning":"이유"}}
 """
 
 
 ROUTER_PROMPT = _build_router_prompt()
 
 
+# ==============================================================================
+# Primitive ↔ Korean label mapping (matches primitive_directives keys)
+# ==============================================================================
+PRIMITIVE_TO_KOREAN: dict[str, str] = {
+    "unit_ops_primitive": "유닛 조작",
+    "popup_primitive": "팝업",
+    "governor_primitive": "총독",
+    "research_select_primitive": "기술 연구",
+    "science_decision_primitive": "기술 연구",  # shares key with research_select
+    "city_production_primitive": "도시 생산",
+    "culture_decision_primitive": "사회 제도",
+    "diplomatic_primitive": "외교",
+    "combat_primitive": "전투",
+    "policy_primitive": "정책",
+}
+
+
+def get_directive_for_primitive(
+    primitive_name: str,
+    primitive_directives: dict[str, str],
+) -> str | None:
+    """Look up the matching directive from strategy.primitive_directives.
+
+    Args:
+        primitive_name: Internal primitive name (e.g. "unit_ops_primitive")
+        primitive_directives: Korean-keyed dict from StructuredStrategy
+
+    Returns:
+        The directive string, or None if no match found.
+    """
+    korean_key = PRIMITIVE_TO_KOREAN.get(primitive_name)
+    if korean_key is None:
+        logger.warning(f"No Korean mapping for primitive '{primitive_name}'")
+        return None
+    return primitive_directives.get(korean_key)
+
+
 def get_primitive_prompt(
     primitive_name: str,
     normalizing_range: int = 1000,
     high_level_strategy: str | None = None,
-    context: str | None = None,
+    recent_actions: str | None = None,
     hitl_directive: str | None = None,
+    # Deprecated — kept for backward compat
+    context: str | None = None,
     **kwargs,
 ) -> str:
     """
@@ -144,11 +186,10 @@ def get_primitive_prompt(
         normalizing_range: Coordinate normalization range (default: 1000)
         high_level_strategy: Optional high-level strategy context to guide decisions.
                          If None, uses default placeholder strategy.
-        context: Primitive-specific information like statics, current state.
-               ex) "city population: 5, production: 10, food: 8, science: 12.
-                    Current turn: 150. Current Production Items: ..."
+        recent_actions: Compressed string of recent actions (for repetition avoidance).
         hitl_directive: Optional micro-level HITL directive (e.g., "병영을 최우선 선택").
                        Injected into the prompt with highest priority.
+        context: **Deprecated** — ignored. Use recent_actions instead.
 
     Returns:
         Prompt string for the primitive with formatted JSON instructions
@@ -156,23 +197,31 @@ def get_primitive_prompt(
     Raises:
         ValueError: If primitive name is not recognized
     """
+    if context is not None:
+        warnings.warn(
+            "get_primitive_prompt(context=...) is deprecated. Use recent_actions= instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
     if primitive_name not in PRIMITIVE_REGISTRY:
         raise ValueError(f"Unknown primitive: {primitive_name}. Available: {PRIMITIVE_NAMES}")
 
     if high_level_strategy is None:
         high_level_strategy = "과학 승리를 목표로 함"
 
-    # Build hitl_directive section (empty string if no directive)
-    hitl_directive_section = ""
-    if hitl_directive:
-        hitl_directive_section = hitl_directive
+    hitl_directive_section = hitl_directive or ""
+    recent_actions_section = recent_actions or "없음"
 
-    json_instruction = JSON_FORMAT_INSTRUCTION.format(normalizing_range=normalizing_range)
+    if primitive_name == "policy_primitive":
+        json_instruction = MULTI_ACTION_SEQUENCE_JSON_FORMAT_INSTRUCTION.format(normalizing_range=normalizing_range)
+    else:
+        json_instruction = JSON_FORMAT_INSTRUCTION.format(normalizing_range=normalizing_range)
     prompt_template = PRIMITIVE_REGISTRY[primitive_name]["prompt"]
     return prompt_template.format(
         json_instruction=json_instruction,
         high_level_strategy=high_level_strategy,
-        context=context,
+        recent_actions=recent_actions_section,
         hitl_directive=hitl_directive_section,
         **kwargs,
     )

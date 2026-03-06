@@ -156,7 +156,10 @@ class StrategyUpdater:
 
     def _process(self, request: StrategyRequest) -> None:
         """Dispatch the request to the appropriate planner method."""
+        import time as _time
+
         trigger = request.trigger
+        t0 = _time.monotonic()
 
         if trigger == StrategyTrigger.INITIAL:
             strategy = self._planner.generate_strategy(
@@ -179,6 +182,20 @@ class StrategyUpdater:
             logger.warning(f"Unknown strategy trigger: {trigger}")
             return
 
+        elapsed = _time.monotonic() - t0
+
         # Atomic reference swap — no lock needed for Python attribute assignment
         self._ctx.set_strategy(strategy)
         logger.info(f"Strategy updated via {trigger.name}: {strategy.victory_goal.value} victory")
+
+        # Update Rich dashboard with full strategy details
+        from computer_use_test.utils.rich_logger import RichLogger
+
+        RichLogger.get().update_strategy(
+            goal=strategy.victory_goal.value,
+            trigger=trigger.name,
+            phase=strategy.current_phase,
+            text=strategy.text,
+            directives=strategy.primitive_directives,
+            duration=elapsed,
+        )

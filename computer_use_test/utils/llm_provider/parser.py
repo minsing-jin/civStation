@@ -221,6 +221,54 @@ def parse_action_json(response_text: str) -> AgentAction | None:
         return None
 
 
+def parse_action_json_list(response_text: str) -> list[AgentAction]:
+    """
+    Parse VLM response into a list of AgentActions (for multi-action primitives).
+
+    Accepts either a JSON array of action objects or a single action object
+    (which is wrapped into a one-element list).
+
+    Returns:
+        List of AgentAction objects. Empty list on parse failure.
+    """
+    content = ""
+    try:
+        content = strip_markdown(response_text)
+        logger.debug(f"Stripped content for multi-action parsing:\n{content}")
+
+        data = json.loads(content)
+
+        # Single object → wrap in list
+        if isinstance(data, dict):
+            data = [data]
+
+        if not isinstance(data, list):
+            logger.warning(f"Parse multi: expected list or dict, got {type(data).__name__}")
+            return []
+
+        actions: list[AgentAction] = []
+        for i, item in enumerate(data):
+            if not isinstance(item, dict):
+                logger.warning(f"Parse multi: item {i} is not a dict, skipping")
+                continue
+
+            action = parse_action_json(json.dumps(item))
+            if action is not None:
+                actions.append(action)
+            else:
+                logger.warning(f"Parse multi: item {i} failed to parse, skipping")
+
+        if not actions:
+            logger.warning("Parse multi: no valid actions parsed from list")
+
+        return actions
+
+    except json.JSONDecodeError as e:
+        logger.warning(f"Parse multi: invalid JSON: {e}")
+        logger.debug(f"Raw: {response_text}\nStripped: {content}")
+        return []
+
+
 def parse_to_agent_plan(response_content: str, primitive_name: str) -> AgentPlan:
     """
     Parse VLM response text into AgentPlan (for static evaluation).

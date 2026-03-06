@@ -55,6 +55,10 @@ def parse_args() -> configargparse.Namespace:
     provider_group.add_argument("--router-model", help="Override model for routing")
     provider_group.add_argument("--planner-provider", choices=provider_choices, help="Override provider for planning")
     provider_group.add_argument("--planner-model", help="Override model for planning")
+    provider_group.add_argument(
+        "--turn-detector-provider", choices=provider_choices, help="Override provider for turn detection"
+    )
+    provider_group.add_argument("--turn-detector-model", help="Override model for turn detection")
 
     # --- Group 2: Execution Settings ---
     exec_group = parser.add_argument_group("Execution Parameters")
@@ -305,6 +309,24 @@ def main():
     except Exception as e:
         logger.warning(f"ContextUpdater init failed: {e}")
 
+    # 4d. Turn Detector (background turn-number detection)
+    # Calibration is lazy — happens automatically on first submit()
+    # when the game screen is actually visible.
+    turn_detector = None
+    td_provider_name = getattr(args, "turn_detector_provider", None) or args.router_provider or args.provider
+    td_model = getattr(args, "turn_detector_model", None) or args.router_model or args.model
+    if td_provider_name:
+        try:
+            from computer_use_test.agent.modules.context.turn_detector import TurnDetector
+
+            td_provider = create_provider(provider_name=td_provider_name, model=td_model)
+            turn_detector = TurnDetector(td_provider)
+            turn_detector.start()
+            logger.info("TurnDetector background worker started (calibration deferred to first game screenshot)")
+        except Exception as e:
+            logger.warning(f"TurnDetector init failed: {e}")
+            turn_detector = None
+
     # 4c. Strategy Updater (background strategy generation)
     strategy_updater = None
     if strategy_planner:
@@ -481,6 +503,11 @@ def main():
 
         agent_gate.set_state(AgentState.RUNNING)
 
+    from computer_use_test.utils.rich_logger import RichLogger
+
+    rl = RichLogger.get()
+    rl.start_live()
+
     logger.info(f"Starting execution for {args.turns} turn(s)...")
     try:
         runner_kwargs = {
@@ -493,6 +520,7 @@ def main():
             "strategy_planner": strategy_planner,
             "knowledge_manager": knowledge_manager,
             "strategy_updater": strategy_updater,
+            "turn_detector": turn_detector,
         }
 
         if args.turns == 1:
@@ -519,10 +547,13 @@ def main():
                 **runner_kwargs,
             )
     finally:
+        rl.stop_live()
         if agent_gate:
             from computer_use_test.agent.modules.hitl.agent_gate import AgentState
 
             agent_gate.set_state(AgentState.STOPPED)
+        if turn_detector:
+            turn_detector.stop()
         if strategy_updater:
             strategy_updater.stop()
         if context_updater:

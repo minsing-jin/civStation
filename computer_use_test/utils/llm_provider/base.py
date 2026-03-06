@@ -15,6 +15,7 @@ from computer_use_test.agent.models.schema import AgentPlan
 from computer_use_test.utils.llm_provider.parser import (
     AgentAction,
     parse_action_json,
+    parse_action_json_list,
     parse_to_agent_plan,
     validate_action,
 )
@@ -212,6 +213,71 @@ class BaseVLMProvider(ABC):
                 self.logger.error(f"[Attempt {attempt}/{self.MAX_RETRIES}] API error: {e}")
 
         self.logger.error(f"analyze() failed after {self.MAX_RETRIES} attempts")
+        return None
+
+    def analyze_multi(
+        self,
+        pil_image,
+        instruction: str,
+        normalizing_range: int = 1000,
+    ) -> list[AgentAction] | None:
+        """
+        Analyze PIL image and return a list of actions for multi-step primitives.
+
+        Like analyze() but parses a JSON array response into multiple AgentActions.
+        Used for primitives that need sequential multi-action execution (e.g., policy).
+
+        Args:
+            pil_image: PIL Image (screenshot)
+            instruction: Complete prompt with JSON format instructions included
+            normalizing_range: Coordinate normalization range (default: 1000)
+
+        Returns:
+            List of AgentActions, or None after all retries exhausted
+        """
+        prepared = self._prepare_pil_image(pil_image)
+        content_parts = [
+            self._build_pil_image_content(prepared),
+            self._build_text_content(instruction),
+        ]
+
+        for attempt in range(1, self.MAX_RETRIES + 1):
+            try:
+                response = self._send_to_api(content_parts, temperature=0.3, max_tokens=8192)
+
+                if response.finish_reason in ("max_tokens", "length", "MAX_TOKENS"):
+                    self.logger.warning(
+                        f"[Attempt {attempt}/{self.MAX_RETRIES}] Response TRUNCATED"
+                        f" (finish_reason={response.finish_reason})"
+                    )
+
+                actions = parse_action_json_list(response.content)
+                if not actions:
+                    self.logger.warning(f"[Attempt {attempt}/{self.MAX_RETRIES}] Multi-parse failed, retrying...")
+                    continue
+
+                # Validate each action
+                all_valid = True
+                for i, action in enumerate(actions):
+                    errors = validate_action(action, normalizing_range)
+                    if errors:
+                        for err in errors:
+                            self.logger.warning(f"[Attempt {attempt}] Action {i} validation: {err}")
+                        all_valid = False
+                        break
+
+                if not all_valid:
+                    self.logger.warning(f"[Attempt {attempt}/{self.MAX_RETRIES}] Validation failed, retrying...")
+                    continue
+
+                if attempt > 1:
+                    self.logger.info(f"Multi-action succeeded on attempt {attempt}/{self.MAX_RETRIES}")
+                return actions
+
+            except Exception as e:
+                self.logger.error(f"[Attempt {attempt}/{self.MAX_RETRIES}] API error: {e}")
+
+        self.logger.error(f"analyze_multi() failed after {self.MAX_RETRIES} attempts")
         return None
 
 
