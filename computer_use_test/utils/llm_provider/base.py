@@ -65,6 +65,7 @@ class BaseVLMProvider(ABC):
         content_parts: list,
         temperature: float = 0.7,
         max_tokens: int = 8192,
+        use_thinking: bool = True,
     ) -> VLMResponse:
         """
         Send content parts to the VLM API and return raw response.
@@ -183,7 +184,7 @@ class BaseVLMProvider(ABC):
                 #       field from action JSON format to save tokens.
                 # max_tokens must be large enough to cover thinking tokens (Gemini)
                 # plus the actual JSON response (~200 tokens).
-                response = self._send_to_api(content_parts, temperature=0.3, max_tokens=16384)
+                response = self._send_to_api(content_parts, temperature=0.3, max_tokens=8192)
 
                 if response.finish_reason in ("max_tokens", "length", "MAX_TOKENS"):
                     self.logger.warning(
@@ -222,7 +223,7 @@ class MockVLMProvider(BaseVLMProvider):
     def __init__(self, api_key=None, model=None):
         super().__init__(api_key="mock", model=model or self.DEFAULT_MODEL)
 
-    def _send_to_api(self, content_parts, temperature=0.7, max_tokens=4096):
+    def _send_to_api(self, content_parts, temperature=0.7, max_tokens=4096, use_thinking=True):
         return VLMResponse(
             content=json.dumps(
                 {

@@ -75,6 +75,7 @@ class ClaudeVLMProvider(BaseVLMProvider):
         content_parts: list,
         temperature: float = 0.7,
         max_tokens: int = 8192,
+        use_thinking: bool = True,
     ) -> VLMResponse:
         """Send content parts to Anthropic Messages API."""
         try:
