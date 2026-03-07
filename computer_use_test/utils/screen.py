@@ -8,6 +8,10 @@ Flow:
 1. capture_screen_pil() → PIL image + logical resolution
 2. VLM analyzes image → returns normalized coords (0-1000)
 3. execute_action() → converts normalized → logical → PyAutoGUI
+
+When the game runs in windowed mode, capture_screen_pil() automatically
+detects the game window via macOS Quartz and crops the screenshot to
+just the game area, eliminating desktop noise (Dock, menu bar, etc.).
 """
 
 from __future__ import annotations
@@ -26,19 +30,64 @@ logger = logging.getLogger(__name__)
 VLM_MAX_LONG_EDGE: int = 1280
 VLM_JPEG_QUALITY: int = 80
 
+# Keywords to match the Civilization VI window (case-insensitive)
+_GAME_WINDOW_KEYWORDS = ("civilization", "civ6", "civ vi")
 
-def capture_screen_pil():
-    """
-    Capture current screen as PIL image.
 
-    Returns the logical resolution (what PyAutoGUI uses) so that
-    normalized coordinates can be correctly mapped.
+def _detect_game_window() -> tuple[int, int, int, int] | None:
+    """Detect the Civilization VI game window bounds (logical coords).
+
+    Uses macOS Quartz CGWindowList API. Returns None on non-macOS
+    platforms or when the game window is not found.
 
     Returns:
-        Tuple of (pil_image, screen_width, screen_height)
-        - pil_image: PIL.Image of the screenshot
-        - screen_width: Logical width (PyAutoGUI coordinate space)
-        - screen_height: Logical height (PyAutoGUI coordinate space)
+        (x, y, width, height) in logical screen coordinates, or None.
+    """
+    try:
+        import Quartz
+    except ImportError:
+        return None
+
+    windows = Quartz.CGWindowListCopyWindowInfo(
+        Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements,
+        Quartz.kCGNullWindowID,
+    )
+    if not windows:
+        return None
+
+    for w in windows:
+        name = (w.get("kCGWindowName") or "").lower()
+        owner = (w.get("kCGWindowOwnerName") or "").lower()
+        combined = f"{name} {owner}"
+
+        if any(kw in combined for kw in _GAME_WINDOW_KEYWORDS):
+            bounds = w.get("kCGWindowBounds")
+            if bounds:
+                gw, gh = int(bounds["Width"]), int(bounds["Height"])
+                # Skip tiny windows (e.g. helper processes)
+                if gw < 400 or gh < 300:
+                    continue
+                return (int(bounds["X"]), int(bounds["Y"]), gw, gh)
+
+    return None
+
+
+def capture_screen_pil(crop_to_game: bool = True):
+    """
+    Capture current screen as PIL image, optionally cropped to the game window.
+
+    When crop_to_game is True and the game window is detected, the screenshot
+    is cropped to just the game area. Normalized coordinates from the VLM
+    will then map to the game window, and execute_action() uses the returned
+    offsets to convert back to absolute screen coordinates.
+
+    Returns:
+        Tuple of (pil_image, region_w, region_h, x_offset, y_offset)
+        - pil_image: PIL.Image (cropped to game window if detected)
+        - region_w: Logical width of the captured region
+        - region_h: Logical height of the captured region
+        - x_offset: Logical X offset of the region on screen
+        - y_offset: Logical Y offset of the region on screen
     """
     # PyAutoGUI size returns logical resolution (not physical/retina)
     screen_w, screen_h = pyautogui.size()
@@ -46,7 +95,27 @@ def capture_screen_pil():
     # Capture screenshot (returns PIL Image)
     screenshot = pyautogui.screenshot()
 
-    return screenshot, screen_w, screen_h
+    x_offset, y_offset = 0, 0
+    region_w, region_h = screen_w, screen_h
+
+    if crop_to_game:
+        bounds = _detect_game_window()
+        if bounds:
+            gx, gy, gw, gh = bounds
+            # Retina scale factor: screenshot pixels vs logical pixels
+            scale = screenshot.size[0] / screen_w
+            crop_box = (
+                int(gx * scale),
+                int(gy * scale),
+                int((gx + gw) * scale),
+                int((gy + gh) * scale),
+            )
+            screenshot = screenshot.crop(crop_box)
+            x_offset, y_offset = gx, gy
+            region_w, region_h = gw, gh
+            logger.debug(f"Cropped to game window: {gw}x{gh} at ({gx},{gy})")
+
+    return screenshot, region_w, region_h, x_offset, y_offset
 
 
 def resize_for_vlm(
@@ -91,21 +160,24 @@ def execute_action(
     screen_w: int,
     screen_h: int,
     normalizing_range: int = 1000,
+    x_offset: int = 0,
+    y_offset: int = 0,
 ) -> None:
     """
     Execute an AgentAction by converting normalized coordinates to screen coordinates.
 
-    Normalized coords (0-1000) → Real screen coords (0-screen_w, 0-screen_h)
+    Normalized coords (0-1000) → region coords (0-screen_w) → absolute screen coords (+offset)
 
-    This solves the Mac Retina display mismatch where:
-    - Screenshot pixel coords ≠ PyAutoGUI coords
-    - Screenshot is 2x the logical resolution on Retina displays
+    When the screenshot was cropped to a game window, x_offset/y_offset shift
+    the coordinates back to absolute screen positions for PyAutoGUI.
 
     Args:
         action: AgentAction with normalized coordinates (0-{normalizing_range})
-        screen_w: Logical screen width (from pyautogui.size())
-        screen_h: Logical screen height (from pyautogui.size())
+        screen_w: Logical width of the captured region (game window or full screen)
+        screen_h: Logical height of the captured region
         normalizing_range: Coordinate range used in the prompt (default: 1000)
+        x_offset: Logical X offset of the captured region on screen (default: 0)
+        y_offset: Logical Y offset of the captured region on screen (default: 0)
     """
     if action is None:
         logger.warning("No action to execute (None)")
@@ -135,26 +207,26 @@ def execute_action(
         return
 
     if action_type == "click":
-        real_x = norm_to_real(action.x, screen_w, normalizing_range)
-        real_y = norm_to_real(action.y, screen_h, normalizing_range)
+        real_x = norm_to_real(action.x, screen_w, normalizing_range) + x_offset
+        real_y = norm_to_real(action.y, screen_h, normalizing_range) + y_offset
 
         logger.debug(f"Click: normalized({action.x}, {action.y}) → real({real_x}, {real_y}) - {action.button}")
         pyautogui.moveTo(real_x, real_y, duration=0.5)
         pyautogui.click(button=action.button)
 
     elif action_type == "double_click":
-        real_x = norm_to_real(action.x, screen_w, normalizing_range)
-        real_y = norm_to_real(action.y, screen_h, normalizing_range)
+        real_x = norm_to_real(action.x, screen_w, normalizing_range) + x_offset
+        real_y = norm_to_real(action.y, screen_h, normalizing_range) + y_offset
 
         logger.debug(f"Double-click: normalized({action.x}, {action.y}) → real({real_x}, {real_y}) - {action.button}")
         pyautogui.moveTo(real_x, real_y, duration=0.5)
         pyautogui.doubleClick(button=action.button)
 
     elif action_type == "drag":
-        start_x = norm_to_real(action.x, screen_w, normalizing_range)
-        start_y = norm_to_real(action.y, screen_h, normalizing_range)
-        end_x = norm_to_real(action.end_x, screen_w, normalizing_range)
-        end_y = norm_to_real(action.end_y, screen_h, normalizing_range)
+        start_x = norm_to_real(action.x, screen_w, normalizing_range) + x_offset
+        start_y = norm_to_real(action.y, screen_h, normalizing_range) + y_offset
+        end_x = norm_to_real(action.end_x, screen_w, normalizing_range) + x_offset
+        end_y = norm_to_real(action.end_y, screen_h, normalizing_range) + y_offset
 
         logger.debug(
             f"Drag: ({action.x},{action.y})→({action.end_x},{action.end_y}) "
@@ -209,8 +281,8 @@ def agent_loop(
         logger.info(f"\n--- Step {step}/{max_steps} ---")
 
         # 1. Capture screen
-        pil_image, screen_w, screen_h = capture_screen_pil()
-        logger.info(f"Screen captured: {screen_w}x{screen_h} (logical)")
+        pil_image, screen_w, screen_h, x_off, y_off = capture_screen_pil()
+        logger.info(f"Screen captured: {screen_w}x{screen_h} (logical, offset=({x_off},{y_off}))")
 
         # 2. Analyze with VLM
         logger.info("Analyzing...")
@@ -225,6 +297,6 @@ def agent_loop(
             break
 
         # 3. Execute action
-        execute_action(action, screen_w, screen_h, normalizing_range)
+        execute_action(action, screen_w, screen_h, normalizing_range, x_off, y_off)
 
     logger.info("Agent loop completed")

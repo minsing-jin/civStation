@@ -13,6 +13,7 @@ from computer_use_test.agent.modules.context.global_context import GlobalContext
 from computer_use_test.agent.modules.context.high_level_context import HighLevelContext
 from computer_use_test.agent.modules.context.macro_turn_manager import MacroTurnManager, MacroTurnSummary
 from computer_use_test.agent.modules.context.primitive_context import PrimitiveContext
+from computer_use_test.agent.modules.context.turn_detector import TurnDetector
 
 __all__ = [
     "ContextManager",
@@ -22,4 +23,5 @@ __all__ = [
     "MacroTurnManager",
     "MacroTurnSummary",
     "PrimitiveContext",
+    "TurnDetector",
 ]
