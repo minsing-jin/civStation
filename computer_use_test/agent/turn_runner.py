@@ -17,7 +17,7 @@ from computer_use_test.agent.turn_executor import run_multi_turn, run_one_turn
 from computer_use_test.utils.debug import DebugOptions
 from computer_use_test.utils.llm_provider import create_provider, get_available_providers
 
-# 로깅 설정
+# Logging setup (로깅 설정)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -36,15 +36,15 @@ def parse_args() -> configargparse.Namespace:
 
     parser = configargparse.ArgumentParser(
         description="Run Civilization VI AI Agent",
-        # 기본적으로 읽을 설정 파일 지정
+        # Default config file (기본 설정 파일)
         default_config_files=["config.yaml"],
-        # YAML 파서 명시 (YAML 문법 지원)
+        # Use YAML parser (YAML 문법 지원)
         config_file_parser_class=configargparse.YAMLConfigFileParser,
         formatter_class=configargparse.RawDescriptionHelpFormatter,
         epilog="Use python -m computer_use_test.agent.turn_runner --help to see full options.",
     )
 
-    # 설정 파일 경로를 직접 지정할 수 있는 옵션 (--config my_config.yaml)
+    # Override config file path (설정 파일 경로를 직접 지정)
     parser.add_argument("--config", is_config_file=True, help="Path to configuration file")
 
     # --- Group 1: Provider Settings ---
@@ -55,6 +55,10 @@ def parse_args() -> configargparse.Namespace:
     provider_group.add_argument("--router-model", help="Override model for routing")
     provider_group.add_argument("--planner-provider", choices=provider_choices, help="Override provider for planning")
     provider_group.add_argument("--planner-model", help="Override model for planning")
+    provider_group.add_argument(
+        "--turn-detector-provider", choices=provider_choices, help="Override provider for turn detection"
+    )
+    provider_group.add_argument("--turn-detector-model", help="Override model for turn detection")
 
     # --- Group 2: Execution Settings ---
     exec_group = parser.add_argument_group("Execution Parameters")
@@ -100,16 +104,29 @@ def parse_args() -> configargparse.Namespace:
 
     # --- Group 6: Control API & Status UI ---
     ui_group = parser.add_argument_group("Control API & Status UI")
-    ui_group.add_argument("--status-ui", action="store_true", help="Enable real-time status dashboard (includes control API)")
+    ui_group.add_argument(
+        "--status-ui", action="store_true", help="Enable real-time status dashboard (includes control API)"
+    )
     ui_group.add_argument("--control-api", action="store_true", help="Enable start/pause/resume/stop API server")
     ui_group.add_argument("--status-port", type=int, default=8765, help="Control API / Status UI port (default: 8765)")
     ui_group.add_argument(
         "--wait-for-start",
         action="store_true",
-        help="Wait for external start signal via API before running (requires --control-api/--status-ui or --relay-url)",
+        help="Wait for external start signal via API before running "
+        "(requires --control-api/--status-ui or --relay-url)",
     )
 
-    # --- Group 7: Relay ---
+    # --- Group 7: Image Pipeline ---
+    img_group = parser.add_argument_group("Image Pipeline (per-site preprocessing)")
+    for _site in ("router", "planner", "context", "turn-detector"):
+        img_group.add_argument(f"--{_site}-img-preset", help=f"Preset name for {_site} images")
+        img_group.add_argument(f"--{_site}-img-max-long-edge", type=int, help=f"Max long edge for {_site}")
+        img_group.add_argument(f"--{_site}-img-ui-filter", help=f"UI filter mode for {_site}")
+        img_group.add_argument(f"--{_site}-img-color", help=f"Color policy for {_site}")
+        img_group.add_argument(f"--{_site}-img-encode", help=f"Encode mode for {_site}")
+        img_group.add_argument(f"--{_site}-img-jpeg-quality", type=int, help=f"JPEG quality for {_site}")
+
+    # --- Group 8: Relay ---
     relay_group = parser.add_argument_group("Relay (remote HITL via external relay server)")
     relay_group.add_argument("--relay-url", help="WebSocket URL of the relay server (wss://...)")
     relay_group.add_argument(
@@ -130,11 +147,11 @@ def setup_providers(args) -> tuple[object, object]:
     if not router_p_name or not planner_p_name:
         raise ValueError("Provider not specified. Check config.yaml or use --provider CLI arg.")
 
-    # Router 생성
+    # Create router provider (Router 생성)
     router = create_provider(provider_name=router_p_name, model=router_model)
     logger.info(f"Router initialized: {router.get_provider_name()} ({router.model})")
 
-    # Planner 생성
+    # Create planner provider (Planner 생성)
     if planner_p_name == router_p_name and planner_model == router_model:
         planner = router
         logger.info("Planner: Sharing instance with Router")
@@ -271,6 +288,14 @@ def main():
             chat_app.stop()
         return
 
+    # 2b. Image Pipeline Configs
+    from computer_use_test.utils.image_pipeline import config_from_args as img_config_from_args
+
+    router_img_config = img_config_from_args(args, "router")
+    planner_img_config = img_config_from_args(args, "planner")
+    context_img_config = img_config_from_args(args, "context")
+    turn_detector_img_config = img_config_from_args(args, "turn_detector")
+
     # 3. Command Queue + Queue Listener (Phase 1)
     command_queue = CommandQueue()
     queue_listener = None
@@ -296,11 +321,47 @@ def main():
     try:
         from computer_use_test.agent.modules.context.context_updater import ContextUpdater
 
-        context_updater = ContextUpdater(ctx, router_provider)
+        context_updater = ContextUpdater(ctx, router_provider, img_config=context_img_config)
         context_updater.start()
         logger.info("ContextUpdater background worker started")
     except Exception as e:
         logger.warning(f"ContextUpdater init failed: {e}")
+
+    # 4d. Turn Detector (background turn-number detection)
+    # Calibration is lazy — happens automatically on first submit()
+    # when the game screen is actually visible.
+    turn_detector = None
+    td_provider_name = getattr(args, "turn_detector_provider", None) or args.router_provider or args.provider
+    td_model = getattr(args, "turn_detector_model", None) or args.router_model or args.model
+    if td_provider_name:
+        try:
+            from computer_use_test.agent.modules.context.turn_detector import TurnDetector
+
+            td_provider = create_provider(provider_name=td_provider_name, model=td_model)
+            turn_detector = TurnDetector(td_provider, img_config=turn_detector_img_config)
+            turn_detector.start()
+            logger.info("TurnDetector background worker started (calibration deferred to first game screenshot)")
+        except Exception as e:
+            logger.warning(f"TurnDetector init failed: {e}")
+            turn_detector = None
+
+    # 4c. Strategy Updater (background strategy generation)
+    strategy_updater = None
+    if strategy_planner:
+        try:
+            from computer_use_test.agent.modules.strategy.strategy_updater import (
+                StrategyRequest,
+                StrategyTrigger,
+                StrategyUpdater,
+            )
+
+            strategy_updater = StrategyUpdater(ctx, strategy_planner)
+            strategy_updater.start()
+            # Submit initial strategy request
+            strategy_updater.submit(StrategyRequest(StrategyTrigger.INITIAL, human_input=args.strategy))
+            logger.info("StrategyUpdater background worker started")
+        except Exception as e:
+            logger.warning(f"StrategyUpdater init failed: {e}")
 
     # 5. Agent Gate + Status UI (Phase 3)
     agent_gate = None
@@ -351,14 +412,23 @@ def main():
 
                 web_discussion_engine = StrategyDiscussion(vlm_provider=planner_provider, context_manager=ctx)
 
-            status_server = StatusServer(state_bridge, command_queue, ws_manager=ws_manager, agent_gate=agent_gate, discussion_engine=web_discussion_engine, port=args.status_port)
+            status_server = StatusServer(
+                state_bridge,
+                command_queue,
+                ws_manager=ws_manager,
+                agent_gate=agent_gate,
+                discussion_engine=web_discussion_engine,
+                port=args.status_port,
+            )
             status_server.start()
             if args.status_ui:
                 logger.info(f"Status UI available at http://localhost:{args.status_port}")
             else:
                 logger.info(f"Control API available at http://localhost:{args.status_port}")
         except ImportError:
-            logger.warning("Control API requires fastapi and uvicorn. Install with: pip install 'computer-use-test[ui]'")
+            logger.warning(
+                "Control API requires fastapi and uvicorn. Install with: pip install 'computer-use-test[ui]'"
+            )
         except Exception as e:
             logger.warning(f"Control API init failed: {e}")
     elif getattr(args, "relay_url", None):
@@ -397,7 +467,10 @@ def main():
         has_chatapp_control = bool(chatapp_input_provider is not None)
 
         if not (has_status_control or has_chatapp_control):
-            logger.error("Manual start required, but no control channel is enabled. Use --control-api/--status-ui, --relay-url, or chatapp input provider.")
+            logger.error(
+                "Manual start required, but no control channel is enabled. "
+                "Use --control-api/--status-ui, --relay-url, or chatapp input provider."
+            )
             return
         elif has_status_control:
             logger.info("Agent ready. Waiting for external start signal (POST /api/agent/start)...")
@@ -448,6 +521,11 @@ def main():
 
         agent_gate.set_state(AgentState.RUNNING)
 
+    from computer_use_test.utils.rich_logger import RichLogger
+
+    rl = RichLogger.get()
+    rl.start_live()
+
     logger.info(f"Starting execution for {args.turns} turn(s)...")
     try:
         runner_kwargs = {
@@ -459,6 +537,10 @@ def main():
             "context_manager": ctx,
             "strategy_planner": strategy_planner,
             "knowledge_manager": knowledge_manager,
+            "strategy_updater": strategy_updater,
+            "turn_detector": turn_detector,
+            "router_img_config": router_img_config,
+            "planner_img_config": planner_img_config,
         }
 
         if args.turns == 1:
@@ -485,10 +567,15 @@ def main():
                 **runner_kwargs,
             )
     finally:
+        rl.stop_live()
         if agent_gate:
             from computer_use_test.agent.modules.hitl.agent_gate import AgentState
 
             agent_gate.set_state(AgentState.STOPPED)
+        if turn_detector:
+            turn_detector.stop()
+        if strategy_updater:
+            strategy_updater.stop()
         if context_updater:
             context_updater.stop()
         if queue_listener:

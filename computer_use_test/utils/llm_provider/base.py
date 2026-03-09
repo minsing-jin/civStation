@@ -15,6 +15,7 @@ from computer_use_test.agent.models.schema import AgentPlan
 from computer_use_test.utils.llm_provider.parser import (
     AgentAction,
     parse_action_json,
+    parse_action_json_list,
     parse_to_agent_plan,
     validate_action,
 )
@@ -46,9 +47,15 @@ class BaseVLMProvider(ABC):
 
     DEFAULT_MODEL: str = ""
 
-    def __init__(self, api_key: str | None = None, model: str | None = None):
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str | None = None,
+        resize_for_vlm: bool = True,
+    ):
         self.api_key = api_key
         self.model = model
+        self.resize_for_vlm = resize_for_vlm
         self.logger = logger
 
     # ==================== Core (implement in subclass) ====================
@@ -59,6 +66,7 @@ class BaseVLMProvider(ABC):
         content_parts: list,
         temperature: float = 0.7,
         max_tokens: int = 8192,
+        use_thinking: bool = True,
     ) -> VLMResponse:
         """
         Send content parts to the VLM API and return raw response.
@@ -82,7 +90,7 @@ class BaseVLMProvider(ABC):
         pass
 
     @abstractmethod
-    def _build_pil_image_content(self, pil_image) -> object:
+    def _build_pil_image_content(self, pil_image, jpeg_quality: int | None = None) -> object:
         """Build provider-specific image content from PIL image."""
         pass
 
@@ -94,6 +102,26 @@ class BaseVLMProvider(ABC):
     @abstractmethod
     def get_provider_name(self) -> str:
         pass
+
+    # ==================== Image pre-processing ====================
+
+    def _prepare_pil_image(self, pil_image, img_config=None):
+        """Preprocess a PIL image before sending to the VLM.
+
+        When *img_config* is provided, applies the parameterized pipeline.
+        Otherwise falls back to PLANNER_DEFAULT when ``self.resize_for_vlm``
+        is True.
+        """
+        if img_config is not None:
+            from computer_use_test.utils.image_pipeline import process_image
+
+            return process_image(pil_image, img_config).image
+
+        if self.resize_for_vlm:
+            from computer_use_test.utils.image_pipeline import PLANNER_DEFAULT, process_image
+
+            return process_image(pil_image, PLANNER_DEFAULT).image
+        return pil_image
 
     # ==================== Static Evaluation (file-based) ====================
 
@@ -132,6 +160,7 @@ class BaseVLMProvider(ABC):
         pil_image,
         instruction: str,
         normalizing_range: int = 1000,
+        img_config=None,
     ) -> AgentAction | None:
         """
         Analyze PIL image and return next action with normalized coordinates.
@@ -146,12 +175,16 @@ class BaseVLMProvider(ABC):
             pil_image: PIL Image (screenshot)
             instruction: Complete prompt with JSON format instructions included
             normalizing_range: Coordinate normalization range (default: 1000)
+            img_config: Optional ImagePipelineConfig for preprocessing
 
         Returns:
             AgentAction with normalized coordinates, or None after all retries exhausted
         """
+        prepared = self._prepare_pil_image(pil_image, img_config=img_config)
+        jpeg_quality = getattr(img_config, "jpeg_quality", 0) if img_config else 0
+        build_kwargs = {"jpeg_quality": jpeg_quality} if jpeg_quality > 0 else {}
         content_parts = [
-            self._build_pil_image_content(pil_image),
+            self._build_pil_image_content(prepared, **build_kwargs),
             self._build_text_content(instruction),
         ]
 
@@ -161,14 +194,20 @@ class BaseVLMProvider(ABC):
                 #       field from action JSON format to save tokens.
                 # max_tokens must be large enough to cover thinking tokens (Gemini)
                 # plus the actual JSON response (~200 tokens).
-                response = self._send_to_api(content_parts, temperature=0.3, max_tokens=16384)
+                response = self._send_to_api(content_parts, temperature=0.3, max_tokens=8192)
 
                 if response.finish_reason in ("max_tokens", "length", "MAX_TOKENS"):
-                    self.logger.warning(f"[Attempt {attempt}/{self.MAX_RETRIES}] Response TRUNCATED (finish_reason={response.finish_reason})")
+                    self.logger.warning(
+                        f"[Attempt {attempt}/{self.MAX_RETRIES}] Response TRUNCATED"
+                        f" (finish_reason={response.finish_reason})"
+                    )
 
                 action = parse_action_json(response.content)
                 if action is None:
-                    self.logger.warning(f"[Attempt {attempt}/{self.MAX_RETRIES}] Parse failed, retrying...")
+                    self.logger.warning(
+                        f"[Attempt {attempt}/{self.MAX_RETRIES}] Parse failed, retrying...\n"
+                        f"  Raw response (first 500 chars): {response.content[:500]}"
+                    )
                     continue
 
                 errors = validate_action(action, normalizing_range)
@@ -188,6 +227,75 @@ class BaseVLMProvider(ABC):
         self.logger.error(f"analyze() failed after {self.MAX_RETRIES} attempts")
         return None
 
+    def analyze_multi(
+        self,
+        pil_image,
+        instruction: str,
+        normalizing_range: int = 1000,
+        img_config=None,
+    ) -> list[AgentAction] | None:
+        """
+        Analyze PIL image and return a list of actions for multi-step primitives.
+
+        Like analyze() but parses a JSON array response into multiple AgentActions.
+        Used for primitives that need sequential multi-action execution (e.g., policy).
+
+        Args:
+            pil_image: PIL Image (screenshot)
+            instruction: Complete prompt with JSON format instructions included
+            normalizing_range: Coordinate normalization range (default: 1000)
+            img_config: Optional ImagePipelineConfig for preprocessing
+
+        Returns:
+            List of AgentActions, or None after all retries exhausted
+        """
+        prepared = self._prepare_pil_image(pil_image, img_config=img_config)
+        jpeg_quality = getattr(img_config, "jpeg_quality", 0) if img_config else 0
+        build_kwargs = {"jpeg_quality": jpeg_quality} if jpeg_quality > 0 else {}
+        content_parts = [
+            self._build_pil_image_content(prepared, **build_kwargs),
+            self._build_text_content(instruction),
+        ]
+
+        for attempt in range(1, self.MAX_RETRIES + 1):
+            try:
+                response = self._send_to_api(content_parts, temperature=0.3, max_tokens=8192)
+
+                if response.finish_reason in ("max_tokens", "length", "MAX_TOKENS"):
+                    self.logger.warning(
+                        f"[Attempt {attempt}/{self.MAX_RETRIES}] Response TRUNCATED"
+                        f" (finish_reason={response.finish_reason})"
+                    )
+
+                actions = parse_action_json_list(response.content)
+                if not actions:
+                    self.logger.warning(f"[Attempt {attempt}/{self.MAX_RETRIES}] Multi-parse failed, retrying...")
+                    continue
+
+                # Validate each action
+                all_valid = True
+                for i, action in enumerate(actions):
+                    errors = validate_action(action, normalizing_range)
+                    if errors:
+                        for err in errors:
+                            self.logger.warning(f"[Attempt {attempt}] Action {i} validation: {err}")
+                        all_valid = False
+                        break
+
+                if not all_valid:
+                    self.logger.warning(f"[Attempt {attempt}/{self.MAX_RETRIES}] Validation failed, retrying...")
+                    continue
+
+                if attempt > 1:
+                    self.logger.info(f"Multi-action succeeded on attempt {attempt}/{self.MAX_RETRIES}")
+                return actions
+
+            except Exception as e:
+                self.logger.error(f"[Attempt {attempt}/{self.MAX_RETRIES}] API error: {e}")
+
+        self.logger.error(f"analyze_multi() failed after {self.MAX_RETRIES} attempts")
+        return None
+
 
 class MockVLMProvider(BaseVLMProvider):
     """Mock VLM provider for testing without API calls."""
@@ -197,7 +305,7 @@ class MockVLMProvider(BaseVLMProvider):
     def __init__(self, api_key=None, model=None):
         super().__init__(api_key="mock", model=model or self.DEFAULT_MODEL)
 
-    def _send_to_api(self, content_parts, temperature=0.7, max_tokens=4096):
+    def _send_to_api(self, content_parts, temperature=0.7, max_tokens=4096, use_thinking=True):
         return VLMResponse(
             content=json.dumps(
                 {
@@ -213,7 +321,7 @@ class MockVLMProvider(BaseVLMProvider):
     def _build_image_content(self, image_path):
         return {"type": "image", "path": str(image_path)}
 
-    def _build_pil_image_content(self, pil_image):
+    def _build_pil_image_content(self, pil_image, jpeg_quality: int | None = None):
         return {"type": "image", "data": "mock"}
 
     def _build_text_content(self, text):

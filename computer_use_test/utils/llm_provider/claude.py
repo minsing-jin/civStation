@@ -75,6 +75,7 @@ class ClaudeVLMProvider(BaseVLMProvider):
         content_parts: list,
         temperature: float = 0.7,
         max_tokens: int = 8192,
+        use_thinking: bool = True,
     ) -> VLMResponse:
         """Send content parts to Anthropic Messages API."""
         try:
@@ -103,7 +104,10 @@ class ClaudeVLMProvider(BaseVLMProvider):
             finish_reason = response.stop_reason  # "end_turn" or "max_tokens"
 
             if finish_reason == "max_tokens":
-                self.logger.warning(f"Claude response TRUNCATED (stop_reason={finish_reason}). Output likely incomplete. Consider increasing max_tokens.")
+                self.logger.warning(
+                    f"Claude response TRUNCATED (stop_reason={finish_reason})."
+                    " Output likely incomplete. Consider increasing max_tokens."
+                )
 
             return VLMResponse(
                 content=response_text,
@@ -128,19 +132,23 @@ class ClaudeVLMProvider(BaseVLMProvider):
             },
         }
 
-    def _build_pil_image_content(self, pil_image) -> object:
-        """Build Anthropic image content from PIL image."""
+    def _build_pil_image_content(self, pil_image, jpeg_quality: int | None = None) -> object:
+        """Build Anthropic image content from PIL image (JPEG for speed)."""
         import io
 
+        from computer_use_test.utils.screen import VLM_JPEG_QUALITY
+
+        quality = jpeg_quality or VLM_JPEG_QUALITY
         buffer = io.BytesIO()
-        pil_image.save(buffer, format="PNG")
+        img = pil_image.convert("RGB") if pil_image.mode != "RGB" else pil_image
+        img.save(buffer, format="JPEG", quality=quality)
         image_data = base64.standard_b64encode(buffer.getvalue()).decode("utf-8")
 
         return {
             "type": "image",
             "source": {
                 "type": "base64",
-                "media_type": "image/png",
+                "media_type": "image/jpeg",
                 "data": image_data,
             },
         }

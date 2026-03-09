@@ -172,7 +172,9 @@ class PrimitiveContext:
                 elif action.action_type == "press":
                     lines.append(f"  - press '{action.key}' [{action.result}]")
                 elif action.action_type == "drag":
-                    lines.append(f"  - drag ({action.x}, {action.y}) -> ({action.end_x}, {action.end_y}) [{action.result}]")
+                    lines.append(
+                        f"  - drag ({action.x}, {action.y}) -> ({action.end_x}, {action.end_y}) [{action.result}]"
+                    )
                 else:
                     lines.append(f"  - {action.action_type} [{action.result}]")
 

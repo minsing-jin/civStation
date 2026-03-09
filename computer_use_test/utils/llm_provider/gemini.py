@@ -45,7 +45,9 @@ class GeminiVLMProvider(BaseVLMProvider):
 
             self.client = genai.Client(api_key=os.getenv("GENAI_API_KEY"))
         except ImportError as e:
-            raise ImportError("google-generativeai package not installed. Install with: pip install google-generativeai") from e
+            raise ImportError(
+                "google-generativeai package not installed. Install with: pip install google-generativeai"
+            ) from e
 
     # ==================== Abstract method implementations ====================
 
@@ -101,7 +103,10 @@ class GeminiVLMProvider(BaseVLMProvider):
                 finish_reason = raw_reason.name if hasattr(raw_reason, "name") else str(raw_reason)
 
             if finish_reason == "MAX_TOKENS":
-                self.logger.warning(f"Gemini response TRUNCATED (finish_reason={finish_reason}). Output likely incomplete. Consider increasing max_tokens.")
+                self.logger.warning(
+                    f"Gemini response TRUNCATED (finish_reason={finish_reason})."
+                    " Output likely incomplete. Consider increasing max_tokens."
+                )
 
             return VLMResponse(
                 content=response_text,
@@ -127,8 +132,8 @@ class GeminiVLMProvider(BaseVLMProvider):
         except ImportError as e:
             raise ImportError("PIL package not installed. Install with: pip install Pillow") from e
 
-    def _build_pil_image_content(self, pil_image) -> object:
-        """Pass through PIL image (Gemini uses PIL natively)."""
+    def _build_pil_image_content(self, pil_image, jpeg_quality: int | None = None) -> object:
+        """Pass through PIL image (Gemini uses PIL natively, JPEG quality N/A)."""
         return pil_image
 
     def _build_text_content(self, text: str) -> object:

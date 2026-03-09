@@ -40,9 +40,11 @@ from computer_use_test.agent.modules.router.primitive_registry import (
     PRIMITIVE_NAMES,
     ROUTER_PROMPT,
     RouterResult,
+    get_directive_for_primitive,
     get_primitive_prompt,
 )
 from computer_use_test.utils.debug import DebugOptions, TurnValidator, log_context
+from computer_use_test.utils.image_pipeline import ImagePipelineConfig, process_image
 from computer_use_test.utils.llm_provider.base import BaseVLMProvider
 from computer_use_test.utils.llm_provider.parser import AgentAction, strip_markdown
 from computer_use_test.utils.rich_logger import RichLogger
@@ -51,19 +53,17 @@ from computer_use_test.utils.screen import capture_screen_pil, execute_action
 if TYPE_CHECKING:
     from computer_use_test.agent.modules.context.context_updater import ContextUpdater
     from computer_use_test.agent.modules.context.macro_turn_manager import MacroTurnManager
+    from computer_use_test.agent.modules.context.turn_detector import TurnDetector
     from computer_use_test.agent.modules.hitl.agent_gate import AgentGate
     from computer_use_test.agent.modules.hitl.status_ui.state_bridge import AgentStateBridge
     from computer_use_test.agent.modules.knowledge import KnowledgeManager
     from computer_use_test.agent.modules.strategy import StrategyPlanner
+    from computer_use_test.agent.modules.strategy.strategy_updater import StrategyUpdater
 
 logger = logging.getLogger(__name__)
 
 # finish_reason values that indicate truncation across providers
 _TRUNCATION_REASONS = {"max_tokens", "length", "MAX_TOKENS"}
-
-
-# The last turn number observed by the Router, used to detect new in-game turns.
-_last_observed_turn: int | None = None
 
 # Module-level TurnValidator singleton (created on first use)
 _turn_validator: TurnValidator | None = None
@@ -154,43 +154,47 @@ def _check_queue_for_interrupt(
 def route_primitive(
     provider: BaseVLMProvider,
     pil_image,
+    img_config: ImagePipelineConfig | None = None,
 ) -> RouterResult:
     """
     Use VLM to classify a screenshot and select the appropriate primitive.
 
-    Also reads the in-game turn number from the top-right corner of the
-    screenshot and detects when a new game turn has started.
+    Turn detection is handled separately by TurnDetector (background thread).
 
     Args:
         provider: VLM provider instance
         pil_image: PIL Image of the current game screen
+        img_config: Image pipeline config (defaults to ROUTER_DEFAULT)
 
     Returns:
-        RouterResult with primitive name, reasoning, and turn metadata
+        RouterResult with primitive name and reasoning
     """
-    # TODO: 추후 턴 및 버튼 인식의 정확도와 속도를 높이기 위해,
-    #       단순 VLM 프롬프팅 대신 OCR을 도입하거나 가벼운 Small VLM(sVLM)을
-    #       파인튜닝하여 대체할 것.
-    global _last_observed_turn  # noqa: PLW0603
+    from computer_use_test.utils.image_pipeline import ROUTER_DEFAULT
 
+    cfg = img_config or ROUTER_DEFAULT
+    result = process_image(pil_image, cfg)
+    prepared = result.image
+    jpeg_quality = cfg.jpeg_quality if cfg.jpeg_quality > 0 else None
     content_parts = [
-        provider._build_pil_image_content(pil_image),
+        provider._build_pil_image_content(prepared, jpeg_quality=jpeg_quality),
         provider._build_text_content(ROUTER_PROMPT),
     ]
 
     response = None
     try:
-        # TODO: For long-horizon tasks, reduce max_tokens and remove "reasoning"
-        #       field from ROUTER_PROMPT JSON format to save tokens.
         response = provider._send_to_api(
             content_parts,
             temperature=0.2,
-            max_tokens=8192,
+            max_tokens=1024,
+            use_thinking=False,
         )
 
         # Check for truncation BEFORE attempting JSON parse
         if response.finish_reason in _TRUNCATION_REASONS:
-            logger.warning(f"Router response TRUNCATED (finish_reason={response.finish_reason}). JSON is likely incomplete. Raw response:\n{response.content}")
+            logger.warning(
+                f"Router response TRUNCATED (finish_reason={response.finish_reason}). "
+                f"JSON is likely incomplete. Raw:\n{response.content}"
+            )
 
         content = strip_markdown(response.content)
         data = json.loads(content)
@@ -202,28 +206,11 @@ def route_primitive(
             logger.warning(f"Router returned unknown primitive '{selected}', defaulting to unit_ops_primitive")
             selected = "unit_ops_primitive"
 
-        # --- Turn recognition ---
-        raw_turn = data.get("turn_number")
-        observed_turn: int | None = None
-        if isinstance(raw_turn, int):
-            observed_turn = raw_turn
-        elif isinstance(raw_turn, float) and raw_turn == int(raw_turn):
-            observed_turn = int(raw_turn)
-
-        is_new_turn = False
-        if observed_turn is not None:
-            if _last_observed_turn is not None and observed_turn > _last_observed_turn:
-                is_new_turn = True
-                logger.debug(f"New game turn detected: {_last_observed_turn} → {observed_turn}")
-            _last_observed_turn = observed_turn
-
-        logger.debug(f"Router selected: {selected} (turn={observed_turn}, new={is_new_turn})")
+        logger.debug(f"Router selected: {selected}")
 
         return RouterResult(
             primitive=selected,
             reasoning=reasoning,
-            observed_turn=observed_turn,
-            is_new_turn=is_new_turn,
         )
 
     except (json.JSONDecodeError, KeyError, RuntimeError) as e:
@@ -231,9 +218,80 @@ def route_primitive(
         if response is not None:
             logger.error(f"Raw response:\n{response.content}")
             if response.finish_reason in _TRUNCATION_REASONS:
-                logger.error(f"Response was truncated (finish_reason={response.finish_reason}) -- this is the likely cause of the parse failure.")
+                logger.error(
+                    f"Response was truncated (finish_reason={response.finish_reason})"
+                    " -- this is the likely cause of the parse failure."
+                )
         logger.error("Defaulting to unit_ops_primitive")
         return RouterResult(primitive="unit_ops_primitive")
+
+
+def _build_recent_actions_string(ctx: ContextManager) -> str:
+    """Build a compressed string of the last 3 actions for repetition avoidance."""
+    last_actions = ctx.primitive_context.get_last_actions(3)
+    if not last_actions:
+        return "없음"
+
+    parts = []
+    for a in last_actions:
+        if a.action_type == "click":
+            parts.append(f"click({a.x},{a.y})")
+        elif a.action_type == "press":
+            parts.append(f"press({a.key})")
+        elif a.action_type == "drag":
+            parts.append(f"drag({a.x},{a.y}→{a.end_x},{a.end_y})")
+        elif a.action_type == "type":
+            parts.append(f"type({a.text[:20]})")
+        else:
+            parts.append(a.action_type)
+    return ", ".join(parts)
+
+
+def _build_strategy_with_directive(ctx: ContextManager, primitive_name: str) -> str:
+    """Combine strategy + primitive directive + live game observations.
+
+    Assembles:
+    1. strategy.text (from StrategyUpdater)
+    2. primitive_directives match (행동 기준 for this primitive)
+    3. ContextUpdater observations (위협/기회/상황요약 — the live game state)
+
+    If the primitive has no Korean mapping (unmapped), falls back to
+    full context from ``get_context_for_primitive()``.
+    """
+    from computer_use_test.agent.modules.router.primitive_registry import PRIMITIVE_TO_KOREAN
+
+    strategy_str = ctx.get_strategy_string()
+
+    # --- Primitive-specific directive ---
+    hl_ctx = ctx.high_level_context
+    if hl_ctx.current_strategy and hl_ctx.current_strategy.primitive_directives:
+        directive = get_directive_for_primitive(primitive_name, hl_ctx.current_strategy.primitive_directives)
+        if directive:
+            strategy_str = f"{strategy_str}\n\n[이 프리미티브 행동 기준] {directive}"
+        elif primitive_name not in PRIMITIVE_TO_KOREAN:
+            full_ctx = ctx.get_context_for_primitive(primitive_name)
+            strategy_str = f"{strategy_str}\n\n[게임 상태 컨텍스트]\n{full_ctx}"
+            logger.debug(f"Unmapped primitive '{primitive_name}': injecting full context as fallback")
+
+    # --- Live game observations from ContextUpdater (threats/opportunities/summary) ---
+    observation_parts = []
+
+    # Latest situation summary (from ContextUpdater background analysis)
+    if hl_ctx.notes:
+        observation_parts.append(hl_ctx.notes[-1])  # most recent summary
+
+    # Active threats
+    if hl_ctx.active_threats:
+        observation_parts.append(f"위협: {', '.join(hl_ctx.active_threats[:3])}")
+
+    # Opportunities
+    if hl_ctx.opportunities:
+        observation_parts.append(f"기회: {', '.join(hl_ctx.opportunities[:3])}")
+
+    if observation_parts:
+        strategy_str = f"{strategy_str}\n\n[현재 상황] {' | '.join(observation_parts)}"
+
+    return strategy_str
 
 
 def plan_action(
@@ -242,11 +300,15 @@ def plan_action(
     primitive_name: str,
     normalizing_range: int = 1000,
     high_level_strategy: str | None = None,
-    context_string: str | None = None,
+    recent_actions_string: str | None = None,
     hitl_directive: str | None = None,
-) -> AgentAction | None:
+    img_config: ImagePipelineConfig | None = None,
+) -> AgentAction | list[AgentAction] | None:
     """
-    Use VLM to generate the next action for the selected primitive.
+    Use VLM to generate the next action(s) for the selected primitive.
+
+    For multi-action primitives (e.g., policy_primitive), returns a list of
+    AgentActions to be executed sequentially. Otherwise returns a single action.
 
     Args:
         provider: VLM provider instance
@@ -254,24 +316,34 @@ def plan_action(
         primitive_name: Selected primitive (determines the prompt)
         normalizing_range: Coordinate normalization range
         high_level_strategy: Optional high-level strategy/goal to guide action selection
-        context_string: Optional context string from ContextManager
+        recent_actions_string: Compressed string of recent actions (for repetition avoidance)
         hitl_directive: Optional micro-level HITL directive (e.g., "병영을 최우선 선택")
+        img_config: Image pipeline config for planner (defaults to PLANNER_DEFAULT)
 
     Returns:
-        AgentAction with normalized coordinates, or None on failure
+        AgentAction, list[AgentAction], or None on failure
     """
     instruction = get_primitive_prompt(
         primitive_name,
         normalizing_range,
         high_level_strategy=high_level_strategy,
-        context=context_string or "현재 게임 상태 정보 없음",
+        recent_actions=recent_actions_string or "없음",
         hitl_directive=hitl_directive,
     )
+
+    if primitive_name == "policy_primitive":
+        return provider.analyze_multi(
+            pil_image=pil_image,
+            instruction=instruction,
+            normalizing_range=normalizing_range,
+            img_config=img_config,
+        )
 
     return provider.analyze(
         pil_image=pil_image,
         instruction=instruction,
         normalizing_range=normalizing_range,
+        img_config=img_config,
     )
 
 
@@ -291,6 +363,10 @@ def run_one_turn(
     debug_options: DebugOptions | None = None,
     command_queue: CommandQueue | None = None,
     agent_gate: AgentGate | None = None,
+    strategy_updater: StrategyUpdater | None = None,
+    turn_detector: TurnDetector | None = None,
+    router_img_config: ImagePipelineConfig | None = None,
+    planner_img_config: ImagePipelineConfig | None = None,
 ) -> TurnSummary | None:
     """
     Execute one full game turn.
@@ -328,9 +404,16 @@ def run_one_turn(
     ctx = context_manager or ContextManager.get_instance()
     dbg = debug_options or DebugOptions.none()
 
-    # Step 0: Strategy generation/refinement
-    strategy_string = None
-    if strategy_planner:
+    # Step 0: Read strategy (non-blocking when StrategyUpdater is active)
+    if high_level_strategy:
+        # CLI --strategy flag takes top priority
+        strategy_string = high_level_strategy
+    elif strategy_updater:
+        # Background StrategyUpdater keeps ctx updated — just read the latest
+        strategy_string = ctx.get_strategy_string()
+    elif strategy_planner:
+        # Fallback: synchronous VLM call (legacy path when no updater)
+        strategy_string = None
         try:
             structured_strategy = strategy_planner.generate_strategy(
                 context=ctx,
@@ -342,25 +425,32 @@ def run_one_turn(
         except Exception as e:
             logger.warning(f"Strategy generation failed: {e}, using fallback")
             strategy_string = high_level_strategy
-    elif high_level_strategy:
-        strategy_string = high_level_strategy
     else:
         strategy_string = ctx.get_strategy_string()
 
-    # Step 1: Observation
-    pil_image, screen_w, screen_h = capture_screen_pil()
+    # Step 1: Observation (cropped to game window if detected)
+    pil_image, screen_w, screen_h, x_offset, y_offset = capture_screen_pil()
 
-    # Step 2: Routing (also reads turn number from screen)
-    router_result = route_primitive(router_provider, pil_image)
+    # Step 1a: Submit to TurnDetector (background, non-blocking)
+    if turn_detector:
+        turn_detector.submit(pil_image)
+
+    # Step 2: Routing (classification only — no turn detection)
+    rl.update_phase("routing")
+    router_result = route_primitive(router_provider, pil_image, img_config=router_img_config)
     primitive_name = router_result.primitive
     macro_turn = macro_turn_manager.macro_turn_number if macro_turn_manager else 1
-    rl.route_result(primitive_name, router_result.reasoning, router_result.observed_turn, macro_turn, turn_number)
+
+    # Read turn from TurnDetector (instant)
+    detected_turn = turn_detector.latest_turn if turn_detector else None
+    rl.route_result(primitive_name, router_result.reasoning, detected_turn, macro_turn, turn_number)
 
     # Step 2a: Turn-number validation
+    is_new_turn = turn_detector.check_new_turn() if turn_detector else False
     if dbg.validate_turns:
         _get_turn_validator().validate(
-            observed_turn=router_result.observed_turn,
-            is_new_turn=router_result.is_new_turn,
+            observed_turn=detected_turn,
+            is_new_turn=is_new_turn,
             micro_turn=turn_number,
             macro_turn=macro_turn,
         )
@@ -371,10 +461,18 @@ def run_one_turn(
     if context_updater:
         context_updater.submit(pil_image)
 
-    # Handle game-turn transition detected by router
-    if router_result.is_new_turn and macro_turn_manager:
+    # Submit strategy triggers based on TurnDetector result
+    if strategy_updater and is_new_turn:
+        from computer_use_test.agent.modules.strategy.strategy_updater import StrategyRequest, StrategyTrigger
+
+        strategy_updater.submit(StrategyRequest(StrategyTrigger.NEW_GAME_TURN))
+        strategy_updater.submit_if_periodic_due()
+
+    # Handle game-turn transition detected by TurnDetector
+    if is_new_turn and macro_turn_manager:
         macro_summary = macro_turn_manager.handle_macro_turn_end()
-        logger.debug(f"Macro-turn {macro_summary.macro_turn_number} ended (turn {router_result.observed_turn}): {macro_summary.llm_summary[:80]}...")
+        mt_num = macro_summary.macro_turn_number
+        logger.debug(f"Macro-turn {mt_num} ended (turn {detected_turn}): {macro_summary.llm_summary[:80]}...")
         if state_bridge:
             state_bridge.update_macro_turn(macro_summary.macro_turn_number + 1)
 
@@ -393,7 +491,18 @@ def run_one_turn(
 
     primitive_hint = ""
     if queue_result.strategy_override:
-        if strategy_planner:
+        if strategy_updater:
+            # Non-blocking: submit to background worker + apply text override immediately
+            from computer_use_test.agent.modules.strategy.strategy_updater import StrategyRequest, StrategyTrigger
+
+            strategy_updater.submit(
+                StrategyRequest(StrategyTrigger.HITL_CHANGE, human_input=queue_result.strategy_override)
+            )
+            # CRITICAL: micro command is applied immediately this turn — don't wait for BG result
+            primitive_hint = queue_result.strategy_override
+            strategy_string = f"[사용자 최우선 지시] {queue_result.strategy_override}\n\n{strategy_string or ''}"
+            rl.strategy_update("HITL Override", queue_result.strategy_override or "")
+        elif strategy_planner:
             try:
                 refined = strategy_planner.refine_strategy(queue_result.strategy_override, ctx)
                 ctx.set_strategy(refined)
@@ -412,31 +521,39 @@ def run_one_turn(
         action = queue_result.override_action
         rl.hitl_event("OVERRIDE", f"{action.action} ({action.x}, {action.y})")
         if state_bridge:
-            state_bridge.update_current_action(primitive_name, f"[HITL] {action.action} ({action.x}, {action.y})", action.reasoning)
+            state_bridge.update_current_action(
+                primitive_name, f"[HITL] {action.action} ({action.x}, {action.y})", action.reasoning
+            )
             state_bridge.broadcast_agent_phase("사용자 명령 실행 중")
     else:
-        # Step 3: Planning with context (normal VLM flow)
-        # NOTE: get_context_for_primitive() reads the *latest* context, which may
-        # already include updates from the background ContextUpdater.
+        # Step 3: Planning — strategy + directive + recent_actions
+        rl.update_phase("planning")
         if state_bridge:
             state_bridge.broadcast_agent_phase("추론 중...")
         logger.debug(f"Planning: generating action for {primitive_name}...")
 
-        context_string = ctx.get_context_for_primitive(primitive_name)
+        # Build strategy with primitive-specific directive
+        if strategy_updater and not high_level_strategy:
+            strategy_string = _build_strategy_with_directive(ctx, primitive_name)
+        elif not strategy_string:
+            strategy_string = _build_strategy_with_directive(ctx, primitive_name)
+
+        # Build recent actions string (compressed, for repetition avoidance)
+        recent_actions_str = _build_recent_actions_string(ctx)
 
         if dbg.log_context:
-            log_context(primitive_name, strategy_string, context_string)
+            log_context(primitive_name, strategy_string, recent_actions_str)
         else:
-            logger.debug(f"Context for primitive:\n{context_string}")
+            logger.debug(f"Recent actions for primitive: {recent_actions_str}")
 
-        # Optionally augment with knowledge
+        # Optionally augment strategy with knowledge
         if knowledge_manager and knowledge_manager.is_available():
             query = f"{primitive_name} 전략 가이드"
             try:
                 knowledge_result = knowledge_manager.query(query, top_k=2)
                 if not knowledge_result.is_empty():
                     knowledge_section = knowledge_result.to_prompt_string(max_chunks=2, max_tokens=300)
-                    context_string = f"{context_string}\n\n{knowledge_section}"
+                    strategy_string = f"{strategy_string}\n\n{knowledge_section}"
                     logger.debug(f"Added {len(knowledge_result.chunks)} knowledge chunks")
             except Exception as e:
                 logger.warning(f"Knowledge retrieval failed: {e}")
@@ -447,12 +564,15 @@ def run_one_turn(
             primitive_name,
             normalizing_range,
             high_level_strategy=strategy_string,
-            context_string=context_string,
+            recent_actions_string=recent_actions_str,
             hitl_directive=primitive_hint if primitive_hint else None,
+            img_config=planner_img_config,
         )
 
-        if action is None:
+        # Handle None and empty list
+        if action is None or (isinstance(action, list) and len(action) == 0):
             logger.error("  VLM returned no action. Turn aborted.")
+            rl.update_phase("idle")
             ctx.record_action(
                 action_type="none",
                 primitive=primitive_name,
@@ -467,72 +587,95 @@ def run_one_turn(
                 error_message="VLM returned no action",
             )
 
+        # Display action result(s)
+        display_action = action[0] if isinstance(action, list) else action
         extra = {}
-        if action.action == "drag":
-            extra["End Coords"] = f"({action.end_x}, {action.end_y})"
-        if action.key:
-            extra["Key"] = action.key
-        if action.text:
-            extra["Text"] = action.text
+        if display_action.action == "drag":
+            extra["End Coords"] = f"({display_action.end_x}, {display_action.end_y})"
+        if display_action.key:
+            extra["Key"] = display_action.key
+        if display_action.text:
+            extra["Text"] = display_action.text
+        if isinstance(action, list) and len(action) > 1:
+            extra["Multi-Action"] = f"{len(action)} actions"
         rl.action_result(
-            action_type=action.action,
-            coords=(action.x, action.y),
-            reasoning=action.reasoning or "",
+            action_type=display_action.action,
+            coords=(display_action.x, display_action.y),
+            reasoning=display_action.reasoning or "",
             extra=extra or None,
         )
 
         # Update state bridge with current action info
         if state_bridge:
-            action_desc = f"{action.action} ({action.x}, {action.y})"
-            state_bridge.update_current_action(primitive_name, action_desc, action.reasoning or "")
+            action_desc = f"{display_action.action} ({display_action.x}, {display_action.y})"
+            state_bridge.update_current_action(primitive_name, action_desc, display_action.reasoning or "")
 
-    # Step 4: Execution
+    # Step 4: Execution — handle both single action and multi-action lists
+    rl.update_phase("executing")
     if delay_before_action > 0:
         time.sleep(delay_before_action)
 
-    try:
-        execute_action(action, screen_w, screen_h, normalizing_range)
-        rl.execution_status(True)
-        execution_result = "success"
-        error_message = ""
-    except Exception as e:
-        rl.execution_status(False, str(e))
-        execution_result = "failed"
-        error_message = str(e)
+    # Normalize to list for uniform handling
+    actions_list: list[AgentAction] = action if isinstance(action, list) else [action]
 
-    # Step 5: Record action in context
-    ctx.record_action(
-        action_type=action.action,
-        primitive=primitive_name,
-        x=action.x,
-        y=action.y,
-        end_x=action.end_x if action.action == "drag" else 0,
-        end_y=action.end_y if action.action == "drag" else 0,
-        key=action.key,
-        text=action.text,
-        result=execution_result,
-        error_message=error_message,
-    )
+    execution_result = "success"
+    error_message = ""
+    for i, act in enumerate(actions_list):
+        try:
+            execute_action(act, screen_w, screen_h, normalizing_range, x_offset, y_offset)
+            if len(actions_list) > 1:
+                logger.debug(f"Multi-action {i + 1}/{len(actions_list)} executed: {act.action}")
+                if i < len(actions_list) - 1:
+                    time.sleep(0.3)
+        except Exception as e:
+            rl.execution_status(False, str(e))
+            execution_result = "failed"
+            error_message = str(e)
+            break
+
+    if execution_result == "success":
+        rl.execution_status(True)
+
+    rl.update_phase("idle")
+
+    # Step 5: Record action(s) in context
+    # Use the first action for summary; record all in context
+    first_action = actions_list[0]
+    for act in actions_list:
+        ctx.record_action(
+            action_type=act.action,
+            primitive=primitive_name,
+            x=act.x,
+            y=act.y,
+            end_x=act.end_x if act.action == "drag" else 0,
+            end_y=act.end_y if act.action == "drag" else 0,
+            key=act.key,
+            text=act.text,
+            result=execution_result,
+            error_message=error_message,
+        )
 
     # Step 6: Macro-turn tracking (fallback: keyword-based detection from old flow)
     if macro_turn_manager:
-        macro_turn_manager.record_micro_turn(primitive_name, action.reasoning or "")
-        # Keyword-based fallback detection (supplements router-based detection above)
-        if not router_result.is_new_turn and macro_turn_manager.is_next_turn_action(primitive_name, action):
+        macro_turn_manager.record_micro_turn(primitive_name, first_action.reasoning or "")
+        # Keyword-based fallback detection (supplements TurnDetector-based detection above)
+        if not is_new_turn and macro_turn_manager.is_next_turn_action(primitive_name, first_action):
             macro_summary = macro_turn_manager.handle_macro_turn_end()
-            logger.debug(f"Macro-turn {macro_summary.macro_turn_number} ended (keyword fallback): {macro_summary.llm_summary[:80]}...")
+            mt_num = macro_summary.macro_turn_number
+            logger.debug(f"Macro-turn {mt_num} ended (keyword fallback): {macro_summary.llm_summary[:80]}...")
             if state_bridge:
                 state_bridge.update_macro_turn(macro_summary.macro_turn_number + 1)
 
-    rl.turn_summary(turn_number, primitive_name, action.action, execution_result == "success")
+    action_desc = first_action.action if len(actions_list) == 1 else f"{first_action.action}(x{len(actions_list)})"
+    rl.turn_summary(turn_number, primitive_name, action_desc, execution_result == "success")
     return TurnSummary(
         turn_number=turn_number,
         primitive=primitive_name,
-        action_type=action.action,
+        action_type=first_action.action,
         success=execution_result == "success",
-        reasoning=action.reasoning or "",
+        reasoning=first_action.reasoning or "",
         error_message=error_message,
-        coords=(action.x, action.y),
+        coords=(first_action.x, first_action.y),
     )
 
 
@@ -554,6 +697,10 @@ def run_multi_turn(
     context_updater: ContextUpdater | None = None,
     debug_options: DebugOptions | None = None,
     agent_gate: AgentGate | None = None,
+    strategy_updater: StrategyUpdater | None = None,
+    turn_detector: TurnDetector | None = None,
+    router_img_config: ImagePipelineConfig | None = None,
+    planner_img_config: ImagePipelineConfig | None = None,
 ) -> None:
     """
     Execute multiple consecutive turns.
@@ -626,6 +773,10 @@ def run_multi_turn(
                 debug_options=debug_options,
                 command_queue=command_queue,
                 agent_gate=agent_gate,
+                strategy_updater=strategy_updater,
+                turn_detector=turn_detector,
+                router_img_config=router_img_config,
+                planner_img_config=planner_img_config,
             )
 
             if summary is None or not summary.success:

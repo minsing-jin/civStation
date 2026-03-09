@@ -177,7 +177,11 @@ class GlobalContext:
             lines.append("")
             lines.append(f"🏛️ 도시 ({len(self.cities)}개, 총 인구 {self.total_population}):")
             for city in self.cities[:5]:  # Limit to 5 cities for brevity
-                production_info = f", 생산: {city.current_production} ({city.production_turns_left}턴)" if city.current_production else ""
+                production_info = (
+                    f", 생산: {city.current_production} ({city.production_turns_left}턴)"
+                    if city.current_production
+                    else ""
+                )
                 lines.append(f"  - {city.name} (인구 {city.population}{production_info})")
 
         if self.current_research:

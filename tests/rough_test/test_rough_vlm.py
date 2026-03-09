@@ -5,19 +5,30 @@ import os
 from abc import ABC, abstractmethod
 from io import BytesIO
 
-import pyautogui
 from dotenv import load_dotenv
 from PIL import Image
+
+try:
+    import pyautogui
+except Exception:  # pragma: no cover - depends on GUI availability
+    pyautogui = None
 
 load_dotenv()
 
 
+def _require_pyautogui():
+    if pyautogui is None:
+        raise RuntimeError("pyautogui is unavailable in this environment")
+    return pyautogui
+
+
 def capture_screen_pil(max_size=2048):
     """화면을 캡처하고 리사이징된 PIL 이미지를 반환"""
-    screenshot = pyautogui.screenshot()
+    gui = _require_pyautogui()
+    screenshot = gui.screenshot()
 
     # Retina 디스플레이 등 좌표계 보정을 위해 논리적 해상도 가져오기
-    screen_w, screen_h = pyautogui.size()
+    screen_w, screen_h = gui.size()
 
     if screenshot.mode in ("RGBA", "P"):
         screenshot = screenshot.convert("RGB")
@@ -195,6 +206,8 @@ def execute_action(action_plan, screen_w, screen_h, normalizing_range=1000):
     if not action_plan:
         return
 
+    gui = _require_pyautogui()
+
     # [수정된 부분] action_plan이 리스트로 들어올 경우 첫 번째 요소 선택
     if isinstance(action_plan, list):
         if len(action_plan) == 0:
@@ -221,22 +234,22 @@ def execute_action(action_plan, screen_w, screen_h, normalizing_range=1000):
         button = action_plan.get("button", "left")
 
         print(f"[*] 이동 및 클릭: ({real_x}, {real_y}) - {button}")
-        pyautogui.moveTo(real_x, real_y, duration=0.5)
-        pyautogui.click(button=button)
+        gui.moveTo(real_x, real_y, duration=0.5)
+        gui.click(button=button)
 
     # 2. 키보드 입력 (단축키 등)
     elif action_type == "press":
         key = action_plan.get("key")
         if key:
             print(f"[*] 키보드 누름: {key}")
-            pyautogui.press(key)
+            gui.press(key)
 
     # 3. 텍스트 타이핑
     elif action_type == "type":
         text = action_plan.get("text")
         if text:
             print(f"[*] 텍스트 입력: {text}")
-            pyautogui.write(text, interval=0.1)
+            gui.write(text, interval=0.1)
 
 
 # ==============================================================================

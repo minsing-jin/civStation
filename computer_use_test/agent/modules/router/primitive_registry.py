@@ -1,14 +1,20 @@
 """
 Primitive Registry — Single source of truth for all primitives.
 
-- criteria: Router가 이 primitive를 선택하는 조건 (한국어)
-- prompt: Primitive가 사용하는 action 프롬프트 템플릿
-- priority: Router 프롬프트에서의 판단 우선순위 (낮을수록 먼저 판단)
+Each entry defines:
+- criteria: Condition for the router to select this primitive (Korean, matching game UI)
+  (Router가 이 primitive를 선택하는 조건)
+- prompt: Action prompt template used by the primitive
+  (Primitive가 사용하는 action 프롬프트 템플릿)
+- priority: Evaluation order in the router prompt — lower = checked first
+  (Router 프롬프트에서의 판단 우선순위, 낮을수록 먼저 판단)
 
-새로운 primitive 추가 시 여기에만 추가하면
-ROUTER_PROMPT, PRIMITIVE_NAMES, get_primitive_prompt() 모두 자동 반영됨.
+To add a new primitive, add an entry to PRIMITIVE_REGISTRY below.
+ROUTER_PROMPT, PRIMITIVE_NAMES, and get_primitive_prompt() auto-update.
 """
 
+import logging
+import warnings
 from dataclasses import dataclass
 
 from computer_use_test.utils.prompts.primitive_prompt import (
@@ -18,24 +24,25 @@ from computer_use_test.utils.prompts.primitive_prompt import (
     DIPLOMATIC_PROMPT,
     GOVERNOR_PROMPT,
     JSON_FORMAT_INSTRUCTION,
+    MULTI_ACTION_SEQUENCE_JSON_FORMAT_INSTRUCTION,
     POLICY_PROMPT,
     POPUP_PROMPT,
     RESEARCH_MANAGER_PROMPT,
     UNIT_OPS_PROMPT,
 )
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class RouterResult:
     """Result from the Router's screenshot classification.
 
-    Contains the selected primitive and turn-recognition metadata.
+    Turn detection is handled by TurnDetector (background thread).
     """
 
     primitive: str
     reasoning: str = ""
-    observed_turn: int | None = None  # Turn number read from the screen (top-right)
-    is_new_turn: bool = False  # True when the in-game turn number has incremented
 
 
 # ==============================================================================
@@ -43,67 +50,52 @@ class RouterResult:
 # ==============================================================================
 PRIMITIVE_REGISTRY: dict[str, dict] = {
     "popup_primitive": {
-        "criteria": (
-            "화면에 팝업상자가 나타나 있다. "
-            "또는 좌측 화면에 스킬트리 선택화면이 없는상태에서 화면 오른쪽 아래에 '다음 턴', '연구 선택', '생산 품목', "
-            "'사회 제도 선택' 같은 버튼이 보인다."
-        ),
+        "criteria": "팝업 표시됨. 또는 우하단에 '다음 턴'/'연구 선택'/'생산 품목' 버튼 보임.",
         "prompt": POPUP_PROMPT,
         "priority": 1,
     },
     "governor_primitive": {
-        "criteria": (
-            "화면에 '총독' 관련 텍스트가 보이거나 총독 카드들이 나열된 화면이다. "
-            "또는 화면 좌측 상단에 '다음 위치에 총독 배정'이라는 텍스트가 보이는 지도 화면이다. "
-            "우측 아래에 총독 임명 선택 창 팝업창이 보인다."
-        ),
+        "criteria": "총독 카드 나열 또는 '총독 배정' 텍스트 표시. 총독 임명 팝업 포함.",
         "prompt": GOVERNOR_PROMPT,
         "priority": 2,
     },
     "unit_ops_primitive": {
-        "criteria": (
-            "유닛이 선택되어 있어서 오른쪽 아래에 유닛 이름과 이동력이 있는 정보가 보이고, "
-            "맵에서 유닛 조작(이동, 공격, 건설 등)이 필요한 상황이다. "
-            "하늘색 이동 가능 타일이 보이거나, 적 유닛/도시가 인접해 공격이 가능한 상황을 포함한다."
-        ),
+        "criteria": "유닛 선택됨 (우하단 유닛정보). 이동/공격/건설 필요. 하늘색 타일 또는 적 인접.",
         "prompt": UNIT_OPS_PROMPT,
         "priority": 3,
     },
     "research_select_primitive": {
-        "criteria": "화면 오른쪽 아래에 연구 선택 팝업이 나타나 있다. 연구할 기술 목록이 보인다.",
+        "criteria": "연구 선택 팝업 표시. 기술 목록 보임.",
         "prompt": RESEARCH_MANAGER_PROMPT,
         "priority": 4,
     },
     "city_production_primitive": {
-        "criteria": "화면 오른쪽에 생산 품목 선택 팝업이 나타나 있다. 생산할 수 있는 건물/유닛 목록이 보인다.",
+        "criteria": "생산 품목 선택 팝업 표시. 건물/유닛 목록 보임.",
         "prompt": CITY_PRODUCTION_PROMPT,
         "priority": 5,
     },
     "science_decision_primitive": {
-        "criteria": "기술 트리 화면이 열려 있다. 기술 노드들이 연결된 트리 형태로 보인다.",
+        "criteria": "기술 트리 화면 열림. 기술 노드 트리 형태.",
         "prompt": RESEARCH_MANAGER_PROMPT,
         "priority": 6,
     },
     "culture_decision_primitive": {
-        "criteria": "사회 제도 트리 화면이 열려 있다. 사회 제도 노드들이 연결된 트리 형태로 보인다.",
+        "criteria": "사회 제도 트리 화면 열림. 사회 제도 노드 트리 형태.",
         "prompt": CULTURE_MANAGER_PROMPT,
         "priority": 7,
     },
     "diplomatic_primitive": {
-        "criteria": "외교 화면이 열려 있다. 상대 문명과의 대화, 거래, 전쟁 선포 등 외교 상호작용이 필요하다.",
+        "criteria": "외교 화면. 대화/거래/전쟁 선포 등 외교 상호작용.",
         "prompt": DIPLOMATIC_PROMPT,
         "priority": 8,
     },
     "combat_primitive": {
-        "criteria": "전투 유닛이 적과 인접해 있거나 공격/방어 결정이 필요한 전투 상황이다.",
+        "criteria": "전투 유닛이 적 인접. 공격/방어 결정 필요.",
         "prompt": COMBAT_PROMPT,
         "priority": 9,
     },
     "policy_primitive": {
-        "criteria": "1. '정부(Government)' 화면이 열려 있음. "
-        "2. '정부 화면'에서 '정책 변경' 탭이 활성화됨. "
-        "3. 새로운 정부(과두제 등)를 선택하는 화면임. "
-        "4. 정책 화면을 닫을 때 발생하는 '정책변경이 확정되지 않았습니다' 팝업이 떠 있음.",
+        "criteria": "정부/정책 변경 화면. 정부 선택 또는 '정책변경 미확정' 팝업.",
         "prompt": POLICY_PROMPT,
         "priority": 10,
     },
@@ -123,38 +115,67 @@ def _build_router_prompt() -> str:
     for i, (name, entry) in enumerate(sorted_entries, 1):
         criteria_lines.append(f'{i}. "{name}": {entry["criteria"]}')
 
-    criteria_block = "\n\n".join(criteria_lines)
+    criteria_block = "\n".join(criteria_lines)
 
-    return f"""너는 문명6 게임 상태를 분석하는 라우터야.
-스크린샷을 보고 현재 상황을 정확히 하나의 카테고리로 분류해.
-
-추가로, 화면 오른쪽 위(Top-right)에 표시된 현재 턴 숫자를 읽어서 "turn_number" 필드에 정수로 기록해.
-턴 숫자를 읽을 수 없는 경우 null로 표기해.
-
-분류 기준 (우선순위 순서대로 판단):
+    return f"""문명6 스크린샷을 분류해.
+우선순위 순서대로 판단:
 
 {criteria_block}
 
-위 기준 중 해당하는 것이 없다면 "popup_primitive"로 분류해 (다음 턴 버튼을 눌러야 할 가능성이 높음).
-
-반드시 아래 JSON 형식으로만 응답해:
-{{
-    "primitive": "위_카테고리_중_하나",
-    "reasoning": "이유를 간단히 설명",
-    "turn_number": 현재_턴_숫자_또는_null
-}}
+해당 없으면 "popup_primitive" (다음 턴).
+JSON만 응답:
+{{"primitive":"카테고리","reasoning":"이유"}}
 """
 
 
 ROUTER_PROMPT = _build_router_prompt()
 
 
+# ==============================================================================
+# Primitive ↔ Korean label mapping (matches primitive_directives keys)
+# ==============================================================================
+PRIMITIVE_TO_KOREAN: dict[str, str] = {
+    "unit_ops_primitive": "유닛 조작",
+    "popup_primitive": "팝업",
+    "governor_primitive": "총독",
+    "research_select_primitive": "기술 연구",
+    "science_decision_primitive": "기술 연구",  # shares key with research_select
+    "city_production_primitive": "도시 생산",
+    "culture_decision_primitive": "사회 제도",
+    "diplomatic_primitive": "외교",
+    "combat_primitive": "전투",
+    "policy_primitive": "정책",
+}
+
+
+def get_directive_for_primitive(
+    primitive_name: str,
+    primitive_directives: dict[str, str],
+) -> str | None:
+    """Look up the matching directive from strategy.primitive_directives.
+
+    Args:
+        primitive_name: Internal primitive name (e.g. "unit_ops_primitive")
+        primitive_directives: Korean-keyed dict from StructuredStrategy
+
+    Returns:
+        The directive string, or None if no match found.
+    """
+    korean_key = PRIMITIVE_TO_KOREAN.get(primitive_name)
+    if korean_key is None:
+        logger.warning(f"No Korean mapping for primitive '{primitive_name}'")
+        return None
+    return primitive_directives.get(korean_key)
+
+
 def get_primitive_prompt(
     primitive_name: str,
     normalizing_range: int = 1000,
     high_level_strategy: str | None = None,
-    context: str | None = None,
+    recent_actions: str | None = None,
     hitl_directive: str | None = None,
+    # Deprecated — kept for backward compat
+    context: str | None = None,
     **kwargs,
 ) -> str:
     """
@@ -165,11 +186,10 @@ def get_primitive_prompt(
         normalizing_range: Coordinate normalization range (default: 1000)
         high_level_strategy: Optional high-level strategy context to guide decisions.
                          If None, uses default placeholder strategy.
-        context: Primitive-specific information like statics, current state.
-               ex) "city population: 5, production: 10, food: 8, science: 12.
-                    Current turn: 150. Current Production Items: ..."
+        recent_actions: Compressed string of recent actions (for repetition avoidance).
         hitl_directive: Optional micro-level HITL directive (e.g., "병영을 최우선 선택").
                        Injected into the prompt with highest priority.
+        context: **Deprecated** — ignored. Use recent_actions instead.
 
     Returns:
         Prompt string for the primitive with formatted JSON instructions
@@ -177,23 +197,31 @@ def get_primitive_prompt(
     Raises:
         ValueError: If primitive name is not recognized
     """
+    if context is not None:
+        warnings.warn(
+            "get_primitive_prompt(context=...) is deprecated. Use recent_actions= instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
     if primitive_name not in PRIMITIVE_REGISTRY:
         raise ValueError(f"Unknown primitive: {primitive_name}. Available: {PRIMITIVE_NAMES}")
 
     if high_level_strategy is None:
         high_level_strategy = "과학 승리를 목표로 함"
 
-    # Build hitl_directive section (empty string if no directive)
-    hitl_directive_section = ""
-    if hitl_directive:
-        hitl_directive_section = hitl_directive
+    hitl_directive_section = hitl_directive or ""
+    recent_actions_section = recent_actions or "없음"
 
-    json_instruction = JSON_FORMAT_INSTRUCTION.format(normalizing_range=normalizing_range)
+    if primitive_name == "policy_primitive":
+        json_instruction = MULTI_ACTION_SEQUENCE_JSON_FORMAT_INSTRUCTION.format(normalizing_range=normalizing_range)
+    else:
+        json_instruction = JSON_FORMAT_INSTRUCTION.format(normalizing_range=normalizing_range)
     prompt_template = PRIMITIVE_REGISTRY[primitive_name]["prompt"]
     return prompt_template.format(
         json_instruction=json_instruction,
         high_level_strategy=high_level_strategy,
-        context=context,
+        recent_actions=recent_actions_section,
         hitl_directive=hitl_directive_section,
         **kwargs,
     )

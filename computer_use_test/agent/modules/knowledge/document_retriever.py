@@ -75,7 +75,11 @@ class DocumentRetriever(BaseKnowledgeRetriever):
             self.index_path.parent.mkdir(parents=True, exist_ok=True)
 
             # Don't save embeddings to JSON (too large)
-            save_data = {"documents": {doc_id: {k: v for k, v in doc.items() if k != "embedding"} for doc_id, doc in self.documents.items()}}
+            save_data = {
+                "documents": {
+                    doc_id: {k: v for k, v in doc.items() if k != "embedding"} for doc_id, doc in self.documents.items()
+                }
+            }
 
             with open(self.index_path, "w", encoding="utf-8") as f:
                 json.dump(save_data, f, ensure_ascii=False, indent=2)
