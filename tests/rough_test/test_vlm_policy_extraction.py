@@ -8,7 +8,6 @@ from io import BytesIO
 from pathlib import Path
 
 import PIL.Image
-import pyautogui
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
@@ -34,6 +33,11 @@ from computer_use_test.utils.ui_benchmarking import (
     score_actions_against_case,
 )
 
+try:
+    import pyautogui
+except Exception:  # pragma: no cover - depends on GUI availability
+    pyautogui = None
+
 load_dotenv()
 
 console = Console()
@@ -41,6 +45,12 @@ console = Console()
 ALLOWED_PROMPT_VARIANTS = {"long_prompt", "concise_prompt"}
 ALLOWED_SIZE_MODES = {"raw", "compressed", "downscale_restore", "compressed_downscale_restore"}
 ALLOWED_BACKGROUND_MODES = {"none", "color"}
+
+
+def _require_pyautogui():
+    if pyautogui is None:
+        raise RuntimeError("pyautogui is unavailable in this environment")
+    return pyautogui
 
 
 @dataclass(frozen=True)
@@ -442,11 +452,12 @@ def restore_actions_to_base_norm(
 
 
 def capture_live_screenshot(countdown_sec: int = 3, save_path: str | None = None) -> PIL.Image.Image:
+    gui = _require_pyautogui()
     if countdown_sec > 0:
         print(f"[INFO] {countdown_sec}초 후 현재 화면을 캡처합니다. 문명6 화면으로 전환하세요.")
         time.sleep(countdown_sec)
 
-    screenshot = pyautogui.screenshot()
+    screenshot = gui.screenshot()
     screenshot = screenshot.convert("RGB")
 
     if save_path:
@@ -1039,7 +1050,8 @@ def execute_action_sequence_live(
     drag_hold_sec: float = 0.08,
     drag_drop_hold_sec: float = 0.05,
 ) -> None:
-    screen_w, screen_h = pyautogui.size()
+    gui = _require_pyautogui()
+    screen_w, screen_h = gui.size()
 
     for idx, action in enumerate(actions, start=1):
         action_type = str(action.get("action", "")).strip()
@@ -1049,8 +1061,8 @@ def execute_action_sequence_live(
             x = norm_to_real(action.get("x", 0), screen_w, normalizing_range)
             y = norm_to_real(action.get("y", 0), screen_h, normalizing_range)
             button = str(action.get("button", "left") or "left")
-            pyautogui.moveTo(x, y, duration=max(0.0, move_duration_sec))
-            pyautogui.click(button=button)
+            gui.moveTo(x, y, duration=max(0.0, move_duration_sec))
+            gui.click(button=button)
 
         elif action_type == "drag":
             start_x = norm_to_real(action.get("x", 0), screen_w, normalizing_range)
@@ -1059,26 +1071,26 @@ def execute_action_sequence_live(
             end_y = norm_to_real(action.get("end_y", 0), screen_h, normalizing_range)
             button = str(action.get("button", "left") or "left")
             console.print(f"[cyan]drag[/cyan] start=({start_x}, {start_y}) end=({end_x}, {end_y}) button={button}")
-            pyautogui.moveTo(start_x, start_y, duration=max(0.0, move_duration_sec))
-            pyautogui.mouseDown(x=start_x, y=start_y, button=button)
+            gui.moveTo(start_x, start_y, duration=max(0.0, move_duration_sec))
+            gui.mouseDown(x=start_x, y=start_y, button=button)
             if drag_hold_sec > 0:
                 time.sleep(drag_hold_sec)
-            pyautogui.moveTo(end_x, end_y, duration=max(0.0, move_duration_sec))
+            gui.moveTo(end_x, end_y, duration=max(0.0, move_duration_sec))
             if drag_drop_hold_sec > 0:
                 time.sleep(drag_drop_hold_sec)
-            pyautogui.mouseUp(x=end_x, y=end_y, button=button)
+            gui.mouseUp(x=end_x, y=end_y, button=button)
 
         elif action_type == "press":
             key = str(action.get("key", "")).strip()
             if key and key.lower() != "none":
-                pyautogui.press(key)
+                gui.press(key)
             else:
                 console.print("[yellow]skip[/yellow] press action has empty key")
 
         elif action_type == "type":
             text = str(action.get("text", ""))
             if text and text.lower() != "none":
-                pyautogui.write(text, interval=0.06)
+                gui.write(text, interval=0.06)
             else:
                 console.print("[yellow]skip[/yellow] type action has empty text")
 
