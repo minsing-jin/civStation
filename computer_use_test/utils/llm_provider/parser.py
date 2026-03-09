@@ -39,18 +39,25 @@ def strip_markdown(text: str) -> str:
     Strip markdown code block wrappers from response text.
 
     Handles various markdown formats:
-    - ```json...```
+    - ```json...``` (whole response is a code block)
+    - Preamble text + ```json...``` (VLM adds reasoning before JSON)
     - ```...```
     - Multiple closing ```
     - Extra whitespace
     """
     content = text.strip()
 
-    # Remove opening fence
+    # Remove opening fence (response starts with code block)
     if content.startswith("```json"):
         content = content[7:].lstrip()
     elif content.startswith("```"):
         content = content[3:].lstrip()
+    else:
+        # Preamble text before code block — extract the code block content
+        fence_match = re.search(r"```(?:json)?\s*\n?([\s\S]*?)```", content)
+        if fence_match:
+            content = fence_match.group(1).strip()
+            return content
 
     # Remove all closing fences (handle multiple ``` with possible newlines)
     # Use regex to remove trailing ``` blocks
@@ -130,7 +137,16 @@ def parse_action_json(response_text: str) -> AgentAction | None:
         content = strip_markdown(response_text)
         logger.debug(f"Stripped content for parsing:\n{content}")
 
-        data = json.loads(content)
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError:
+            # Fallback: find first JSON object by matching outermost { }
+            first_brace = content.find("{")
+            last_brace = content.rfind("}")
+            if first_brace != -1 and last_brace > first_brace:
+                data = json.loads(content[first_brace : last_brace + 1])
+            else:
+                raise
 
         # Handle list response
         if isinstance(data, list):
@@ -236,7 +252,21 @@ def parse_action_json_list(response_text: str) -> list[AgentAction]:
         content = strip_markdown(response_text)
         logger.debug(f"Stripped content for multi-action parsing:\n{content}")
 
-        data = json.loads(content)
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError:
+            # Fallback: find JSON array [...] or object {...}
+            for start_char, end_char in [("[", "]"), ("{", "}")]:
+                first = content.find(start_char)
+                last = content.rfind(end_char)
+                if first != -1 and last > first:
+                    try:
+                        data = json.loads(content[first : last + 1])
+                        break
+                    except json.JSONDecodeError:
+                        continue
+            else:
+                raise
 
         # Single object → wrap in list
         if isinstance(data, dict):

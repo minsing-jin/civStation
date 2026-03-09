@@ -116,7 +116,17 @@ def parse_args() -> configargparse.Namespace:
         "(requires --control-api/--status-ui or --relay-url)",
     )
 
-    # --- Group 7: Relay ---
+    # --- Group 7: Image Pipeline ---
+    img_group = parser.add_argument_group("Image Pipeline (per-site preprocessing)")
+    for _site in ("router", "planner", "context", "turn-detector"):
+        img_group.add_argument(f"--{_site}-img-preset", help=f"Preset name for {_site} images")
+        img_group.add_argument(f"--{_site}-img-max-long-edge", type=int, help=f"Max long edge for {_site}")
+        img_group.add_argument(f"--{_site}-img-ui-filter", help=f"UI filter mode for {_site}")
+        img_group.add_argument(f"--{_site}-img-color", help=f"Color policy for {_site}")
+        img_group.add_argument(f"--{_site}-img-encode", help=f"Encode mode for {_site}")
+        img_group.add_argument(f"--{_site}-img-jpeg-quality", type=int, help=f"JPEG quality for {_site}")
+
+    # --- Group 8: Relay ---
     relay_group = parser.add_argument_group("Relay (remote HITL via external relay server)")
     relay_group.add_argument("--relay-url", help="WebSocket URL of the relay server (wss://...)")
     relay_group.add_argument(
@@ -278,6 +288,14 @@ def main():
             chat_app.stop()
         return
 
+    # 2b. Image Pipeline Configs
+    from computer_use_test.utils.image_pipeline import config_from_args as img_config_from_args
+
+    router_img_config = img_config_from_args(args, "router")
+    planner_img_config = img_config_from_args(args, "planner")
+    context_img_config = img_config_from_args(args, "context")
+    turn_detector_img_config = img_config_from_args(args, "turn_detector")
+
     # 3. Command Queue + Queue Listener (Phase 1)
     command_queue = CommandQueue()
     queue_listener = None
@@ -303,7 +321,7 @@ def main():
     try:
         from computer_use_test.agent.modules.context.context_updater import ContextUpdater
 
-        context_updater = ContextUpdater(ctx, router_provider)
+        context_updater = ContextUpdater(ctx, router_provider, img_config=context_img_config)
         context_updater.start()
         logger.info("ContextUpdater background worker started")
     except Exception as e:
@@ -320,7 +338,7 @@ def main():
             from computer_use_test.agent.modules.context.turn_detector import TurnDetector
 
             td_provider = create_provider(provider_name=td_provider_name, model=td_model)
-            turn_detector = TurnDetector(td_provider)
+            turn_detector = TurnDetector(td_provider, img_config=turn_detector_img_config)
             turn_detector.start()
             logger.info("TurnDetector background worker started (calibration deferred to first game screenshot)")
         except Exception as e:
@@ -521,6 +539,8 @@ def main():
             "knowledge_manager": knowledge_manager,
             "strategy_updater": strategy_updater,
             "turn_detector": turn_detector,
+            "router_img_config": router_img_config,
+            "planner_img_config": planner_img_config,
         }
 
         if args.turns == 1:

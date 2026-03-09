@@ -94,9 +94,11 @@ class ContextUpdater:
         self,
         context_manager: ContextManager,
         vlm_provider: BaseVLMProvider,
+        img_config=None,
     ) -> None:
         self._ctx = context_manager
         self._vlm = vlm_provider
+        self._img_config = img_config
 
         # Single-slot "mailbox": holds the most recent screenshot.
         # If a new screenshot arrives before the previous one is processed,
@@ -170,15 +172,17 @@ class ContextUpdater:
         """Call VLM to extract strategic observations and write to high-level context."""
         import time as _time
 
-        from computer_use_test.utils.screen import resize_for_vlm
+        from computer_use_test.utils.image_pipeline import CONTEXT_DEFAULT, process_image
 
         t0 = _time.monotonic()
 
-        # 1280px — same as Planner. High enough for UI text/numbers,
-        # avoids sending raw Retina resolution (3600px+) which wastes tokens.
-        prepared = resize_for_vlm(pil_image, max_long_edge=1280)
+        cfg = self._img_config or CONTEXT_DEFAULT
+        result = process_image(pil_image, cfg)
+        prepared = result.image
+        jpeg_quality = cfg.jpeg_quality if cfg.jpeg_quality > 0 else None
+        build_kwargs = {"jpeg_quality": jpeg_quality} if jpeg_quality else {}
         content_parts = [
-            self._vlm._build_pil_image_content(prepared),
+            self._vlm._build_pil_image_content(prepared, **build_kwargs),
             self._vlm._build_text_content(_CONTEXT_EXTRACTION_PROMPT),
         ]
 

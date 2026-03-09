@@ -44,6 +44,7 @@ from computer_use_test.agent.modules.router.primitive_registry import (
     get_primitive_prompt,
 )
 from computer_use_test.utils.debug import DebugOptions, TurnValidator, log_context
+from computer_use_test.utils.image_pipeline import ImagePipelineConfig, process_image
 from computer_use_test.utils.llm_provider.base import BaseVLMProvider
 from computer_use_test.utils.llm_provider.parser import AgentAction, strip_markdown
 from computer_use_test.utils.rich_logger import RichLogger
@@ -153,6 +154,7 @@ def _check_queue_for_interrupt(
 def route_primitive(
     provider: BaseVLMProvider,
     pil_image,
+    img_config: ImagePipelineConfig | None = None,
 ) -> RouterResult:
     """
     Use VLM to classify a screenshot and select the appropriate primitive.
@@ -162,18 +164,19 @@ def route_primitive(
     Args:
         provider: VLM provider instance
         pil_image: PIL Image of the current game screen
+        img_config: Image pipeline config (defaults to ROUTER_DEFAULT)
 
     Returns:
         RouterResult with primitive name and reasoning
     """
-    # Router classifies the screen — 1024px keeps Korean UI text readable in windowed mode
-    ROUTER_MAX_LONG_EDGE = 1024
+    from computer_use_test.utils.image_pipeline import ROUTER_DEFAULT
 
-    from computer_use_test.utils.screen import resize_for_vlm
-
-    prepared = resize_for_vlm(pil_image, max_long_edge=ROUTER_MAX_LONG_EDGE)
+    cfg = img_config or ROUTER_DEFAULT
+    result = process_image(pil_image, cfg)
+    prepared = result.image
+    jpeg_quality = cfg.jpeg_quality if cfg.jpeg_quality > 0 else None
     content_parts = [
-        provider._build_pil_image_content(prepared),
+        provider._build_pil_image_content(prepared, jpeg_quality=jpeg_quality),
         provider._build_text_content(ROUTER_PROMPT),
     ]
 
@@ -299,6 +302,7 @@ def plan_action(
     high_level_strategy: str | None = None,
     recent_actions_string: str | None = None,
     hitl_directive: str | None = None,
+    img_config: ImagePipelineConfig | None = None,
 ) -> AgentAction | list[AgentAction] | None:
     """
     Use VLM to generate the next action(s) for the selected primitive.
@@ -314,6 +318,7 @@ def plan_action(
         high_level_strategy: Optional high-level strategy/goal to guide action selection
         recent_actions_string: Compressed string of recent actions (for repetition avoidance)
         hitl_directive: Optional micro-level HITL directive (e.g., "병영을 최우선 선택")
+        img_config: Image pipeline config for planner (defaults to PLANNER_DEFAULT)
 
     Returns:
         AgentAction, list[AgentAction], or None on failure
@@ -331,12 +336,14 @@ def plan_action(
             pil_image=pil_image,
             instruction=instruction,
             normalizing_range=normalizing_range,
+            img_config=img_config,
         )
 
     return provider.analyze(
         pil_image=pil_image,
         instruction=instruction,
         normalizing_range=normalizing_range,
+        img_config=img_config,
     )
 
 
@@ -358,6 +365,8 @@ def run_one_turn(
     agent_gate: AgentGate | None = None,
     strategy_updater: StrategyUpdater | None = None,
     turn_detector: TurnDetector | None = None,
+    router_img_config: ImagePipelineConfig | None = None,
+    planner_img_config: ImagePipelineConfig | None = None,
 ) -> TurnSummary | None:
     """
     Execute one full game turn.
@@ -428,7 +437,7 @@ def run_one_turn(
 
     # Step 2: Routing (classification only — no turn detection)
     rl.update_phase("routing")
-    router_result = route_primitive(router_provider, pil_image)
+    router_result = route_primitive(router_provider, pil_image, img_config=router_img_config)
     primitive_name = router_result.primitive
     macro_turn = macro_turn_manager.macro_turn_number if macro_turn_manager else 1
 
@@ -557,6 +566,7 @@ def run_one_turn(
             high_level_strategy=strategy_string,
             recent_actions_string=recent_actions_str,
             hitl_directive=primitive_hint if primitive_hint else None,
+            img_config=planner_img_config,
         )
 
         # Handle None and empty list
@@ -689,6 +699,8 @@ def run_multi_turn(
     agent_gate: AgentGate | None = None,
     strategy_updater: StrategyUpdater | None = None,
     turn_detector: TurnDetector | None = None,
+    router_img_config: ImagePipelineConfig | None = None,
+    planner_img_config: ImagePipelineConfig | None = None,
 ) -> None:
     """
     Execute multiple consecutive turns.
@@ -763,6 +775,8 @@ def run_multi_turn(
                 agent_gate=agent_gate,
                 strategy_updater=strategy_updater,
                 turn_detector=turn_detector,
+                router_img_config=router_img_config,
+                planner_img_config=planner_img_config,
             )
 
             if summary is None or not summary.success:

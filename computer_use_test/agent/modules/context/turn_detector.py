@@ -89,10 +89,11 @@ class TurnDetector:
         detector.stop()
     """
 
-    def __init__(self, vlm_provider) -> None:
+    def __init__(self, vlm_provider, img_config=None) -> None:
         from computer_use_test.utils.llm_provider.base import BaseVLMProvider
 
         self._vlm: BaseVLMProvider = vlm_provider
+        self._img_config = img_config
         self._crop_box: dict[str, float] = dict(_DEFAULT_CROP)
         self._calibrated: bool = False
 
@@ -327,6 +328,12 @@ class TurnDetector:
         y2 = int(h * self._crop_box["y2"])
 
         cropped = pil_image.crop((x1, y1, x2, y2))
+
+        # Apply pipeline if config provided (e.g. resize/filter for the crop)
+        if self._img_config is not None:
+            from computer_use_test.utils.image_pipeline import process_image
+
+            cropped = process_image(cropped, self._img_config).image
 
         content_parts = [
             self._vlm._build_pil_image_content(cropped),

@@ -3,7 +3,9 @@ import json
 import os
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from io import BytesIO
+from pathlib import Path
 
 import PIL.Image
 import pyautogui
@@ -14,9 +16,22 @@ from rich.console import Console
 from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn, TimeRemainingColumn
 from rich.table import Table
 
+from computer_use_test.evaluation.evaluator.action_eval.bbox_eval.dataset_loader import load_dataset
+from computer_use_test.evaluation.evaluator.action_eval.bbox_eval.scorer import aggregate_results
 from computer_use_test.utils.prompts.primitive_prompt import (
     MULTI_ACTION_SEQUENCE_JSON_FORMAT_INSTRUCTION,
     POLICY_PROMPT,
+)
+from computer_use_test.utils.ui_benchmarking import (
+    ALLOWED_COLOR_POLICIES,
+    ALLOWED_ENCODE_MODES,
+    ALLOWED_UI_FILTER_MODES,
+    PreprocessSpec,
+    UnsupportedEncodingModeError,
+    build_preprocess_specs,
+    prepare_benchmark_image,
+    resolve_dataset_screenshot_path,
+    score_actions_against_case,
 )
 
 load_dotenv()
@@ -36,6 +51,22 @@ class ImageVariant:
     image: PIL.Image.Image
     # (left, top, width, height): 원본 UI가 variant 이미지 내에서 차지하는 영역
     content_box: tuple[int, int, int, int]
+
+
+@dataclass(frozen=True)
+class PreparedImageVariant:
+    name: str
+    size_mode: str
+    background_mode: str
+    ui_filter_mode: str
+    color_policy: str
+    encode_mode: str
+    image: PIL.Image.Image
+    content_box: tuple[int, int, int, int]
+    preprocess_latency_ms: float
+    encode_latency_ms: float
+    payload_bytes: int
+    payload_format: str
 
 
 def build_action_schema(normalizing_range: int) -> dict:
@@ -178,7 +209,33 @@ def parse_csv_ints(raw: str, arg_name: str) -> list[int]:
     return values
 
 
-def build_prompt(prompt_variant: str, normalizing_range: int) -> str:
+def build_instruction_prompt(prompt_variant: str, normalizing_range: int, instruction: str) -> str:
+    if prompt_variant == "long_prompt":
+        return f"""
+{MULTI_ACTION_SEQUENCE_JSON_FORMAT_INSTRUCTION.format(normalizing_range=normalizing_range)}
+
+사용자 지시:
+- {instruction}
+
+추가 지시:
+- 반드시 실행 가능한 action sequence만 반환하라.
+- 좌표는 모두 0~{normalizing_range} 정규화 좌표를 사용하라.
+- 실행 불가한 추측은 하지 말고, 보이는 UI 근거를 reasoning에 짧게 남겨라.
+""".strip()
+    if prompt_variant == "concise_prompt":
+        return f"""
+게임 UI 스크린샷에 대해 사용자 지시를 수행하는 실행 계획(JSON 배열)을 반환하라.
+- instruction: {instruction}
+- action: click | press | drag | type
+- 좌표는 0~{normalizing_range} 정규화
+- 출력은 JSON 배열만 반환
+""".strip()
+    raise ValueError(f"Unknown prompt variant: {prompt_variant}")
+
+
+def build_prompt(prompt_variant: str, normalizing_range: int, instruction: str | None = None) -> str:
+    if instruction is not None:
+        return build_instruction_prompt(prompt_variant, normalizing_range, instruction)
     if prompt_variant == "long_prompt":
         return build_long_prompt(normalizing_range)
     if prompt_variant == "concise_prompt":
@@ -227,6 +284,91 @@ def build_image_variant(
         background_mode=background_mode,
         image=variant_image,
         content_box=content_box,
+    )
+
+
+def prepare_image_variant(image_variant: ImageVariant, preprocess_spec: PreprocessSpec) -> PreparedImageVariant:
+    prepared = prepare_benchmark_image(image_variant.image, preprocess_spec)
+    return PreparedImageVariant(
+        name=f"{image_variant.name}+{preprocess_spec.name}",
+        size_mode=image_variant.size_mode,
+        background_mode=image_variant.background_mode,
+        ui_filter_mode=preprocess_spec.ui_filter_mode,
+        color_policy=preprocess_spec.color_policy,
+        encode_mode=preprocess_spec.encode_mode,
+        image=prepared.image,
+        content_box=image_variant.content_box,
+        preprocess_latency_ms=prepared.preprocess_latency_ms,
+        encode_latency_ms=prepared.encode_latency_ms,
+        payload_bytes=prepared.payload_bytes,
+        payload_format=prepared.payload_format,
+    )
+
+
+def select_experiment_axes(
+    experiment_mode: str,
+    normalizing_ranges: tuple[int, ...],
+    prompt_variants: tuple[str, ...],
+    size_modes: tuple[str, ...],
+    background_modes: tuple[str, ...],
+) -> tuple[tuple[int, ...], tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    if experiment_mode == "full":
+        return normalizing_ranges, prompt_variants, size_modes, background_modes
+
+    staged_ranges = tuple(value for value in normalizing_ranges if value in {250, 500}) or normalizing_ranges[:1]
+    staged_prompts = (
+        tuple(value for value in prompt_variants if value in {"long_prompt", "concise_prompt"}) or (prompt_variants[:1])
+    )
+    staged_sizes = tuple(
+        value for value in size_modes if value in {"compressed", "compressed_downscale_restore", "downscale_restore"}
+    )
+    if "raw" in size_modes:
+        staged_sizes = tuple(dict.fromkeys((*staged_sizes, "raw")))
+    staged_sizes = staged_sizes or size_modes[:1]
+    staged_backgrounds = tuple(value for value in background_modes if value == "none") or background_modes[:1]
+    return staged_ranges, staged_prompts, staged_sizes, staged_backgrounds
+
+
+def build_prepared_variants(
+    base_image: PIL.Image.Image,
+    size_modes: tuple[str, ...],
+    background_modes: tuple[str, ...],
+    preprocess_specs: list[PreprocessSpec],
+    downscale_long_edge: int,
+    background_color: tuple[int, int, int],
+    background_padding_ratio: float,
+) -> list[PreparedImageVariant]:
+    prepared_variants: list[PreparedImageVariant] = []
+    for size_mode in size_modes:
+        for background_mode in background_modes:
+            base_variant = build_image_variant(
+                base_image=base_image,
+                size_mode=size_mode,
+                background_mode=background_mode,
+                downscale_long_edge=downscale_long_edge,
+                background_color=background_color,
+                background_padding_ratio=background_padding_ratio,
+            )
+            for preprocess_spec in preprocess_specs:
+                try:
+                    prepared_variants.append(prepare_image_variant(base_variant, preprocess_spec))
+                except UnsupportedEncodingModeError as exc:
+                    console.print(
+                        f"[yellow]skip[/yellow] variant={base_variant.name}+{preprocess_spec.name} reason={exc}"
+                    )
+    return prepared_variants
+
+
+def make_variant_key(row: dict) -> tuple[str, int, str, str, str, str, str, str]:
+    return (
+        row["benchmark_type"],
+        row["normalizing_range"],
+        row["prompt_variant"],
+        row["size_variant"],
+        row["background_variant"],
+        row["ui_filter_mode"],
+        row["color_policy"],
+        row["encode_mode"],
     )
 
 
@@ -340,19 +482,22 @@ def run_single(
     return payload, elapsed
 
 
-def benchmark(
+def benchmark_grid(
     image_path: str | None,
     model: str,
     runs: int = 1,
     capture_live: bool = True,
     capture_countdown_sec: int = 3,
     save_capture_path: str | None = None,
-    normalizing_range: int = 1000,
+    normalizing_ranges: tuple[int, ...] = (1000,),
+    prompt_variants: tuple[str, ...] = ("long_prompt", "concise_prompt"),
     size_modes: tuple[str, ...] = ("raw", "compressed", "downscale_restore", "compressed_downscale_restore"),
     background_modes: tuple[str, ...] = ("none", "color"),
+    preprocess_specs: list[PreprocessSpec] | None = None,
     downscale_long_edge: int = 960,
     background_color: tuple[int, int, int] = (32, 32, 32),
     background_padding_ratio: float = 0.12,
+    experiment_mode: str = "staged",
 ) -> list[dict]:
     api_key = os.getenv("GENAI_API_KEY")
     if not api_key:
@@ -369,29 +514,26 @@ def benchmark(
             raise ValueError("capture_live=False 인 경우 --image 경로가 필요합니다")
         base_image = PIL.Image.open(image_path).convert("RGB")
 
-    prompt_variants = {
-        "long_prompt": build_long_prompt(normalizing_range),
-        "concise_prompt": build_concise_prompt(normalizing_range),
-    }
-    action_schema = build_action_schema(normalizing_range)
-
-    image_variants: list[ImageVariant] = []
-    for size_mode in size_modes:
-        for background_mode in background_modes:
-            image_variants.append(
-                build_image_variant(
-                    base_image=base_image,
-                    size_mode=size_mode,
-                    background_mode=background_mode,
-                    downscale_long_edge=downscale_long_edge,
-                    background_color=background_color,
-                    background_padding_ratio=background_padding_ratio,
-                )
-            )
+    selected_ranges, selected_prompts, selected_sizes, selected_backgrounds = select_experiment_axes(
+        experiment_mode=experiment_mode,
+        normalizing_ranges=normalizing_ranges,
+        prompt_variants=prompt_variants,
+        size_modes=size_modes,
+        background_modes=background_modes,
+    )
+    preprocess_specs = preprocess_specs or [PreprocessSpec("baseline", "none", "preserve", "none")]
+    prepared_variants = build_prepared_variants(
+        base_image=base_image,
+        size_modes=selected_sizes,
+        background_modes=selected_backgrounds,
+        preprocess_specs=preprocess_specs,
+        downscale_long_edge=downscale_long_edge,
+        background_color=background_color,
+        background_padding_ratio=background_padding_ratio,
+    )
 
     results: list[dict] = []
-
-    total_calls = len(prompt_variants) * len(image_variants) * runs
+    total_calls = len(selected_ranges) * len(selected_prompts) * len(prepared_variants) * runs
     done_calls = 0
 
     with Progress(
@@ -405,64 +547,276 @@ def benchmark(
     ) as progress:
         task_id = progress.add_task("Inference Progress", total=total_calls)
 
-        for prompt_name, prompt in prompt_variants.items():
-            for image_variant in image_variants:
-                variant_tag = f"{prompt_name}+{image_variant.name}"
-                console.print(f"[bold]실험 시작[/bold] variant={variant_tag}, runs={runs}")
-                times: list[float] = []
-                last_payload_raw: list[dict] = []
-                last_payload_restored: list[dict] = []
-                for _ in range(runs):
-                    run_idx = len(times) + 1
-                    console.print(f"[dim]  -> run {run_idx}/{runs} | variant={variant_tag} | calling model...[/dim]")
-                    payload_raw, elapsed = run_single(
-                        client,
-                        model,
-                        image_variant.image,
-                        prompt,
-                        action_schema=action_schema,
-                    )
-                    payload_restored = restore_actions_to_base_norm(
-                        payload_raw,
-                        image_variant,
-                        normalizing_range=normalizing_range,
-                    )
-                    last_payload_raw = payload_raw
-                    last_payload_restored = payload_restored
-                    times.append(elapsed)
-                    done_calls += 1
-                    progress.update(task_id, completed=done_calls)
-                    console.print(f"[dim]     done run {run_idx}/{runs} | elapsed={elapsed:.3f}s[/dim]")
+        for normalizing_range in selected_ranges:
+            action_schema = build_action_schema(normalizing_range)
+            prompts = {prompt_name: build_prompt(prompt_name, normalizing_range) for prompt_name in selected_prompts}
 
-                avg_time = sum(times) / len(times)
-                first_action = last_payload_restored[0]["action"] if last_payload_restored else "n/a"
-                result = {
-                    "prompt_variant": prompt_name,
-                    "image_variant": image_variant.name,
-                    "size_variant": image_variant.size_mode,
-                    "background_variant": image_variant.background_mode,
-                    "variant_image_size": f"{image_variant.image.size[0]}x{image_variant.image.size[1]}",
-                    "content_box": image_variant.content_box,
-                    "normalizing_range": normalizing_range,
-                    "runs": runs,
-                    "avg_latency_sec": round(avg_time, 3),
-                    "min_latency_sec": round(min(times), 3),
-                    "max_latency_sec": round(max(times), 3),
-                    "num_actions": len(last_payload_restored),
-                    "first_action": first_action,
-                    "result": last_payload_restored,
-                    "result_raw": last_payload_raw,
-                }
-                results.append(result)
-                console.print(
-                    f"[green]실험 완료[/green] variant={variant_tag} "
-                    f"| avg={avg_time:.3f}s min={min(times):.3f}s max={max(times):.3f}s"
-                )
+            for prompt_name, prompt in prompts.items():
+                for image_variant in prepared_variants:
+                    variant_tag = f"{normalizing_range}/{prompt_name}/{image_variant.name}"
+                    console.print(f"[bold]실험 시작[/bold] variant={variant_tag}, runs={runs}")
+                    inference_times: list[float] = []
+                    last_payload_raw: list[dict] = []
+                    last_payload_restored: list[dict] = []
+                    for _ in range(runs):
+                        run_idx = len(inference_times) + 1
+                        console.print(
+                            f"[dim]  -> run {run_idx}/{runs} | variant={variant_tag} | calling model...[/dim]"
+                        )
+                        payload_raw, elapsed = run_single(
+                            client,
+                            model,
+                            image_variant.image,
+                            prompt,
+                            action_schema=action_schema,
+                        )
+                        payload_restored = restore_actions_to_base_norm(
+                            payload_raw,
+                            image_variant,
+                            normalizing_range=normalizing_range,
+                        )
+                        last_payload_raw = payload_raw
+                        last_payload_restored = payload_restored
+                        inference_times.append(elapsed)
+                        done_calls += 1
+                        progress.update(task_id, completed=done_calls)
+                        console.print(f"[dim]     done run {run_idx}/{runs} | elapsed={elapsed:.3f}s[/dim]")
+
+                    avg_inference = sum(inference_times) / len(inference_times)
+                    preprocess_sec = image_variant.preprocess_latency_ms / 1000
+                    first_action = last_payload_restored[0]["action"] if last_payload_restored else "n/a"
+                    result = {
+                        "benchmark_type": "latency_static",
+                        "prompt_variant": prompt_name,
+                        "image_variant": image_variant.name,
+                        "size_variant": image_variant.size_mode,
+                        "background_variant": image_variant.background_mode,
+                        "ui_filter_mode": image_variant.ui_filter_mode,
+                        "color_policy": image_variant.color_policy,
+                        "encode_mode": image_variant.encode_mode,
+                        "payload_format": image_variant.payload_format,
+                        "payload_bytes": image_variant.payload_bytes,
+                        "variant_image_size": f"{image_variant.image.size[0]}x{image_variant.image.size[1]}",
+                        "content_box": image_variant.content_box,
+                        "normalizing_range": normalizing_range,
+                        "runs": runs,
+                        "preprocess_latency_ms": round(image_variant.preprocess_latency_ms, 3),
+                        "encode_latency_ms": round(image_variant.encode_latency_ms, 3),
+                        "avg_inference_latency_sec": round(avg_inference, 3),
+                        "avg_latency_sec": round(avg_inference + preprocess_sec, 3),
+                        "min_latency_sec": round(min(inference_times) + preprocess_sec, 3),
+                        "max_latency_sec": round(max(inference_times) + preprocess_sec, 3),
+                        "num_actions": len(last_payload_restored),
+                        "first_action": first_action,
+                        "result": last_payload_restored,
+                        "result_raw": last_payload_raw,
+                    }
+                    results.append(result)
+                    console.print(
+                        f"[green]실험 완료[/green] variant={variant_tag} "
+                        f"| total_avg={result['avg_latency_sec']:.3f}s "
+                        f"| infer_avg={avg_inference:.3f}s payload={image_variant.payload_bytes}B"
+                    )
 
     show_experiment_summary(results)
     show_action_preview(results)
-
     return results
+
+
+def benchmark_quality_dataset(
+    dataset_path: str,
+    model: str,
+    normalizing_ranges: tuple[int, ...],
+    prompt_variants: tuple[str, ...],
+    size_modes: tuple[str, ...],
+    background_modes: tuple[str, ...],
+    preprocess_specs: list[PreprocessSpec],
+    downscale_long_edge: int,
+    background_color: tuple[int, int, int],
+    background_padding_ratio: float,
+    experiment_mode: str,
+    ignore_wait: bool = True,
+    case_limit: int | None = None,
+) -> list[dict]:
+    api_key = os.getenv("GENAI_API_KEY")
+    if not api_key:
+        raise ValueError("GENAI_API_KEY is not set")
+
+    client = genai.Client(api_key=api_key)
+    cases = load_dataset(dataset_path)
+    if case_limit is not None:
+        cases = cases[:case_limit]
+
+    selected_ranges, selected_prompts, selected_sizes, selected_backgrounds = select_experiment_axes(
+        experiment_mode=experiment_mode,
+        normalizing_ranges=normalizing_ranges,
+        prompt_variants=prompt_variants,
+        size_modes=size_modes,
+        background_modes=background_modes,
+    )
+    results: list[dict] = []
+    total_calls = len(selected_ranges) * len(selected_prompts) * len(selected_sizes) * len(selected_backgrounds)
+    total_calls *= len(preprocess_specs) * len(cases)
+    done_calls = 0
+
+    with Progress(
+        TextColumn("[bold cyan]{task.description}"),
+        BarColumn(),
+        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        TextColumn("({task.completed}/{task.total})"),
+        TimeElapsedColumn(),
+        TimeRemainingColumn(),
+        console=console,
+    ) as progress:
+        task_id = progress.add_task("Quality Eval Progress", total=total_calls)
+
+        for normalizing_range in selected_ranges:
+            action_schema = build_action_schema(normalizing_range)
+            for prompt_variant in selected_prompts:
+                for size_mode in selected_sizes:
+                    for background_mode in selected_backgrounds:
+                        for preprocess_spec in preprocess_specs:
+                            case_results = []
+                            inference_times: list[float] = []
+                            preprocess_times_ms: list[float] = []
+                            encode_times_ms: list[float] = []
+                            payload_sizes: list[int] = []
+                            sample_image_size = "n/a"
+
+                            for case in cases:
+                                screenshot_path = resolve_dataset_screenshot_path(dataset_path, case.screenshot_path)
+                                base_image = PIL.Image.open(screenshot_path).convert("RGB")
+                                base_variant = build_image_variant(
+                                    base_image=base_image,
+                                    size_mode=size_mode,
+                                    background_mode=background_mode,
+                                    downscale_long_edge=downscale_long_edge,
+                                    background_color=background_color,
+                                    background_padding_ratio=background_padding_ratio,
+                                )
+                                try:
+                                    prepared_variant = prepare_image_variant(base_variant, preprocess_spec)
+                                except UnsupportedEncodingModeError as exc:
+                                    console.print(
+                                        "[yellow]skip[/yellow] quality "
+                                        f"variant={base_variant.name}+{preprocess_spec.name} "
+                                        f"reason={exc}"
+                                    )
+                                    break
+
+                                prompt = build_prompt(
+                                    prompt_variant,
+                                    normalizing_range,
+                                    instruction=case.instruction,
+                                )
+                                payload_raw, elapsed = run_single(
+                                    client=client,
+                                    model=model,
+                                    image=prepared_variant.image,
+                                    prompt=prompt,
+                                    action_schema=action_schema,
+                                )
+                                payload_restored = restore_actions_to_base_norm(
+                                    payload_raw,
+                                    prepared_variant,
+                                    normalizing_range=normalizing_range,
+                                )
+                                case_result = score_actions_against_case(
+                                    case=case,
+                                    actions=payload_restored,
+                                    ignore_wait=ignore_wait,
+                                )
+                                case_results.append(case_result)
+                                inference_times.append(elapsed)
+                                preprocess_times_ms.append(prepared_variant.preprocess_latency_ms)
+                                encode_times_ms.append(prepared_variant.encode_latency_ms)
+                                payload_sizes.append(prepared_variant.payload_bytes)
+                                sample_image_size = f"{prepared_variant.image.size[0]}x{prepared_variant.image.size[1]}"
+                                done_calls += 1
+                                progress.update(task_id, completed=done_calls)
+
+                            else:
+                                aggregate = aggregate_results(case_results)
+                                avg_inference = sum(inference_times) / len(inference_times) if inference_times else 0.0
+                                avg_preprocess_ms = (
+                                    sum(preprocess_times_ms) / len(preprocess_times_ms) if preprocess_times_ms else 0.0
+                                )
+                                avg_encode_ms = sum(encode_times_ms) / len(encode_times_ms) if encode_times_ms else 0.0
+                                avg_payload_bytes = (
+                                    int(round(sum(payload_sizes) / len(payload_sizes))) if payload_sizes else 0
+                                )
+                                results.append(
+                                    {
+                                        "benchmark_type": "quality_dataset",
+                                        "prompt_variant": prompt_variant,
+                                        "image_variant": f"{size_mode}+bg_{background_mode}+{preprocess_spec.name}",
+                                        "size_variant": size_mode,
+                                        "background_variant": background_mode,
+                                        "ui_filter_mode": preprocess_spec.ui_filter_mode,
+                                        "color_policy": preprocess_spec.color_policy,
+                                        "encode_mode": preprocess_spec.encode_mode,
+                                        "payload_format": "mixed",
+                                        "payload_bytes": avg_payload_bytes,
+                                        "variant_image_size": sample_image_size,
+                                        "content_box": None,
+                                        "normalizing_range": normalizing_range,
+                                        "runs": len(case_results),
+                                        "preprocess_latency_ms": round(avg_preprocess_ms, 3),
+                                        "encode_latency_ms": round(avg_encode_ms, 3),
+                                        "avg_inference_latency_sec": round(avg_inference, 3),
+                                        "avg_latency_sec": round(avg_inference + (avg_preprocess_ms / 1000), 3),
+                                        "min_latency_sec": round(
+                                            min(inference_times) + (avg_preprocess_ms / 1000),
+                                            3,
+                                        )
+                                        if inference_times
+                                        else 0.0,
+                                        "max_latency_sec": round(
+                                            max(inference_times) + (avg_preprocess_ms / 1000),
+                                            3,
+                                        )
+                                        if inference_times
+                                        else 0.0,
+                                        "num_actions": 0,
+                                        "first_action": "n/a",
+                                        "result": [],
+                                        "result_raw": [],
+                                        "total_cases": aggregate.total_cases,
+                                        "strict_success_rate": round(aggregate.strict_success_rate, 4),
+                                        "avg_step_accuracy": round(aggregate.avg_step_accuracy, 4),
+                                        "avg_prefix_len": round(aggregate.avg_prefix_len, 4),
+                                        "error_count": aggregate.error_count,
+                                        "timeout_count": aggregate.timeout_count,
+                                        "per_action_type": [
+                                            metric.model_dump() for metric in aggregate.per_action_type
+                                        ],
+                                        "case_results": [case_result.model_dump() for case_result in case_results],
+                                    }
+                                )
+
+    apply_quality_gates(results)
+    show_quality_summary(results)
+    return results
+
+
+def apply_quality_gates(rows: list[dict]) -> None:
+    baseline_rows = {}
+    for row in rows:
+        if row["ui_filter_mode"] == "none" and row["color_policy"] == "preserve" and row["encode_mode"] == "none":
+            baseline_rows[
+                (row["normalizing_range"], row["prompt_variant"], row["size_variant"], row["background_variant"])
+            ] = row
+
+    for row in rows:
+        baseline = baseline_rows.get(
+            (row["normalizing_range"], row["prompt_variant"], row["size_variant"], row["background_variant"])
+        )
+        if baseline is None:
+            row["quality_gate_pass"] = True
+            continue
+        row["quality_gate_pass"] = row["avg_step_accuracy"] >= max(0.0, baseline["avg_step_accuracy"] - 0.05) and row[
+            "strict_success_rate"
+        ] >= max(0.0, baseline["strict_success_rate"] - 0.05)
 
 
 def show_experiment_summary(results: list[dict]) -> None:
@@ -472,34 +826,87 @@ def show_experiment_summary(results: list[dict]) -> None:
     console.print(f"[bold]비교군[/bold]: {len(prompt_set)}개 prompt x {len(image_set)}개 image variant")
 
     table = Table(title="Latency / Action Summary", show_lines=False)
+    table.add_column("Range", justify="right")
     table.add_column("Prompt", style="magenta")
     table.add_column("Image", style="cyan")
     table.add_column("Size", style="yellow")
     table.add_column("BG", style="blue")
+    table.add_column("UI", style="green")
+    table.add_column("Color", style="green")
+    table.add_column("Enc", style="green")
+    table.add_column("Payload", justify="right")
     table.add_column("ImgSize", style="white")
-    table.add_column("Avg(s)", justify="right")
-    table.add_column("Min(s)", justify="right")
-    table.add_column("Max(s)", justify="right")
+    table.add_column("Prep(ms)", justify="right")
+    table.add_column("Infer(s)", justify="right")
+    table.add_column("Total(s)", justify="right")
     table.add_column("Actions", justify="right")
     table.add_column("First", style="green")
 
     for row in results:
         table.add_row(
+            str(row["normalizing_range"]),
             row["prompt_variant"],
             row["image_variant"],
             row["size_variant"],
             row["background_variant"],
+            row["ui_filter_mode"],
+            row["color_policy"],
+            row["encode_mode"],
+            str(row["payload_bytes"]),
             row["variant_image_size"],
+            f"{row['preprocess_latency_ms']:.1f}",
+            f"{row['avg_inference_latency_sec']:.3f}",
             f"{row['avg_latency_sec']:.3f}",
-            f"{row['min_latency_sec']:.3f}",
-            f"{row['max_latency_sec']:.3f}",
             str(row["num_actions"]),
             row["first_action"],
         )
     console.print(table)
 
 
-def show_action_preview(results: list[dict]) -> None:
+def show_quality_summary(results: list[dict]) -> None:
+    if not results:
+        return
+
+    console.rule("[bold cyan]Quality Benchmark Summary")
+    table = Table(title="Quality / Latency Summary", show_lines=False)
+    table.add_column("Range", justify="right")
+    table.add_column("Prompt", style="magenta")
+    table.add_column("Image", style="cyan")
+    table.add_column("UI", style="green")
+    table.add_column("Color", style="green")
+    table.add_column("Enc", style="green")
+    table.add_column("Total(s)", justify="right")
+    table.add_column("Strict", justify="right")
+    table.add_column("StepAcc", justify="right")
+    table.add_column("Prefix", justify="right")
+    table.add_column("Gate", justify="center")
+
+    best_rows = sorted(
+        results,
+        key=lambda row: (
+            not row.get("quality_gate_pass", False),
+            -row["avg_step_accuracy"],
+            row["avg_latency_sec"],
+        ),
+    )[:12]
+    for row in best_rows:
+        table.add_row(
+            str(row["normalizing_range"]),
+            row["prompt_variant"],
+            row["image_variant"],
+            row["ui_filter_mode"],
+            row["color_policy"],
+            row["encode_mode"],
+            f"{row['avg_latency_sec']:.3f}",
+            f"{row['strict_success_rate']:.3f}",
+            f"{row['avg_step_accuracy']:.3f}",
+            f"{row['avg_prefix_len']:.3f}",
+            "pass" if row.get("quality_gate_pass", False) else "fail",
+        )
+    console.print(table)
+
+
+def show_action_preview(results: list[dict], limit: int = 8) -> None:
     preview = Table(title="Action Preview (readable)", show_lines=True)
     preview.add_column("Variant", style="yellow")
     preview.add_column("Step", justify="right")
@@ -508,10 +915,12 @@ def show_action_preview(results: list[dict]) -> None:
     preview.add_column("Button/Key/Text", overflow="fold")
     preview.add_column("Reasoning", overflow="fold")
 
-    for row in results:
+    preview_rows = sorted(results, key=lambda row: row.get("avg_latency_sec", 0.0))[:limit]
+    for row in preview_rows:
         variant = (
             f"{row['prompt_variant']} + {row['image_variant']}"
-            f" (size={row['size_variant']}, bg={row['background_variant']})"
+            f" (size={row['size_variant']}, bg={row['background_variant']}, "
+            f"ui={row['ui_filter_mode']}, color={row['color_policy']}, enc={row['encode_mode']})"
         )
         actions = row["result"]
         if not actions:
@@ -531,6 +940,88 @@ def show_action_preview(results: list[dict]) -> None:
                 action.get("reasoning", ""),
             )
     console.print(preview)
+
+
+def save_reports(
+    report_dir: str,
+    report_prefix: str,
+    config: dict,
+    latency_results: list[dict],
+    quality_results: list[dict],
+) -> tuple[Path, Path]:
+    out_dir = Path(report_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    stem = f"{report_prefix}_{timestamp}"
+    json_path = out_dir / f"{stem}.json"
+    md_path = out_dir / f"{stem}.md"
+
+    payload = {
+        "config": config,
+        "latency_results": latency_results,
+        "quality_results": quality_results,
+    }
+    json_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    md_path.write_text(build_markdown_report(config, latency_results, quality_results), encoding="utf-8")
+    return json_path, md_path
+
+
+def build_markdown_report(config: dict, latency_results: list[dict], quality_results: list[dict]) -> str:
+    lines = [
+        "# VLM UI Benchmark Report",
+        "",
+        "## Setup",
+        f"- Model: `{config['model']}`",
+        f"- Experiment mode: `{config['experiment_mode']}`",
+        f"- Ranges: `{', '.join(map(str, config['normalizing_ranges']))}`",
+        f"- Prompts: `{', '.join(config['prompt_variants'])}`",
+        f"- Size modes: `{', '.join(config['size_modes'])}`",
+        f"- Background modes: `{', '.join(config['background_modes'])}`",
+        f"- UI filters: `{', '.join(config['ui_filter_modes'])}`",
+        f"- Color policies: `{', '.join(config['color_policies'])}`",
+        f"- Encode modes: `{', '.join(config['encode_modes'])}`",
+    ]
+
+    if latency_results:
+        lines.extend(
+            [
+                "",
+                "## Latency Leaders",
+                "| range | prompt | image_variant | total_latency_sec | payload_bytes |",
+                "| --- | --- | --- | --- | --- |",
+            ]
+        )
+        for row in sorted(latency_results, key=lambda item: item["avg_latency_sec"])[:10]:
+            lines.append(
+                f"| {row['normalizing_range']} | {row['prompt_variant']} | {row['image_variant']} | "
+                f"{row['avg_latency_sec']:.3f} | {row['payload_bytes']} |"
+            )
+
+    if quality_results:
+        lines.extend(
+            [
+                "",
+                "## Quality Leaders",
+                "| range | prompt | image_variant | total_latency_sec | "
+                "strict_success_rate | avg_step_accuracy | gate |",
+                "| --- | --- | --- | --- | --- | --- | --- |",
+            ]
+        )
+        for row in sorted(
+            quality_results,
+            key=lambda item: (
+                not item.get("quality_gate_pass", False),
+                -item["avg_step_accuracy"],
+                item["avg_latency_sec"],
+            ),
+        )[:10]:
+            lines.append(
+                f"| {row['normalizing_range']} | {row['prompt_variant']} | {row['image_variant']} | "
+                f"{row['avg_latency_sec']:.3f} | {row['strict_success_rate']:.3f} | "
+                f"{row['avg_step_accuracy']:.3f} | {'pass' if row.get('quality_gate_pass', False) else 'fail'} |"
+            )
+
+    return "\n".join(lines) + "\n"
 
 
 def norm_to_real(norm_value: int, screen_extent: int, normalizing_range: int) -> int:
@@ -605,6 +1096,7 @@ def run_live_variant(
     prompt_variant: str,
     size_mode: str,
     background_mode: str,
+    preprocess_spec: PreprocessSpec,
     downscale_long_edge: int,
     background_color: tuple[int, int, int],
     background_padding_ratio: float,
@@ -637,39 +1129,52 @@ def run_live_variant(
         background_color=background_color,
         background_padding_ratio=background_padding_ratio,
     )
+    prepared_variant = prepare_image_variant(image_variant, preprocess_spec)
 
     payload_raw, elapsed = run_single(
         client=client,
         model=model,
-        image=image_variant.image,
+        image=prepared_variant.image,
         prompt=prompt,
         action_schema=action_schema,
     )
     payload_restored = restore_actions_to_base_norm(
         payload_raw,
-        image_variant,
+        prepared_variant,
         normalizing_range=normalizing_range,
     )
 
     row = {
+        "benchmark_type": "live_single",
         "prompt_variant": prompt_variant,
-        "image_variant": image_variant.name,
+        "image_variant": f"{image_variant.name}+{preprocess_spec.name}",
         "size_variant": image_variant.size_mode,
         "background_variant": image_variant.background_mode,
-        "variant_image_size": f"{image_variant.image.size[0]}x{image_variant.image.size[1]}",
-        "content_box": image_variant.content_box,
+        "ui_filter_mode": preprocess_spec.ui_filter_mode,
+        "color_policy": preprocess_spec.color_policy,
+        "encode_mode": preprocess_spec.encode_mode,
+        "variant_image_size": f"{prepared_variant.image.size[0]}x{prepared_variant.image.size[1]}",
+        "content_box": prepared_variant.content_box,
         "normalizing_range": normalizing_range,
         "runs": 1,
-        "avg_latency_sec": round(elapsed, 3),
-        "min_latency_sec": round(elapsed, 3),
-        "max_latency_sec": round(elapsed, 3),
+        "payload_format": prepared_variant.payload_format,
+        "payload_bytes": prepared_variant.payload_bytes,
+        "preprocess_latency_ms": round(prepared_variant.preprocess_latency_ms, 3),
+        "encode_latency_ms": round(prepared_variant.encode_latency_ms, 3),
+        "avg_inference_latency_sec": round(elapsed, 3),
+        "avg_latency_sec": round(elapsed + (prepared_variant.preprocess_latency_ms / 1000), 3),
+        "min_latency_sec": round(elapsed + (prepared_variant.preprocess_latency_ms / 1000), 3),
+        "max_latency_sec": round(elapsed + (prepared_variant.preprocess_latency_ms / 1000), 3),
         "num_actions": len(payload_restored),
         "first_action": payload_restored[0]["action"] if payload_restored else "n/a",
         "result": payload_restored,
         "result_raw": payload_raw,
     }
 
-    console.print(f"[green]추론 완료[/green] latency={elapsed:.3f}s")
+    console.print(
+        f"[green]추론 완료[/green] total={row['avg_latency_sec']:.3f}s "
+        f"infer={elapsed:.3f}s payload={prepared_variant.payload_bytes}B"
+    )
     show_action_preview([row])
 
     if execute_actions and payload_restored:
@@ -702,6 +1207,7 @@ def run_live_civ6_test(
     prompt_variant: str,
     size_mode: str,
     background_mode: str,
+    preprocess_spec: PreprocessSpec,
     downscale_long_edge: int,
     background_color: tuple[int, int, int],
     background_padding_ratio: float,
@@ -735,6 +1241,8 @@ def run_live_civ6_test(
     console.rule("[bold cyan]Live Civ6 Test")
     console.print(
         f"[bold]설정[/bold] prompt={prompt_variant}, size={size_mode}, bg={background_mode}, "
+        f"ui={preprocess_spec.ui_filter_mode}, color={preprocess_spec.color_policy}, "
+        f"enc={preprocess_spec.encode_mode}, "
         f"range={normalizing_range}, steps={live_steps}, execute_actions={execute_actions}"
     )
     console.print("[yellow]주의[/yellow] 마우스를 화면 왼쪽 위 모서리로 이동하면 PyAutoGUI failsafe로 중단됩니다.")
@@ -751,6 +1259,7 @@ def run_live_civ6_test(
             prompt_variant=prompt_variant,
             size_mode=size_mode,
             background_mode=background_mode,
+            preprocess_spec=preprocess_spec,
             downscale_long_edge=downscale_long_edge,
             background_color=background_color,
             background_padding_ratio=background_padding_ratio,
@@ -781,6 +1290,7 @@ def run_live_civ6_grid(
     prompt_variants: tuple[str, ...],
     size_modes: tuple[str, ...],
     background_modes: tuple[str, ...],
+    preprocess_spec: PreprocessSpec,
     downscale_long_edge: int,
     background_color: tuple[int, int, int],
     background_padding_ratio: float,
@@ -814,6 +1324,8 @@ def run_live_civ6_grid(
         "[bold]설정[/bold] "
         f"ranges={list(normalizing_ranges)}, prompts={list(prompt_variants)}, "
         f"size_modes={list(size_modes)}, bg_modes={list(background_modes)}, "
+        f"ui={preprocess_spec.ui_filter_mode}, color={preprocess_spec.color_policy}, "
+        f"enc={preprocess_spec.encode_mode}, "
         f"execute_actions={execute_actions}"
     )
     console.print(f"[yellow]총 조합[/yellow] {total_variants}")
@@ -842,6 +1354,7 @@ def run_live_civ6_grid(
                         prompt_variant=prompt_variant,
                         size_mode=size_mode,
                         background_mode=background_mode,
+                        preprocess_spec=preprocess_spec,
                         downscale_long_edge=downscale_long_edge,
                         background_color=background_color,
                         background_padding_ratio=background_padding_ratio,
@@ -881,6 +1394,64 @@ def main():
         "--background-modes",
         default="none,color",
         help="배경 변인 CSV (none,color)",
+    )
+    parser.add_argument(
+        "--benchmark-grid-ranges",
+        default=None,
+        help="정적 benchmark에서 사용할 normalizing_range CSV (미지정 시 --normalizing-range 단일값 사용)",
+    )
+    parser.add_argument(
+        "--prompt-variants",
+        default="long_prompt,concise_prompt",
+        help="정적 benchmark에서 사용할 prompt 변인 CSV",
+    )
+    parser.add_argument(
+        "--ui-filter-modes",
+        default="none,ui_contrast,ui_quantized,ui_bg_blur,ui_bg_blur_contrast",
+        help="UI 전처리 변인 CSV",
+    )
+    parser.add_argument(
+        "--color-policies",
+        default="preserve,grayscale,adaptive_gray",
+        help="색상 정책 변인 CSV",
+    )
+    parser.add_argument(
+        "--encode-modes",
+        default="none,jpeg_like,webp_like,avif_like_if_supported",
+        help="전송 인코딩 변인 CSV",
+    )
+    parser.add_argument(
+        "--experiment-mode",
+        choices=["staged", "full"],
+        default="staged",
+        help="staged는 추천 조합만, full은 전체 조합을 탐색",
+    )
+    parser.add_argument(
+        "--quality-dataset",
+        default=None,
+        help="bbox_eval 형식 JSONL 데이터셋 경로. 지정 시 quality benchmark도 함께 실행",
+    )
+    parser.add_argument(
+        "--quality-case-limit",
+        type=int,
+        default=None,
+        help="quality benchmark에서 사용할 최대 case 수",
+    )
+    parser.add_argument(
+        "--quality-ignore-wait",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="quality benchmark에서 wait 액션 무시 여부",
+    )
+    parser.add_argument(
+        "--report-dir",
+        default="tests/rough_test/reports",
+        help="benchmark report 저장 디렉토리",
+    )
+    parser.add_argument(
+        "--report-prefix",
+        default="vlm_ui_benchmark",
+        help="benchmark report 파일 prefix",
     )
     parser.add_argument(
         "--downscale-long-edge",
@@ -929,6 +1500,24 @@ def main():
         choices=sorted(ALLOWED_BACKGROUND_MODES),
         default="none",
         help="live-test에서 사용할 배경 변인",
+    )
+    parser.add_argument(
+        "--live-ui-filter-mode",
+        choices=sorted(ALLOWED_UI_FILTER_MODES),
+        default="ui_bg_blur_contrast",
+        help="live-test에서 사용할 UI 전처리 변인",
+    )
+    parser.add_argument(
+        "--live-color-policy",
+        choices=sorted(ALLOWED_COLOR_POLICIES),
+        default="adaptive_gray",
+        help="live-test에서 사용할 색상 정책",
+    )
+    parser.add_argument(
+        "--live-encode-mode",
+        choices=sorted(ALLOWED_ENCODE_MODES),
+        default="webp_like",
+        help="live-test에서 사용할 전송 인코딩",
     )
     parser.add_argument(
         "--live-grid-ranges",
@@ -1008,7 +1597,11 @@ def main():
     args = parser.parse_args()
 
     size_modes = parse_csv_modes(args.size_modes, ALLOWED_SIZE_MODES, "--size-modes")
+    prompt_variants = parse_csv_modes(args.prompt_variants, ALLOWED_PROMPT_VARIANTS, "--prompt-variants")
     background_modes = parse_csv_modes(args.background_modes, ALLOWED_BACKGROUND_MODES, "--background-modes")
+    ui_filter_modes = parse_csv_modes(args.ui_filter_modes, ALLOWED_UI_FILTER_MODES, "--ui-filter-modes")
+    color_policies = parse_csv_modes(args.color_policies, ALLOWED_COLOR_POLICIES, "--color-policies")
+    encode_modes = parse_csv_modes(args.encode_modes, ALLOWED_ENCODE_MODES, "--encode-modes")
     background_color = parse_background_color(args.background_color)
     if args.normalizing_range <= 0:
         raise ValueError("--normalizing-range는 1 이상이어야 합니다.")
@@ -1030,10 +1623,31 @@ def main():
         raise ValueError("--drag-drop-hold-sec는 0 이상이어야 합니다.")
     if args.step_interval_sec < 0:
         raise ValueError("--step-interval-sec는 0 이상이어야 합니다.")
+    if args.quality_case_limit is not None and args.quality_case_limit <= 0:
+        raise ValueError("--quality-case-limit은 1 이상이어야 합니다.")
 
+    normalizing_ranges = (
+        tuple(parse_csv_ints(args.benchmark_grid_ranges, "--benchmark-grid-ranges"))
+        if args.benchmark_grid_ranges
+        else (args.normalizing_range,)
+    )
     live_grid_ranges = tuple(parse_csv_ints(args.live_grid_ranges, "--live-grid-ranges"))
     live_grid_prompt_variants = tuple(
         parse_csv_modes(args.live_grid_prompt_variants, ALLOWED_PROMPT_VARIANTS, "--live-grid-prompt-variants")
+    )
+    preprocess_specs = build_preprocess_specs(
+        ui_filter_modes=ui_filter_modes,
+        color_policies=color_policies,
+        encode_modes=encode_modes,
+        experiment_mode=args.experiment_mode,
+    )
+    if not preprocess_specs:
+        raise ValueError("선택한 staged/full 조합으로 생성된 preprocess spec이 없습니다.")
+    live_preprocess_spec = PreprocessSpec(
+        name="live_custom",
+        ui_filter_mode=args.live_ui_filter_mode,
+        color_policy=args.live_color_policy,
+        encode_mode=args.live_encode_mode,
     )
 
     if args.live_test:
@@ -1043,6 +1657,7 @@ def main():
             prompt_variant=args.live_prompt_variant,
             size_mode=args.live_size_mode,
             background_mode=args.live_background_mode,
+            preprocess_spec=live_preprocess_spec,
             downscale_long_edge=args.downscale_long_edge,
             background_color=background_color,
             background_padding_ratio=args.background_padding_ratio,
@@ -1067,6 +1682,7 @@ def main():
             prompt_variants=live_grid_prompt_variants,
             size_modes=tuple(size_modes),
             background_modes=tuple(background_modes),
+            preprocess_spec=live_preprocess_spec,
             downscale_long_edge=args.downscale_long_edge,
             background_color=background_color,
             background_padding_ratio=args.background_padding_ratio,
@@ -1083,20 +1699,60 @@ def main():
         )
         return
 
-    benchmark(
+    latency_results = benchmark_grid(
         image_path=args.image,
         model=args.model,
         runs=args.runs,
         capture_live=args.capture_live,
         capture_countdown_sec=args.capture_countdown_sec,
         save_capture_path=args.save_capture_path,
-        normalizing_range=args.normalizing_range,
+        normalizing_ranges=normalizing_ranges,
+        prompt_variants=tuple(prompt_variants),
         size_modes=tuple(size_modes),
         background_modes=tuple(background_modes),
+        preprocess_specs=preprocess_specs,
         downscale_long_edge=args.downscale_long_edge,
         background_color=background_color,
         background_padding_ratio=args.background_padding_ratio,
+        experiment_mode=args.experiment_mode,
     )
+    quality_results = []
+    if args.quality_dataset:
+        quality_results = benchmark_quality_dataset(
+            dataset_path=args.quality_dataset,
+            model=args.model,
+            normalizing_ranges=normalizing_ranges,
+            prompt_variants=tuple(prompt_variants),
+            size_modes=tuple(size_modes),
+            background_modes=tuple(background_modes),
+            preprocess_specs=preprocess_specs,
+            downscale_long_edge=args.downscale_long_edge,
+            background_color=background_color,
+            background_padding_ratio=args.background_padding_ratio,
+            experiment_mode=args.experiment_mode,
+            ignore_wait=args.quality_ignore_wait,
+            case_limit=args.quality_case_limit,
+        )
+
+    json_path, md_path = save_reports(
+        report_dir=args.report_dir,
+        report_prefix=args.report_prefix,
+        config={
+            "model": args.model,
+            "experiment_mode": args.experiment_mode,
+            "normalizing_ranges": list(normalizing_ranges),
+            "prompt_variants": prompt_variants,
+            "size_modes": size_modes,
+            "background_modes": background_modes,
+            "ui_filter_modes": ui_filter_modes,
+            "color_policies": color_policies,
+            "encode_modes": encode_modes,
+            "quality_dataset": args.quality_dataset,
+        },
+        latency_results=latency_results,
+        quality_results=quality_results,
+    )
+    console.print(f"[green]report saved[/green] json={json_path} md={md_path}")
 
 
 if __name__ == "__main__":

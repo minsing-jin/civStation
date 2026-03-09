@@ -90,7 +90,7 @@ class BaseVLMProvider(ABC):
         pass
 
     @abstractmethod
-    def _build_pil_image_content(self, pil_image) -> object:
+    def _build_pil_image_content(self, pil_image, jpeg_quality: int | None = None) -> object:
         """Build provider-specific image content from PIL image."""
         pass
 
@@ -105,17 +105,22 @@ class BaseVLMProvider(ABC):
 
     # ==================== Image pre-processing ====================
 
-    def _prepare_pil_image(self, pil_image):
-        """Optionally downscale a PIL image before sending to the VLM.
+    def _prepare_pil_image(self, pil_image, img_config=None):
+        """Preprocess a PIL image before sending to the VLM.
 
-        When ``self.resize_for_vlm`` is True (the default), the image
-        is resized to a VLM-friendly resolution to reduce token cost
-        and speed up inference.
+        When *img_config* is provided, applies the parameterized pipeline.
+        Otherwise falls back to PLANNER_DEFAULT when ``self.resize_for_vlm``
+        is True.
         """
-        if self.resize_for_vlm:
-            from computer_use_test.utils.screen import resize_for_vlm
+        if img_config is not None:
+            from computer_use_test.utils.image_pipeline import process_image
 
-            return resize_for_vlm(pil_image)
+            return process_image(pil_image, img_config).image
+
+        if self.resize_for_vlm:
+            from computer_use_test.utils.image_pipeline import PLANNER_DEFAULT, process_image
+
+            return process_image(pil_image, PLANNER_DEFAULT).image
         return pil_image
 
     # ==================== Static Evaluation (file-based) ====================
@@ -155,6 +160,7 @@ class BaseVLMProvider(ABC):
         pil_image,
         instruction: str,
         normalizing_range: int = 1000,
+        img_config=None,
     ) -> AgentAction | None:
         """
         Analyze PIL image and return next action with normalized coordinates.
@@ -169,13 +175,16 @@ class BaseVLMProvider(ABC):
             pil_image: PIL Image (screenshot)
             instruction: Complete prompt with JSON format instructions included
             normalizing_range: Coordinate normalization range (default: 1000)
+            img_config: Optional ImagePipelineConfig for preprocessing
 
         Returns:
             AgentAction with normalized coordinates, or None after all retries exhausted
         """
-        prepared = self._prepare_pil_image(pil_image)
+        prepared = self._prepare_pil_image(pil_image, img_config=img_config)
+        jpeg_quality = getattr(img_config, "jpeg_quality", 0) if img_config else 0
+        build_kwargs = {"jpeg_quality": jpeg_quality} if jpeg_quality > 0 else {}
         content_parts = [
-            self._build_pil_image_content(prepared),
+            self._build_pil_image_content(prepared, **build_kwargs),
             self._build_text_content(instruction),
         ]
 
@@ -195,7 +204,10 @@ class BaseVLMProvider(ABC):
 
                 action = parse_action_json(response.content)
                 if action is None:
-                    self.logger.warning(f"[Attempt {attempt}/{self.MAX_RETRIES}] Parse failed, retrying...")
+                    self.logger.warning(
+                        f"[Attempt {attempt}/{self.MAX_RETRIES}] Parse failed, retrying...\n"
+                        f"  Raw response (first 500 chars): {response.content[:500]}"
+                    )
                     continue
 
                 errors = validate_action(action, normalizing_range)
@@ -220,6 +232,7 @@ class BaseVLMProvider(ABC):
         pil_image,
         instruction: str,
         normalizing_range: int = 1000,
+        img_config=None,
     ) -> list[AgentAction] | None:
         """
         Analyze PIL image and return a list of actions for multi-step primitives.
@@ -231,13 +244,16 @@ class BaseVLMProvider(ABC):
             pil_image: PIL Image (screenshot)
             instruction: Complete prompt with JSON format instructions included
             normalizing_range: Coordinate normalization range (default: 1000)
+            img_config: Optional ImagePipelineConfig for preprocessing
 
         Returns:
             List of AgentActions, or None after all retries exhausted
         """
-        prepared = self._prepare_pil_image(pil_image)
+        prepared = self._prepare_pil_image(pil_image, img_config=img_config)
+        jpeg_quality = getattr(img_config, "jpeg_quality", 0) if img_config else 0
+        build_kwargs = {"jpeg_quality": jpeg_quality} if jpeg_quality > 0 else {}
         content_parts = [
-            self._build_pil_image_content(prepared),
+            self._build_pil_image_content(prepared, **build_kwargs),
             self._build_text_content(instruction),
         ]
 
@@ -305,7 +321,7 @@ class MockVLMProvider(BaseVLMProvider):
     def _build_image_content(self, image_path):
         return {"type": "image", "path": str(image_path)}
 
-    def _build_pil_image_content(self, pil_image):
+    def _build_pil_image_content(self, pil_image, jpeg_quality: int | None = None):
         return {"type": "image", "data": "mock"}
 
     def _build_text_content(self, text):

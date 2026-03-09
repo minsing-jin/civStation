@@ -132,15 +132,16 @@ class ClaudeVLMProvider(BaseVLMProvider):
             },
         }
 
-    def _build_pil_image_content(self, pil_image) -> object:
+    def _build_pil_image_content(self, pil_image, jpeg_quality: int | None = None) -> object:
         """Build Anthropic image content from PIL image (JPEG for speed)."""
         import io
 
         from computer_use_test.utils.screen import VLM_JPEG_QUALITY
 
+        quality = jpeg_quality or VLM_JPEG_QUALITY
         buffer = io.BytesIO()
         img = pil_image.convert("RGB") if pil_image.mode != "RGB" else pil_image
-        img.save(buffer, format="JPEG", quality=VLM_JPEG_QUALITY)
+        img.save(buffer, format="JPEG", quality=quality)
         image_data = base64.standard_b64encode(buffer.getvalue()).decode("utf-8")
 
         return {

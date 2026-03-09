@@ -132,8 +132,8 @@ class GeminiVLMProvider(BaseVLMProvider):
         except ImportError as e:
             raise ImportError("PIL package not installed. Install with: pip install Pillow") from e
 
-    def _build_pil_image_content(self, pil_image) -> object:
-        """Pass through PIL image (Gemini uses PIL natively)."""
+    def _build_pil_image_content(self, pil_image, jpeg_quality: int | None = None) -> object:
+        """Pass through PIL image (Gemini uses PIL natively, JPEG quality N/A)."""
         return pil_image
 
     def _build_text_content(self, text: str) -> object:
