@@ -165,7 +165,7 @@ class ContextManager:
             if self.primitive_context.selected_unit_info:
                 lines.append(f"선택된 유닛: {self.primitive_context.selected_unit_info}")
 
-        elif primitive_name in ("research_select_primitive", "science_decision_primitive"):
+        elif primitive_name == "research_select_primitive":
             # Research needs science output and available techs
             lines.append(f"과학 출력: +{self.global_context.science_per_turn:.1f}/턴")
             if self.global_context.current_research:
@@ -219,6 +219,37 @@ class ContextManager:
             lines.append(f"군사력: {self.global_context.military_strength}")
             if self.global_context.is_at_war():
                 lines.append(f"⚔️ 전쟁 상대: {', '.join(self.global_context.active_wars)}")
+
+        elif primitive_name == "religion_primitive":
+            # Religion needs faith info
+            if hasattr(self.global_context, "faith_per_turn"):
+                lines.append(f"신앙 출력: +{self.global_context.faith_per_turn:.1f}/턴")
+
+        elif primitive_name == "war_primitive":
+            # War needs military and diplomacy info
+            lines.append(f"군사력: {self.global_context.military_strength}")
+            if self.global_context.known_civilizations:
+                lines.append("알려진 문명:")
+                for civ in self.global_context.known_civilizations[:5]:
+                    lines.append(f"  - {civ.name}: {civ.diplomatic_status.value}")
+
+        elif primitive_name == "deal_primitive":
+            # Deal needs diplomacy and resource info
+            if self.global_context.known_civilizations:
+                lines.append("알려진 문명:")
+                for civ in self.global_context.known_civilizations[:5]:
+                    lines.append(f"  - {civ.name}: {civ.diplomatic_status.value}")
+
+        elif primitive_name == "voting_primitive":
+            # World congress needs diplomacy info
+            if self.global_context.known_civilizations:
+                lines.append("알려진 문명:")
+                for civ in self.global_context.known_civilizations[:3]:
+                    lines.append(f"  - {civ.name}: {civ.diplomatic_status.value}")
+
+        elif primitive_name == "era_primitive":
+            # Era dedication needs era and score info
+            lines.append(f"현재 시대: {self.global_context.game_era}")
 
         # Add threats and opportunities if relevant
         if self.high_level_context.active_threats:

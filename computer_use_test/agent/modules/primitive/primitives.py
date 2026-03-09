@@ -99,7 +99,7 @@ class ScienceDecisionPrimitive(BasePrimitive):
 
     @property
     def name(self) -> str:
-        return "science_decision_primitive"
+        return "research_select_primitive"
 
     def generate_plan_and_action(self, screenshot_path: str) -> AgentPlan:
         """Generate science decision plan (with VLM or mock)."""

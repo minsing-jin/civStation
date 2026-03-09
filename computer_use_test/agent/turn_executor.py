@@ -36,8 +36,10 @@ from computer_use_test.agent.modules.hitl.turn_checkpoint import (
     TurnCheckpoint,
     TurnSummary,
 )
+from computer_use_test.agent.modules.memory.short_term_memory import ShortTermMemory
 from computer_use_test.agent.modules.router.primitive_registry import (
     PRIMITIVE_NAMES,
+    PRIMITIVE_REGISTRY,
     ROUTER_PROMPT,
     RouterResult,
     get_directive_for_primitive,
@@ -49,6 +51,7 @@ from computer_use_test.utils.llm_provider.base import BaseVLMProvider
 from computer_use_test.utils.llm_provider.parser import AgentAction, strip_markdown
 from computer_use_test.utils.rich_logger import RichLogger
 from computer_use_test.utils.screen import capture_screen_pil, execute_action
+from computer_use_test.utils.ui_change_detector import screenshots_similar
 
 if TYPE_CHECKING:
     from computer_use_test.agent.modules.context.context_updater import ContextUpdater
@@ -83,6 +86,7 @@ class QueueCheckResult:
 
     should_stop: bool = False
     override_action: AgentAction | None = field(default=None)
+    override_primitive: str | None = None  # HITL forced primitive (e.g. "war_primitive")
     strategy_override: str | None = None
 
 
@@ -113,17 +117,23 @@ def _check_queue_for_interrupt(
         elif d.directive_type == DirectiveType.PRIMITIVE_OVERRIDE:
             try:
                 payload = json.loads(d.payload) if isinstance(d.payload, str) else d.payload
-                result.override_action = AgentAction(
-                    action=payload.get("action", "click"),
-                    x=int(payload.get("x", 0)),
-                    y=int(payload.get("y", 0)),
-                    end_x=int(payload.get("end_x", 0)),
-                    end_y=int(payload.get("end_y", 0)),
-                    button=payload.get("button", "left"),
-                    key=payload.get("key", ""),
-                    text=payload.get("text", ""),
-                    reasoning=f"[HITL Override] {payload.get('reasoning', 'User command')}",
-                )
+                # Check if this is a primitive-name override (e.g. {"primitive": "war_primitive"})
+                if "primitive" in payload and payload["primitive"] in PRIMITIVE_REGISTRY:
+                    result.override_primitive = payload["primitive"]
+                    logger.info(f"HITL primitive override: {result.override_primitive}")
+                else:
+                    # Legacy: coordinate-based action override
+                    result.override_action = AgentAction(
+                        action=payload.get("action", "click"),
+                        x=int(payload.get("x", 0)),
+                        y=int(payload.get("y", 0)),
+                        end_x=int(payload.get("end_x", 0)),
+                        end_y=int(payload.get("end_y", 0)),
+                        button=payload.get("button", "left"),
+                        key=payload.get("key", ""),
+                        text=payload.get("text", ""),
+                        reasoning=f"[HITL Override] {payload.get('reasoning', 'User command')}",
+                    )
             except (json.JSONDecodeError, ValueError) as e:
                 logger.warning(f"Invalid primitive override payload: {e}")
 
@@ -331,20 +341,169 @@ def plan_action(
         hitl_directive=hitl_directive,
     )
 
-    if primitive_name == "policy_primitive":
-        return provider.analyze_multi(
-            pil_image=pil_image,
-            instruction=instruction,
-            normalizing_range=normalizing_range,
-            img_config=img_config,
-        )
-
     return provider.analyze(
         pil_image=pil_image,
         instruction=instruction,
         normalizing_range=normalizing_range,
         img_config=img_config,
     )
+
+
+@dataclass
+class PrimitiveLoopResult:
+    """Result from a multi-step primitive execution loop."""
+
+    success: bool = True
+    steps_taken: int = 0
+    completed: bool = False  # task_status == "complete"
+    re_route: bool = False  # UI didn't change → wrong primitive
+    last_action: AgentAction | None = None
+    error_message: str = ""
+
+
+def run_primitive_loop(
+    planner_provider: BaseVLMProvider,
+    primitive_name: str,
+    screen_w: int,
+    screen_h: int,
+    normalizing_range: int,
+    x_offset: int,
+    y_offset: int,
+    strategy_string: str,
+    recent_actions_str: str,
+    hitl_directive: str | None,
+    memory: ShortTermMemory,
+    ctx: ContextManager,
+    max_steps: int,
+    completion_condition: str,
+    planner_img_config: ImagePipelineConfig | None = None,
+    command_queue: CommandQueue | None = None,
+    agent_gate: AgentGate | None = None,
+    state_bridge: AgentStateBridge | None = None,
+    delay_before_action: float = 0.5,
+) -> PrimitiveLoopResult:
+    """Execute a multi-step primitive loop until task completion or fallback.
+
+    Captures a new screenshot each step, asks the VLM for the next action,
+    executes it, and checks for task completion via ``task_status``.
+    If the UI doesn't change for 2 consecutive steps, signals re-routing.
+
+    Returns:
+        PrimitiveLoopResult with execution outcome.
+    """
+    rl = RichLogger.get()
+    no_change_count = 0
+    result = PrimitiveLoopResult()
+
+    for step in range(max_steps):
+        # 1. Capture screenshot (pre)
+        pre_image, screen_w, screen_h, x_offset, y_offset = capture_screen_pil()
+
+        # 2. Check for interrupt
+        if command_queue:
+            queue_check = _check_queue_for_interrupt(command_queue, agent_gate=agent_gate)
+            if queue_check.should_stop:
+                result.success = False
+                result.error_message = "STOP directive received during loop"
+                break
+
+        # 3. Build prompt with short-term memory
+        instruction = get_primitive_prompt(
+            primitive_name,
+            normalizing_range,
+            high_level_strategy=strategy_string,
+            recent_actions=recent_actions_str,
+            hitl_directive=hitl_directive,
+            short_term_memory=memory.to_prompt_string(),
+        )
+
+        # 4. VLM analyze
+        action = planner_provider.analyze(
+            pil_image=pre_image,
+            instruction=instruction,
+            normalizing_range=normalizing_range,
+            img_config=planner_img_config,
+        )
+
+        if action is None:
+            logger.warning(f"Primitive loop step {step + 1}: VLM returned no action")
+            result.error_message = "VLM returned no action"
+            result.success = False
+            break
+
+        result.last_action = action
+        result.steps_taken = step + 1
+
+        # Log action
+        rl.action_result(
+            action_type=action.action,
+            coords=(action.x, action.y),
+            reasoning=action.reasoning or "",
+            extra={"Step": f"{step + 1}/{max_steps}", "Status": action.task_status or "in_progress"},
+        )
+
+        if state_bridge:
+            action_desc = f"{action.action} ({action.x}, {action.y})"
+            state_bridge.update_current_action(primitive_name, action_desc, action.reasoning or "")
+
+        # 5. Execute action
+        if delay_before_action > 0:
+            time.sleep(delay_before_action)
+
+        try:
+            execute_action(action, screen_w, screen_h, normalizing_range, x_offset, y_offset)
+        except Exception as e:
+            logger.error(f"Primitive loop execution failed: {e}")
+            result.success = False
+            result.error_message = str(e)
+            break
+
+        # 6. Record in context
+        ctx.record_action(
+            action_type=action.action,
+            primitive=primitive_name,
+            x=action.x,
+            y=action.y,
+            end_x=action.end_x if action.action == "drag" else 0,
+            end_y=action.end_y if action.action == "drag" else 0,
+            key=action.key,
+            text=action.text,
+            result="success",
+        )
+
+        # 7. Update memory
+        action_summary = f"{action.action}({action.x},{action.y})"
+        if action.action == "press":
+            action_summary = f"press({action.key})"
+        elif action.action == "drag":
+            action_summary = f"drag({action.x},{action.y}→{action.end_x},{action.end_y})"
+        result_text = (action.reasoning or "")[:80]
+        memory.add_observation(action.reasoning or "", action_summary, result=result_text)
+
+        # 8. Check task completion
+        if action.task_status == "complete":
+            result.completed = True
+            logger.info(f"Primitive loop completed: {primitive_name} in {step + 1} steps")
+            break
+
+        # 9. Check for UI change (wait for animation, then capture)
+        time.sleep(delay_before_action)
+        post_image, *_ = capture_screen_pil()
+
+        if screenshots_similar(pre_image, post_image):
+            no_change_count += 1
+            logger.debug(f"No UI change detected (count={no_change_count})")
+            if no_change_count >= 2:
+                result.re_route = True
+                logger.info(f"No UI change for 2 steps — signaling re-route from {primitive_name}")
+                break
+        else:
+            no_change_count = 0
+
+    if result.steps_taken >= max_steps and not result.completed:
+        logger.warning(f"Primitive loop reached max_steps ({max_steps}) without completion")
+
+    return result
 
 
 def run_one_turn(
@@ -516,6 +675,12 @@ def run_one_turn(
             strategy_string = f"[사용자 최우선 지시] {queue_result.strategy_override}\n\n{strategy_string or ''}"
         logger.debug(f"Strategy overridden by user: {queue_result.strategy_override[:80]}...")
 
+    # HITL primitive override — force a specific primitive (e.g. war_primitive, deal_primitive)
+    if queue_result.override_primitive:
+        primitive_name = queue_result.override_primitive
+        ctx.set_current_primitive(primitive_name)
+        rl.hitl_event("PRIMITIVE_OVERRIDE", f"Forced primitive: {primitive_name}")
+
     if queue_result.override_action:
         # Skip VLM planning — execute user's primitive override directly
         action = queue_result.override_action
@@ -525,90 +690,237 @@ def run_one_turn(
                 primitive_name, f"[HITL] {action.action} ({action.x}, {action.y})", action.reasoning
             )
             state_bridge.broadcast_agent_phase("사용자 명령 실행 중")
+
+        # Execute single override action (existing path)
+        rl.update_phase("executing")
+        if delay_before_action > 0:
+            time.sleep(delay_before_action)
+        try:
+            execute_action(action, screen_w, screen_h, normalizing_range, x_offset, y_offset)
+            rl.execution_status(True)
+        except Exception as e:
+            rl.execution_status(False, str(e))
+
+        ctx.record_action(
+            action_type=action.action,
+            primitive=primitive_name,
+            x=action.x,
+            y=action.y,
+            result="success",
+        )
+        rl.update_phase("idle")
+        rl.turn_summary(turn_number, primitive_name, action.action, True)
+        return TurnSummary(
+            turn_number=turn_number,
+            primitive=primitive_name,
+            action_type=action.action,
+            success=True,
+            reasoning=action.reasoning or "",
+            coords=(action.x, action.y),
+        )
+
+    # --- Step 3: Build strategy & recent actions (shared by both paths) ---
+    rl.update_phase("planning")
+    if state_bridge:
+        state_bridge.broadcast_agent_phase("추론 중...")
+    logger.debug(f"Planning: generating action for {primitive_name}...")
+
+    # Build strategy with primitive-specific directive
+    if strategy_updater and not high_level_strategy:
+        strategy_string = _build_strategy_with_directive(ctx, primitive_name)
+    elif not strategy_string:
+        strategy_string = _build_strategy_with_directive(ctx, primitive_name)
+
+    # Build recent actions string (compressed, for repetition avoidance)
+    recent_actions_str = _build_recent_actions_string(ctx)
+
+    if dbg.log_context:
+        log_context(primitive_name, strategy_string, recent_actions_str)
     else:
-        # Step 3: Planning — strategy + directive + recent_actions
-        rl.update_phase("planning")
-        if state_bridge:
-            state_bridge.broadcast_agent_phase("추론 중...")
-        logger.debug(f"Planning: generating action for {primitive_name}...")
+        logger.debug(f"Recent actions for primitive: {recent_actions_str}")
 
-        # Build strategy with primitive-specific directive
-        if strategy_updater and not high_level_strategy:
-            strategy_string = _build_strategy_with_directive(ctx, primitive_name)
-        elif not strategy_string:
-            strategy_string = _build_strategy_with_directive(ctx, primitive_name)
+    # Optionally augment strategy with knowledge
+    if knowledge_manager and knowledge_manager.is_available():
+        query = f"{primitive_name} 전략 가이드"
+        try:
+            knowledge_result = knowledge_manager.query(query, top_k=2)
+            if not knowledge_result.is_empty():
+                knowledge_section = knowledge_result.to_prompt_string(max_chunks=2, max_tokens=300)
+                strategy_string = f"{strategy_string}\n\n{knowledge_section}"
+                logger.debug(f"Added {len(knowledge_result.chunks)} knowledge chunks")
+        except Exception as e:
+            logger.warning(f"Knowledge retrieval failed: {e}")
 
-        # Build recent actions string (compressed, for repetition avoidance)
-        recent_actions_str = _build_recent_actions_string(ctx)
+    # --- Check if this primitive is multi-step ---
+    registry_entry = PRIMITIVE_REGISTRY.get(primitive_name, {})
+    is_multi_step = registry_entry.get("multi_step", False)
 
-        if dbg.log_context:
-            log_context(primitive_name, strategy_string, recent_actions_str)
-        else:
-            logger.debug(f"Recent actions for primitive: {recent_actions_str}")
+    if is_multi_step:
+        # === Multi-step primitive loop ===
+        memory = ShortTermMemory()
+        memory.start_task(primitive_name, registry_entry.get("max_steps", 10))
 
-        # Optionally augment strategy with knowledge
-        if knowledge_manager and knowledge_manager.is_available():
-            query = f"{primitive_name} 전략 가이드"
-            try:
-                knowledge_result = knowledge_manager.query(query, top_k=2)
-                if not knowledge_result.is_empty():
-                    knowledge_section = knowledge_result.to_prompt_string(max_chunks=2, max_tokens=300)
-                    strategy_string = f"{strategy_string}\n\n{knowledge_section}"
-                    logger.debug(f"Added {len(knowledge_result.chunks)} knowledge chunks")
-            except Exception as e:
-                logger.warning(f"Knowledge retrieval failed: {e}")
-
-        action = plan_action(
-            planner_provider,
-            pil_image,
-            primitive_name,
-            normalizing_range,
-            high_level_strategy=strategy_string,
-            recent_actions_string=recent_actions_str,
+        loop_result = run_primitive_loop(
+            planner_provider=planner_provider,
+            primitive_name=primitive_name,
+            screen_w=screen_w,
+            screen_h=screen_h,
+            normalizing_range=normalizing_range,
+            x_offset=x_offset,
+            y_offset=y_offset,
+            strategy_string=strategy_string or "",
+            recent_actions_str=recent_actions_str,
             hitl_directive=primitive_hint if primitive_hint else None,
-            img_config=planner_img_config,
+            memory=memory,
+            ctx=ctx,
+            max_steps=registry_entry.get("max_steps", 10),
+            completion_condition=registry_entry.get("completion_condition", ""),
+            planner_img_config=planner_img_config,
+            command_queue=command_queue,
+            agent_gate=agent_gate,
+            state_bridge=state_bridge,
+            delay_before_action=delay_before_action,
         )
 
-        # Handle None and empty list
-        if action is None or (isinstance(action, list) and len(action) == 0):
-            logger.error("  VLM returned no action. Turn aborted.")
-            rl.update_phase("idle")
-            ctx.record_action(
-                action_type="none",
-                primitive=primitive_name,
-                result="failed",
-                error_message="VLM returned no action",
-            )
-            return TurnSummary(
-                turn_number=turn_number,
-                primitive=primitive_name,
-                action_type="none",
-                success=False,
-                error_message="VLM returned no action",
-            )
+        # Handle re-routing if UI didn't change
+        if loop_result.re_route:
+            for _ in range(2):
+                re_image, *_ = capture_screen_pil()
+                new_router = route_primitive(router_provider, re_image, img_config=router_img_config)
+                if new_router.primitive == primitive_name:
+                    break  # Same primitive → give up re-routing
+                primitive_name = new_router.primitive
+                ctx.set_current_primitive(primitive_name)
+                logger.info(f"Re-routed to: {primitive_name}")
 
-        # Display action result(s)
-        display_action = action[0] if isinstance(action, list) else action
-        extra = {}
-        if display_action.action == "drag":
-            extra["End Coords"] = f"({display_action.end_x}, {display_action.end_y})"
-        if display_action.key:
-            extra["Key"] = display_action.key
-        if display_action.text:
-            extra["Text"] = display_action.text
-        if isinstance(action, list) and len(action) > 1:
-            extra["Multi-Action"] = f"{len(action)} actions"
-        rl.action_result(
-            action_type=display_action.action,
-            coords=(display_action.x, display_action.y),
-            reasoning=display_action.reasoning or "",
-            extra=extra or None,
+                entry = PRIMITIVE_REGISTRY.get(primitive_name, {})
+                if not entry.get("multi_step", False):
+                    # Single-step primitive → run once and exit
+                    action = plan_action(
+                        planner_provider,
+                        re_image,
+                        primitive_name,
+                        normalizing_range,
+                        high_level_strategy=strategy_string,
+                        recent_actions_string=recent_actions_str,
+                        hitl_directive=primitive_hint if primitive_hint else None,
+                        img_config=planner_img_config,
+                    )
+                    if action is not None and not (isinstance(action, list) and len(action) == 0):
+                        single_act = action[0] if isinstance(action, list) else action
+                        if delay_before_action > 0:
+                            time.sleep(delay_before_action)
+                        execute_action(single_act, screen_w, screen_h, normalizing_range, x_offset, y_offset)
+                        ctx.record_action(
+                            action_type=single_act.action,
+                            primitive=primitive_name,
+                            x=single_act.x,
+                            y=single_act.y,
+                            result="success",
+                        )
+                    break
+
+                # Re-routed to another multi-step primitive
+                memory.reset()
+                memory.start_task(primitive_name, entry.get("max_steps", 10))
+                loop_result = run_primitive_loop(
+                    planner_provider=planner_provider,
+                    primitive_name=primitive_name,
+                    screen_w=screen_w,
+                    screen_h=screen_h,
+                    normalizing_range=normalizing_range,
+                    x_offset=x_offset,
+                    y_offset=y_offset,
+                    strategy_string=strategy_string or "",
+                    recent_actions_str=recent_actions_str,
+                    hitl_directive=primitive_hint if primitive_hint else None,
+                    memory=memory,
+                    ctx=ctx,
+                    max_steps=entry.get("max_steps", 10),
+                    completion_condition=entry.get("completion_condition", ""),
+                    planner_img_config=planner_img_config,
+                    command_queue=command_queue,
+                    agent_gate=agent_gate,
+                    state_bridge=state_bridge,
+                    delay_before_action=delay_before_action,
+                )
+                if not loop_result.re_route:
+                    break
+
+        memory.reset()
+        rl.update_phase("idle")
+
+        # Build TurnSummary from loop result
+        last = loop_result.last_action
+        action_type = last.action if last else "none"
+        action_desc = f"{action_type}(loop:{loop_result.steps_taken})"
+        rl.turn_summary(turn_number, primitive_name, action_desc, loop_result.success)
+
+        if macro_turn_manager and last:
+            macro_turn_manager.record_micro_turn(primitive_name, last.reasoning or "")
+
+        return TurnSummary(
+            turn_number=turn_number,
+            primitive=primitive_name,
+            action_type=action_type,
+            success=loop_result.success,
+            reasoning=last.reasoning if last else "",
+            error_message=loop_result.error_message,
+            coords=(last.x, last.y) if last else (0, 0),
         )
 
-        # Update state bridge with current action info
-        if state_bridge:
-            action_desc = f"{display_action.action} ({display_action.x}, {display_action.y})"
-            state_bridge.update_current_action(primitive_name, action_desc, display_action.reasoning or "")
+    # === Single-step primitive (existing path) ===
+    action = plan_action(
+        planner_provider,
+        pil_image,
+        primitive_name,
+        normalizing_range,
+        high_level_strategy=strategy_string,
+        recent_actions_string=recent_actions_str,
+        hitl_directive=primitive_hint if primitive_hint else None,
+        img_config=planner_img_config,
+    )
+
+    # Handle None and empty list
+    if action is None or (isinstance(action, list) and len(action) == 0):
+        logger.error("  VLM returned no action. Turn aborted.")
+        rl.update_phase("idle")
+        ctx.record_action(
+            action_type="none",
+            primitive=primitive_name,
+            result="failed",
+            error_message="VLM returned no action",
+        )
+        return TurnSummary(
+            turn_number=turn_number,
+            primitive=primitive_name,
+            action_type="none",
+            success=False,
+            error_message="VLM returned no action",
+        )
+
+    # Display action result(s)
+    display_action = action[0] if isinstance(action, list) else action
+    extra = {}
+    if display_action.action == "drag":
+        extra["End Coords"] = f"({display_action.end_x}, {display_action.end_y})"
+    if display_action.key:
+        extra["Key"] = display_action.key
+    if display_action.text:
+        extra["Text"] = display_action.text
+    if isinstance(action, list) and len(action) > 1:
+        extra["Multi-Action"] = f"{len(action)} actions"
+    rl.action_result(
+        action_type=display_action.action,
+        coords=(display_action.x, display_action.y),
+        reasoning=display_action.reasoning or "",
+        extra=extra or None,
+    )
+
+    # Update state bridge with current action info
+    if state_bridge:
+        action_desc = f"{display_action.action} ({display_action.x}, {display_action.y})"
+        state_bridge.update_current_action(primitive_name, action_desc, display_action.reasoning or "")
 
     # Step 4: Execution — handle both single action and multi-action lists
     rl.update_phase("executing")

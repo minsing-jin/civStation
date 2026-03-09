@@ -1,7 +1,7 @@
 [
   {
     "screenshot": "turn_10_science.png",
-    "gt_primitive": "science_decision_primitive",
+    "gt_primitive": "research_select_primitive",
     "gt_actions": [
       {
         "type": "click",
