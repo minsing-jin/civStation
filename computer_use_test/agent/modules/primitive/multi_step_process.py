@@ -33,6 +33,9 @@ from computer_use_test.utils.screen import norm_to_real
 logger = logging.getLogger(__name__)
 
 _POLICY_TAB_NAMES = ["군사", "경제", "외교", "와일드카드", "암흑"]
+_POLICY_TAB_BAR_ORDER = ["전체", "군사", "경제", "외교", "와일드카드", "암흑", "황금기"]
+_POLICY_RIGHT_TAB_BAR_RATIOS = (0.57, 0.24, 0.97, 0.31)
+_POLICY_RIGHT_CARD_LIST_RATIOS = (0.57, 0.29, 0.97, 0.84)
 
 
 def _normalized_coord_note(normalizing_range: int, *, fields: str) -> str:
@@ -616,7 +619,7 @@ class PolicyProcess(ScriptedMultiStepProcess):
             return (
                 "현재 stage: bootstrap_tabs\n"
                 "- policy_entry가 끝난 뒤 overview 정책 화면에서 "
-                "좌측 슬롯 의미 정보와 정책 탭 위치를 읽어 cache를 만든다."
+                "좌측 슬롯 의미 정보와 오른쪽 탭바의 정책 탭 위치를 읽어 cache를 만든다."
             )
         if stage == "calibrate_tabs":
             current_tab = memory.get_policy_calibration_target_name() or "-"
@@ -686,6 +689,117 @@ class PolicyProcess(ScriptedMultiStepProcess):
 
     def _build_policy_queue(self) -> list[str]:
         return list(_POLICY_TAB_NAMES)
+
+    @staticmethod
+    def _policy_crop_box(
+        pil_image,
+        ratios: tuple[float, float, float, float],
+    ) -> tuple[int, int, int, int]:
+        """Return one clamped crop box from normalized image ratios."""
+        width, height = pil_image.size
+        left = max(0, min(width - 1, round(width * ratios[0])))
+        top = max(0, min(height - 1, round(height * ratios[1])))
+        right = max(left + 1, min(width, round(width * ratios[2])))
+        bottom = max(top + 1, min(height, round(height * ratios[3])))
+        return left, top, right, bottom
+
+    @classmethod
+    def _crop_policy_region(
+        cls,
+        pil_image,
+        ratios: tuple[float, float, float, float],
+    ) -> tuple[object, tuple[int, int, int, int]]:
+        """Crop one fixed-ratio policy UI region from the current screenshot."""
+        crop_box = cls._policy_crop_box(pil_image, ratios)
+        return pil_image.crop(crop_box), crop_box
+
+    @staticmethod
+    def _crop_local_norm_to_global_norm(
+        local_x: int,
+        local_y: int,
+        crop_box: tuple[int, int, int, int],
+        pil_image,
+        *,
+        normalizing_range: int,
+    ) -> tuple[int, int]:
+        """Convert crop-local normalized coordinates back into full-image normalized coordinates."""
+        width, height = pil_image.size
+        left, top, right, bottom = crop_box
+        crop_width = max(1, right - left)
+        crop_height = max(1, bottom - top)
+
+        local_px_x = norm_to_real(local_x, crop_width, normalizing_range)
+        local_px_y = norm_to_real(local_y, crop_height, normalizing_range)
+        global_px_x = min(width, left + local_px_x)
+        global_px_y = min(height, top + local_px_y)
+        return (
+            round((global_px_x / max(1, width)) * normalizing_range),
+            round((global_px_y / max(1, height)) * normalizing_range),
+        )
+
+    @classmethod
+    def _reconcile_relocalized_policy_crop_position(
+        cls,
+        raw_x: int,
+        raw_y: int,
+        *,
+        existing_x: int,
+        existing_y: int,
+        crop_box: tuple[int, int, int, int],
+        pil_image,
+        normalizing_range: int,
+    ) -> tuple[int | None, int | None, str]:
+        """Choose the best crop-local relocalize result after projecting it into full-image coordinates."""
+        factor = cls._legacy_policy_scale_factor(normalizing_range)
+        axis_budget = cls._policy_relocalize_axis_budget(normalizing_range)
+        candidates: list[tuple[str, int, int]] = [("raw", raw_x, raw_y)]
+        if factor is not None and raw_x <= 1000 and raw_y <= 1000:
+            candidates.append((f"scaled(x{factor})", raw_x * factor, raw_y * factor))
+
+        ranked: list[tuple[int, int, str, int, int, int, int]] = []
+        for label, candidate_local_x, candidate_local_y in candidates:
+            if not (0 <= candidate_local_x <= normalizing_range and 0 <= candidate_local_y <= normalizing_range):
+                continue
+            candidate_global = cls._crop_local_norm_to_global_norm(
+                candidate_local_x,
+                candidate_local_y,
+                crop_box,
+                pil_image,
+                normalizing_range=normalizing_range,
+            )
+            dx = abs(candidate_global[0] - existing_x)
+            dy = abs(candidate_global[1] - existing_y)
+            ranked.append(
+                (
+                    max(dx, dy),
+                    dx + dy,
+                    label,
+                    candidate_global[0],
+                    candidate_global[1],
+                    candidate_local_x,
+                    candidate_local_y,
+                )
+            )
+
+        if not ranked:
+            return None, None, f"reject raw=({raw_x},{raw_y}) out-of-range"
+
+        ranked.sort(key=lambda item: (item[0], item[1], 0 if item[2] == "raw" else 1))
+        max_axis_delta, _, label, chosen_x, chosen_y, chosen_local_x, chosen_local_y = ranked[0]
+        if max_axis_delta > axis_budget:
+            return (
+                None,
+                None,
+                f"reject raw=({raw_x},{raw_y}) existing=({existing_x},{existing_y}) budget={axis_budget}",
+            )
+
+        if label == "raw":
+            return chosen_x, chosen_y, f"raw=({raw_x},{raw_y})"
+        return (
+            chosen_x,
+            chosen_y,
+            f"raw=({raw_x},{raw_y}) -> ({chosen_local_x},{chosen_local_y}) {label}",
+        )
 
     def get_recovery_key(self, memory: ShortTermMemory, *, stage_name: str | None = None) -> str:
         stage = stage_name or memory.current_stage or "step"
@@ -964,7 +1078,107 @@ class PolicyProcess(ScriptedMultiStepProcess):
         )
 
     def _policy_tab_check_img_config(self, img_config=None):
-        return PRESETS.get("policy_tab_check_fast", img_config)
+        return PRESETS.get("planner_high_quality", img_config)
+
+    def _scan_policy_tab_bar_positions(
+        self,
+        provider: BaseVLMProvider,
+        pil_image,
+        memory: ShortTermMemory,
+        *,
+        normalizing_range: int,
+        high_level_strategy: str,
+        img_config=None,
+    ) -> tuple[list[dict[str, int | str | bool]] | None, str]:
+        """Read the 5 queued policy-tab positions from the cropped right-side tab bar."""
+        tab_bar_image, crop_box = self._crop_policy_region(pil_image, _POLICY_RIGHT_TAB_BAR_RATIOS)
+        prompt = (
+            "너는 문명6 정책 탭바 분석기야. 이 이미지는 정책 화면의 오른쪽 상단 탭바만 crop한 이미지다.\n"
+            "JSON만 출력해.\n"
+            "{\n"
+            '  "tab_positions": [\n'
+            '    {"tab_name":"군사","x":0,"y":0}, {"tab_name":"경제","x":0,"y":0}, '
+            '{"tab_name":"외교","x":0,"y":0}, {"tab_name":"와일드카드","x":0,"y":0}, '
+            '{"tab_name":"암흑","x":0,"y":0}\n'
+            "  ]\n"
+            "}\n"
+            "규칙:\n"
+            f"{_normalized_coord_note(normalizing_range, fields='tab_positions.x/y')}\n"
+            "- 이 crop에는 정책 탭바만 보인다고 가정해. 좌측 슬롯이나 우측 카드 목록은 없다.\n"
+            f"- 탭 순서는 {' -> '.join(_POLICY_TAB_BAR_ORDER)} 이다.\n"
+            "- '전체'는 overview 상태 표시일 뿐 queue 대상이 아니다. 반환하지 마.\n"
+            "- '황금기'가 보여도 이번 primitive 대상이 아니므로 반환하지 마.\n"
+            "- 반드시 군사, 경제, 외교, 와일드카드, 암흑 5개 탭의 중심 좌표만 반환해.\n"
+            "- 외교는 경제와 와일드카드 사이, 와일드카드는 외교와 암흑 사이에 있다.\n"
+            f"- 상위 전략 참고:\n{high_level_strategy}\n"
+        )
+        try:
+            data = _analyze_structured_json(
+                provider,
+                tab_bar_image,
+                prompt,
+                img_config=self._policy_tab_check_img_config(img_config),
+                max_tokens=768,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Policy tab-bar scan failed: %s", exc)
+            return None, ""
+
+        tab_positions = data.get("tab_positions", [])
+        if not isinstance(tab_positions, list):
+            return None, ""
+
+        local_positions: list[dict[str, int | str | bool]] = []
+        seen_tabs: set[str] = set()
+        for item in tab_positions:
+            if not isinstance(item, dict):
+                continue
+            tab_name = str(item.get("tab_name", item.get("name", ""))).strip()
+            if tab_name not in _POLICY_TAB_NAMES or tab_name in seen_tabs:
+                continue
+            try:
+                x = int(item.get("x", 0))
+                y = int(item.get("y", 0))
+            except (TypeError, ValueError):
+                continue
+            if not (0 <= x <= normalizing_range and 0 <= y <= normalizing_range):
+                continue
+            local_positions.append({"tab_name": tab_name, "x": x, "y": y, "confirmed": False})
+            seen_tabs.add(tab_name)
+
+        if set(seen_tabs) != set(_POLICY_TAB_NAMES):
+            return None, ""
+
+        local_positions, scale_note = self._maybe_upscale_bootstrap_positions(
+            local_positions,
+            normalizing_range=normalizing_range,
+        )
+        absolute_positions: list[dict[str, int | str | bool]] = []
+        for item in local_positions:
+            global_norm = self._crop_local_norm_to_global_norm(
+                int(item["x"]),
+                int(item["y"]),
+                crop_box,
+                pil_image,
+                normalizing_range=normalizing_range,
+            )
+            absolute = self._normalized_policy_to_absolute(
+                memory,
+                global_norm[0],
+                global_norm[1],
+                normalizing_range=normalizing_range,
+            )
+            if absolute is None:
+                return None, scale_note
+            absolute_positions.append(
+                {
+                    "tab_name": str(item["tab_name"]),
+                    "screen_x": absolute[0],
+                    "screen_y": absolute[1],
+                    "confirmed": False,
+                }
+            )
+        return absolute_positions, scale_note
 
     def _verify_policy_tab_switch(
         self,
@@ -975,31 +1189,30 @@ class PolicyProcess(ScriptedMultiStepProcess):
         *,
         img_config=None,
     ) -> SemanticVerifyResult:
+        card_list_image, _ = self._crop_policy_region(pil_image, _POLICY_RIGHT_CARD_LIST_RATIOS)
         prompt = (
             "문명6 정책 탭 확인기. JSON만 출력.\n"
             '{"match": true, "observed_tab": "경제", "reason": "노란 카드"}\n'
             f"기대 탭: {expected_tab}\n"
+            "이 이미지는 정책 화면 오른쪽 카드 목록만 crop한 이미지다.\n"
             "판정 기준:\n"
-            "- 오른쪽 흰 종이 배경 질감 위에 카드가 여러 장 모여 있는 정책 카드 목록만 본다.\n"
-            "- 좌측 파란 슬롯 영역과 거기에 이미 장착된 카드들은 현재 탭 판정 근거에서 완전히 무시한다.\n"
-            "- 좌측 슬롯에 다른 탭 카드가 끼워져 있어도 탭 전환 실패로 판단하지 마.\n"
-            "- 상단 탭 강조 상태는 참고하지 말고, 오른쪽 카드 목록의 분류와 필터 상태만으로 판단해.\n"
+            "- 이 crop에는 좌측 파란 슬롯 영역이 포함되지 않는다.\n"
+            "- 오른쪽 카드 목록의 분류와 필터 상태만으로 현재 탭을 판단해.\n"
             "- 군사: 오른쪽 카드 목록이 주로 군사 카드(빨강 계열)다.\n"
             "- 경제: 오른쪽 카드 목록이 주로 경제 카드(노랑 계열)다.\n"
             "- 외교: 오른쪽 카드 목록이 주로 외교 카드(초록/청록/파랑 계열)다.\n"
             "- 와일드카드: 오른쪽 카드 목록이 주로 와일드카드 카드이며 "
             "보라색, 검은색, 황금색 카드가 섞여 보일 수 있다.\n"
             "- 암흑: 오른쪽 카드 목록이 주로 암흑 카드(검정 계열)다.\n"
-            "- '전체' 또는 혼합 목록은 여러 색이 섞여 보이므로 "
-            "와일드카드와 혼동하지 마. 오른쪽 카드 목록이 실제로 "
-            "해당 탭 필터 상태인지 본다.\n"
+            "- '전체'는 여러 색이 섞인 혼합 overview 목록이다. 와일드카드와 혼동하지 마.\n"
             "- 방금 클릭한 탭의 오른쪽 카드 목록이 보이면 match=true다.\n"
+            "- 혼합 overview 목록이면 observed_tab='전체' 로 반환해.\n"
             "- 애매하면 match=false, observed_tab='unknown'.\n"
         )
         try:
             data = _analyze_structured_json(
                 provider,
-                pil_image,
+                card_list_image,
                 prompt,
                 img_config=self._policy_tab_check_img_config(img_config),
                 max_tokens=96,
@@ -1010,11 +1223,14 @@ class PolicyProcess(ScriptedMultiStepProcess):
             return SemanticVerifyResult(handled=True, passed=False, reason="policy tab-check parse failed")
 
         observed_tab = str(data.get("observed_tab", "unknown")).strip() or "unknown"
-        matched = bool(data.get("match", False)) and observed_tab == expected_tab
+        is_overview_observation = observed_tab == "전체"
+        matched = bool(data.get("match", False)) and observed_tab == expected_tab and not is_overview_observation
         reason = str(data.get("reason", "")).strip()
         result_note = f"{expected_tab}->{observed_tab}:{'ok' if matched else 'fail'}"
         if reason:
             result_note += f" ({reason})"
+        if observed_tab == "전체" and not memory.policy_state.overview_mode:
+            result_note += " [unexpected-overview]"
         memory.set_policy_last_tab_check_result(result_note)
         return SemanticVerifyResult(handled=True, passed=matched, reason=reason or result_note)
 
@@ -1061,7 +1277,7 @@ class PolicyProcess(ScriptedMultiStepProcess):
                 "{\n"
                 '  "policy_screen_ready": true,\n'
                 '  "overview_mode": true,\n'
-                '  "visible_tabs": ["군사", "경제", "외교", "와일드카드", "암흑"],\n'
+                '  "visible_tabs": ["전체", "군사", "경제", "외교", "와일드카드", "암흑", "황금기"],\n'
                 '  "wild_slot_active": true,\n'
                 '  "slot_inventory": [\n'
                 '    {"slot_id":"military_1","slot_type":"군사",'
@@ -1072,6 +1288,8 @@ class PolicyProcess(ScriptedMultiStepProcess):
                 "규칙:\n"
                 "- 이미 검증된 정책 탭 좌표 cache는 코드가 별도로 갖고 있다. tab_positions는 반환하지 마.\n"
                 "- slot_inventory에는 슬롯 의미 정보만 넣고 좌표는 넣지 마.\n"
+                "- visible_tabs에는 실제로 보이는 탭 이름을 적어도 된다. "
+                "전체/황금기가 보여도 괜찮다.\n"
                 f"- 상위 전략 참고:\n{high_level_strategy}\n"
             )
         else:
@@ -1081,26 +1299,18 @@ class PolicyProcess(ScriptedMultiStepProcess):
                 "{\n"
                 '  "policy_screen_ready": true,\n'
                 '  "overview_mode": true,\n'
-                '  "visible_tabs": ["군사", "경제", "외교", "와일드카드", "암흑"],\n'
+                '  "visible_tabs": ["전체", "군사", "경제", "외교", "와일드카드", "암흑", "황금기"],\n'
                 '  "wild_slot_active": true,\n'
                 '  "slot_inventory": [\n'
                 '    {"slot_id":"military_1","slot_type":"군사",'
                 '"current_card_name":"","is_empty":true,"active":true,"is_wild":false}\n'
-                "  ],\n"
-                '  "tab_positions": [\n'
-                '    {"tab_name":"군사","x":0,"y":0}, {"tab_name":"경제","x":0,"y":0}, '
-                '{"tab_name":"외교","x":0,"y":0}, {"tab_name":"와일드카드","x":0,"y":0}, '
-                '{"tab_name":"암흑","x":0,"y":0}\n'
                 "  ]\n"
                 "}\n"
                 '정책 카드 화면이 아니면 {"policy_screen_ready": false} 만 출력해.\n'
                 "규칙:\n"
-                f"{_normalized_coord_note(normalizing_range, fields='tab_positions.x/y')}\n"
                 "- policy entry 직후의 첫 정책 화면은 기본적으로 overview_mode=true 로 본다.\n"
-                "- 탭 5종류(군사, 경제, 외교, 와일드카드, 암흑)는 모두 visible 이라고 보고, "
-                "5개 전부의 중심 좌표를 반환해.\n"
-                "- 탭 queue는 코드가 군사→경제→외교→와일드카드→암흑 순서로 고정 생성하므로, "
-                "queue를 추론하거나 반환하지 마.\n"
+                "- visible_tabs에는 실제로 보이는 탭 이름을 적어도 된다. "
+                "전체/황금기가 보여도 괜찮다.\n"
                 "- slot_inventory에는 슬롯 의미 정보만 넣고 좌표는 넣지 마.\n"
                 f"- 상위 전략 참고:\n{high_level_strategy}\n"
             )
@@ -1146,54 +1356,21 @@ class PolicyProcess(ScriptedMultiStepProcess):
                 memory.set_policy_event("session cache incomplete -> recalibration required")
                 return False
         else:
-            tab_positions = data.get("tab_positions", [])
-            if not isinstance(tab_positions, list):
-                return False
-            seen_tabs: set[str] = set()
-            for item in tab_positions:
-                if not isinstance(item, dict):
-                    continue
-                tab_name = str(item.get("tab_name", item.get("name", ""))).strip()
-                if tab_name not in _POLICY_TAB_NAMES or tab_name in seen_tabs:
-                    continue
-                try:
-                    x = int(item.get("x", 0))
-                    y = int(item.get("y", 0))
-                except (TypeError, ValueError):
-                    continue
-                if not (0 <= x <= normalizing_range and 0 <= y <= normalizing_range):
-                    continue
-                cached_positions.append({"tab_name": tab_name, "x": x, "y": y, "confirmed": False})
-                seen_tabs.add(tab_name)
-
-            if set(seen_tabs) != set(_POLICY_TAB_NAMES):
-                logger.info("Policy bootstrap rejected: tab positions incomplete (%s)", sorted(seen_tabs))
-                memory.set_policy_event(f"bootstrap rejected: tab_positions={sorted(seen_tabs)}")
-                return False
-            cached_positions, bootstrap_scale_note = self._maybe_upscale_bootstrap_positions(
-                cached_positions,
+            cached_positions, bootstrap_scale_note = self._scan_policy_tab_bar_positions(
+                provider,
+                pil_image,
+                memory,
                 normalizing_range=normalizing_range,
+                high_level_strategy=high_level_strategy,
+                img_config=img_config,
             )
-            absolute_positions: list[dict[str, int | str | bool]] = []
-            for item in cached_positions:
-                absolute = self._normalized_policy_to_absolute(
-                    memory,
-                    int(item["x"]),
-                    int(item["y"]),
-                    normalizing_range=normalizing_range,
-                )
-                if absolute is None:
-                    memory.set_policy_event("bootstrap rejected: capture geometry missing")
-                    return False
-                absolute_positions.append(
-                    {
-                        "tab_name": str(item["tab_name"]),
-                        "screen_x": absolute[0],
-                        "screen_y": absolute[1],
-                        "confirmed": False,
-                    }
-                )
-            cached_positions = absolute_positions
+            if cached_positions is None:
+                return False
+            if set(item["tab_name"] for item in cached_positions) != set(_POLICY_TAB_NAMES):
+                seen_tabs = sorted(str(item["tab_name"]) for item in cached_positions)
+                logger.info("Policy bootstrap rejected: tab positions incomplete (%s)", seen_tabs)
+                memory.set_policy_event(f"bootstrap rejected: tab_positions={seen_tabs}")
+                return False
 
         normalized_queue = self._build_policy_queue()
 
@@ -1330,17 +1507,29 @@ class PolicyProcess(ScriptedMultiStepProcess):
         normalizing_range: int,
         img_config=None,
     ) -> bool:
+        tab_bar_image, crop_box = self._crop_policy_region(pil_image, _POLICY_RIGHT_TAB_BAR_RATIOS)
         prompt = (
-            "너는 문명6 정책 탭 재탐색기야. 지정된 탭 하나의 현재 위치만 다시 찾아 JSON만 출력해.\n"
+            "너는 문명6 정책 탭 재탐색기야. 이 이미지는 정책 화면의 오른쪽 상단 탭바만 crop한 이미지다.\n"
+            "지정된 탭 하나의 현재 위치만 다시 찾아 JSON만 출력해.\n"
             '{"found": true, "tab_name": "군사", "x": 0, "y": 0}\n'
             '못 찾으면 {"found": false}만 출력해.\n'
             f"찾을 탭: {tab_name}\n"
             f"정책 탭 후보: {', '.join(_POLICY_TAB_NAMES)}\n"
             f"{_normalized_coord_note(normalizing_range, fields='x/y')}\n"
+            f"- 탭 순서는 {' -> '.join(_POLICY_TAB_BAR_ORDER)} 이다.\n"
+            "- '전체'는 overview 상태 표시일 뿐 찾을 대상이 아니다.\n"
+            "- '황금기'는 보여도 무시해.\n"
+            "- 외교는 경제와 와일드카드 사이, 와일드카드는 외교와 암흑 사이에 있다.\n"
             "- 다른 탭은 무시하고 요청된 탭 하나의 중심 좌표만 반환해.\n"
         )
         try:
-            data = _analyze_structured_json(provider, pil_image, prompt, img_config=img_config, max_tokens=512)
+            data = _analyze_structured_json(
+                provider,
+                tab_bar_image,
+                prompt,
+                img_config=self._policy_tab_check_img_config(img_config),
+                max_tokens=512,
+            )
         except Exception as exc:  # noqa: BLE001
             logger.warning("Policy tab relocalize failed for %s: %s", tab_name, exc)
             return False
@@ -1357,7 +1546,14 @@ class PolicyProcess(ScriptedMultiStepProcess):
 
         existing_position = memory.policy_state.tab_positions.get(tab_name)
         if existing_position is None:
-            reconciled_x, reconciled_y, reconcile_note = x, y, f"raw=({x},{y})"
+            global_norm = self._crop_local_norm_to_global_norm(
+                x,
+                y,
+                crop_box,
+                pil_image,
+                normalizing_range=normalizing_range,
+            )
+            reconciled_x, reconciled_y, reconcile_note = global_norm[0], global_norm[1], f"raw=({x},{y})"
         else:
             existing_normalized = self._absolute_policy_to_normalized(
                 memory,
@@ -1369,11 +1565,13 @@ class PolicyProcess(ScriptedMultiStepProcess):
                 memory.set_policy_last_relocalize_result(f"{tab_name}:geometry-mismatch")
                 logger.warning("Rejected relocalized policy tab %s due to geometry mismatch", tab_name)
                 return False
-            reconciled_x, reconciled_y, reconcile_note = self._reconcile_relocalized_policy_position(
+            reconciled_x, reconciled_y, reconcile_note = self._reconcile_relocalized_policy_crop_position(
                 x,
                 y,
                 existing_x=existing_normalized[0],
                 existing_y=existing_normalized[1],
+                crop_box=crop_box,
+                pil_image=pil_image,
                 normalizing_range=normalizing_range,
             )
 
@@ -1538,6 +1736,7 @@ class PolicyProcess(ScriptedMultiStepProcess):
             extra_note=(
                 f"현재 탭 '{current_tab}'의 보이는 카드만 기준으로 유지 또는 교체를 한 번에 판단해.\n"
                 "스크롤하지 말고 현재 화면에 보이는 카드만 사용해.\n"
+                "드래그 소스 카드는 오른쪽 카드 목록에서만 찾아. 왼쪽 슬롯에 꽂힌 카드는 소스 후보가 아니다.\n"
                 "교체가 필요 없으면 빈 배열 []을 반환해.\n"
                 "교체가 필요하면 필요한 drag action들만 JSON 배열로 반환해.\n"
                 "- click, press, scroll, type은 반환하지 마.\n"

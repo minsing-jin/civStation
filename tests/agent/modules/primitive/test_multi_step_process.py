@@ -6,6 +6,8 @@ from PIL import Image
 
 from computer_use_test.agent.modules.memory.short_term_memory import ShortTermMemory
 from computer_use_test.agent.modules.primitive.multi_step_process import (
+    _POLICY_RIGHT_CARD_LIST_RATIOS,
+    _POLICY_RIGHT_TAB_BAR_RATIOS,
     ObservationBundle,
     StageTransition,
     get_multi_step_process,
@@ -19,11 +21,14 @@ class FakeProvider(BaseVLMProvider):
         super().__init__(api_key=None, model="fake", resize_for_vlm=False)
         self.responses = list(responses)
         self.last_text = ""
+        self.last_pil_size = None
 
     def _send_to_api(self, content_parts, temperature=0.7, max_tokens=8192, use_thinking=True) -> VLMResponse:
         for part in content_parts:
             if isinstance(part, dict) and "text" in part:
                 self.last_text = str(part["text"])
+            if isinstance(part, dict) and "pil_size" in part:
+                self.last_pil_size = part["pil_size"]
         if not self.responses:
             raise AssertionError("No more fake responses queued")
         return VLMResponse(content=self.responses.pop(0))
@@ -50,6 +55,22 @@ def _set_default_policy_geometry(
     y_offset: int = 0,
 ) -> None:
     memory.set_policy_capture_geometry(region_w, region_h, x_offset, y_offset)
+
+
+def _policy_tabbar_global_norm(process, image, *, x: int, y: int, normalizing_range: int) -> tuple[int, int]:
+    _, crop_box = process._crop_policy_region(image, _POLICY_RIGHT_TAB_BAR_RATIOS)  # noqa: SLF001
+    return process._crop_local_norm_to_global_norm(  # noqa: SLF001
+        x,
+        y,
+        crop_box,
+        image,
+        normalizing_range=normalizing_range,
+    )
+
+
+def _policy_crop_size(process, image, ratios) -> tuple[int, int]:
+    cropped, _ = process._crop_policy_region(image, ratios)  # noqa: SLF001
+    return cropped.size
 
 
 class TestObservationAssistedProcess:
@@ -133,6 +154,8 @@ class TestPromptUpdates:
         assert "새 정부 선택" in prompt
         assert "모든 정책 배정" in prompt
         assert "실패한 탭 하나만 다시 찾아 cached 좌표를 수정한다" in prompt
+        assert "'전체' 탭은 초기 overview 상태" in prompt
+        assert "혼합 overview 목록이면 '전체' 상태" in prompt
 
     def test_popup_prompt_handles_policy_change_popup(self):
         prompt = get_primitive_prompt("popup_primitive")
@@ -173,6 +196,7 @@ class TestPolicyProcess:
         memory.start_task("policy_primitive", enable_policy_state=True)
         _set_default_policy_geometry(memory)
         process.initialize(memory)
+        image = Image.new("RGB", (100, 100))
         provider = FakeProvider(
             [
                 json.dumps({"policy_screen_ready": True}),
@@ -180,7 +204,7 @@ class TestPolicyProcess:
                     {
                         "policy_screen_ready": True,
                         "overview_mode": True,
-                        "visible_tabs": ["군사", "경제", "외교", "와일드카드", "암흑"],
+                        "visible_tabs": ["전체", "군사", "경제", "외교", "와일드카드", "암흑", "황금기"],
                         "wild_slot_active": True,
                         "slot_inventory": [
                             {"slot_id": "military_1", "slot_type": "군사", "is_empty": True},
@@ -191,21 +215,26 @@ class TestPolicyProcess:
                                 "is_wild": True,
                             },
                         ],
+                    }
+                ),
+                json.dumps(
+                    {
                         "tab_positions": [
-                            {"tab_name": "군사", "x": 700, "y": 100},
-                            {"tab_name": "경제", "x": 760, "y": 100},
-                            {"tab_name": "외교", "x": 820, "y": 100},
-                            {"tab_name": "와일드카드", "x": 880, "y": 100},
-                            {"tab_name": "암흑", "x": 940, "y": 100},
+                            {"tab_name": "군사", "x": 340, "y": 500},
+                            {"tab_name": "경제", "x": 460, "y": 500},
+                            {"tab_name": "외교", "x": 580, "y": 500},
+                            {"tab_name": "와일드카드", "x": 700, "y": 500},
+                            {"tab_name": "암흑", "x": 820, "y": 500},
                         ],
                     }
                 ),
             ]
         )
+        expected_military = _policy_tabbar_global_norm(process, image, x=340, y=500, normalizing_range=1000)
 
         action = process.plan_action(
             provider,
-            Image.new("RGB", (100, 100)),
+            image,
             memory,
             normalizing_range=1000,
             high_level_strategy="과학 승리",
@@ -216,7 +245,8 @@ class TestPolicyProcess:
         assert action is not None
         assert action.action == "click"
         assert action.coord_space == "absolute"
-        assert action.x == 700
+        assert action.x == expected_military[0]
+        assert action.y == expected_military[1]
         assert memory.is_policy_entry_done() is True
         assert memory.has_policy_bootstrap() is True
         assert memory.policy_state.eligible_tabs_queue == ["군사", "경제", "외교", "와일드카드", "암흑"]
@@ -225,6 +255,7 @@ class TestPolicyProcess:
         assert set(memory.policy_state.tab_positions) == {"군사", "경제", "외교", "와일드카드", "암흑"}
         assert memory.policy_state.calibration_pending_tabs == []
         assert memory.policy_state.provisional_tabs == {"군사", "경제", "외교", "와일드카드", "암흑"}
+        assert provider.last_pil_size == _policy_crop_size(process, image, _POLICY_RIGHT_TAB_BAR_RATIOS)
 
     def test_bootstrap_upscales_legacy_1000_positions_for_10000_range(self):
         process = get_multi_step_process("policy_primitive", "")
@@ -232,45 +263,52 @@ class TestPolicyProcess:
         memory.start_task("policy_primitive", normalizing_range=10000, enable_policy_state=True)
         _set_default_policy_geometry(memory, region_w=10000, region_h=10000)
         memory.mark_policy_entry_done()
+        image = Image.new("RGB", (100, 100))
         provider = FakeProvider(
             [
                 json.dumps(
                     {
                         "policy_screen_ready": True,
                         "overview_mode": True,
-                        "visible_tabs": ["군사", "경제", "외교", "와일드카드", "암흑"],
+                        "visible_tabs": ["전체", "군사", "경제", "외교", "와일드카드", "암흑", "황금기"],
                         "wild_slot_active": True,
                         "slot_inventory": [{"slot_id": "military_1", "slot_type": "군사", "is_empty": True}],
+                    }
+                ),
+                json.dumps(
+                    {
                         "tab_positions": [
-                            {"tab_name": "군사", "x": 691, "y": 268},
-                            {"tab_name": "경제", "x": 742, "y": 268},
-                            {"tab_name": "외교", "x": 793, "y": 268},
-                            {"tab_name": "와일드카드", "x": 844, "y": 268},
-                            {"tab_name": "암흑", "x": 895, "y": 268},
+                            {"tab_name": "군사", "x": 340, "y": 500},
+                            {"tab_name": "경제", "x": 460, "y": 500},
+                            {"tab_name": "외교", "x": 580, "y": 500},
+                            {"tab_name": "와일드카드", "x": 700, "y": 500},
+                            {"tab_name": "암흑", "x": 820, "y": 500},
                         ],
                     }
-                )
+                ),
             ]
         )
+        expected_military = _policy_tabbar_global_norm(process, image, x=3400, y=5000, normalizing_range=10000)
 
         bootstrapped = process._bootstrap_policy_screen(  # noqa: SLF001
             provider,
-            Image.new("RGB", (100, 100)),
+            image,
             memory,
             high_level_strategy="과학 승리",
             normalizing_range=10000,
         )
 
         assert bootstrapped is True
-        assert memory.policy_state.tab_positions["군사"].screen_x == 6910
-        assert memory.policy_state.tab_positions["군사"].screen_y == 2680
+        assert memory.policy_state.tab_positions["군사"].screen_x == expected_military[0]
+        assert memory.policy_state.tab_positions["군사"].screen_y == expected_military[1]
         assert "coord_scale=legacy1000x10" in memory.policy_state.bootstrap_summary
         assert memory.current_stage == "click_cached_tab"
         assert memory.policy_state.calibration_pending_tabs == []
+        assert provider.last_pil_size == _policy_crop_size(process, image, _POLICY_RIGHT_TAB_BAR_RATIOS)
 
         action = process.plan_action(
             FakeProvider([]),
-            Image.new("RGB", (100, 100)),
+            image,
             memory,
             normalizing_range=10000,
             high_level_strategy="과학 승리",
@@ -281,8 +319,8 @@ class TestPolicyProcess:
         assert action is not None
         assert action.action == "click"
         assert action.coord_space == "absolute"
-        assert action.x == 6910
-        assert action.y == 2680
+        assert action.x == expected_military[0]
+        assert action.y == expected_military[1]
 
     def test_click_cached_tab_verification_uses_semantic_verifier_for_provisional_tab(self):
         process = get_multi_step_process("policy_primitive", "")
@@ -308,10 +346,10 @@ class TestPolicyProcess:
         assert verified.handled is True
         assert verified.passed is True
         assert "기대 탭: 경제" in provider.last_text
-        assert "오른쪽 흰 종이 배경 질감 위에 카드가 여러 장 모여 있는 정책 카드 목록만 본다." in provider.last_text
-        assert (
-            "좌측 파란 슬롯 영역과 거기에 이미 장착된 카드들은 현재 탭 판정 근거에서 완전히 무시한다."
-            in provider.last_text
+        assert "이 이미지는 정책 화면 오른쪽 카드 목록만 crop한 이미지다." in provider.last_text
+        assert "이 crop에는 좌측 파란 슬롯 영역이 포함되지 않는다." in provider.last_text
+        assert provider.last_pil_size == _policy_crop_size(
+            process, Image.new("RGB", (100, 100)), _POLICY_RIGHT_CARD_LIST_RATIOS
         )
 
     def test_bootstrap_fails_when_any_visible_policy_tab_coord_is_missing(self):
@@ -326,17 +364,21 @@ class TestPolicyProcess:
                     {
                         "policy_screen_ready": True,
                         "overview_mode": True,
-                        "visible_tabs": ["군사", "경제", "외교", "와일드카드", "암흑"],
+                        "visible_tabs": ["전체", "군사", "경제", "외교", "와일드카드", "암흑", "황금기"],
                         "wild_slot_active": True,
                         "slot_inventory": [{"slot_id": "military_1", "slot_type": "군사", "is_empty": True}],
+                    }
+                ),
+                json.dumps(
+                    {
                         "tab_positions": [
-                            {"tab_name": "군사", "x": 700, "y": 100},
-                            {"tab_name": "경제", "x": 760, "y": 100},
-                            {"tab_name": "외교", "x": 820, "y": 100},
-                            {"tab_name": "와일드카드", "x": 880, "y": 100},
+                            {"tab_name": "군사", "x": 340, "y": 500},
+                            {"tab_name": "경제", "x": 460, "y": 500},
+                            {"tab_name": "외교", "x": 580, "y": 500},
+                            {"tab_name": "와일드카드", "x": 700, "y": 500},
                         ],
                     }
-                )
+                ),
             ]
         )
 
@@ -732,24 +774,31 @@ class TestPolicyProcess:
         memory.start_task("policy_primitive", enable_policy_state=True)
         _set_default_policy_geometry(memory)
         memory.mark_policy_entry_done()
+        image = Image.new("RGB", (100, 100))
+        military_pos = _policy_tabbar_global_norm(process, image, x=340, y=500, normalizing_range=1000)
+        economic_pos = _policy_tabbar_global_norm(process, image, x=460, y=500, normalizing_range=1000)
+        diplomatic_pos = _policy_tabbar_global_norm(process, image, x=580, y=500, normalizing_range=1000)
+        wildcard_pos = _policy_tabbar_global_norm(process, image, x=700, y=500, normalizing_range=1000)
+        dark_pos = _policy_tabbar_global_norm(process, image, x=820, y=500, normalizing_range=1000)
         memory.init_policy_state(
             tab_positions=[
-                {"tab_name": "군사", "x": 700, "y": 100},
-                {"tab_name": "경제", "x": 760, "y": 100},
-                {"tab_name": "외교", "x": 820, "y": 100},
-                {"tab_name": "와일드카드", "x": 880, "y": 100},
-                {"tab_name": "암흑", "x": 940, "y": 100},
+                {"tab_name": "군사", "x": military_pos[0], "y": military_pos[1]},
+                {"tab_name": "경제", "x": economic_pos[0], "y": economic_pos[1]},
+                {"tab_name": "외교", "x": diplomatic_pos[0], "y": diplomatic_pos[1]},
+                {"tab_name": "와일드카드", "x": wildcard_pos[0], "y": wildcard_pos[1]},
+                {"tab_name": "암흑", "x": dark_pos[0], "y": dark_pos[1]},
             ],
             eligible_tabs_queue=["군사", "경제", "외교", "와일드카드", "암흑"],
             slot_inventory=[{"slot_id": "military_1", "slot_type": "군사", "is_empty": True}],
             wild_slot_active=False,
         )
         memory.begin_stage("click_cached_tab")
-        provider = FakeProvider([json.dumps({"found": True, "tab_name": "군사", "x": 710, "y": 110})])
+        provider = FakeProvider([json.dumps({"found": True, "tab_name": "군사", "x": 360, "y": 520})])
+        expected = _policy_tabbar_global_norm(process, image, x=360, y=520, normalizing_range=1000)
 
         resolution = process.handle_no_progress(
             provider,
-            Image.new("RGB", (100, 100)),
+            image,
             memory,
             last_action=type("A", (), {"action": "click"})(),
             normalizing_range=1000,
@@ -760,12 +809,16 @@ class TestPolicyProcess:
 
         assert resolution.handled is True
         assert memory.current_stage == "click_cached_tab"
-        assert memory.policy_state.tab_positions["군사"].screen_x == 710
+        assert memory.policy_state.tab_positions["군사"].screen_x == expected[0]
+        assert memory.policy_state.tab_positions["군사"].screen_y == expected[1]
         assert memory.policy_state.provisional_tabs == {"군사"}
         assert memory.policy_state.eligible_tabs_queue == ["군사", "경제", "외교", "와일드카드", "암흑"]
         assert memory.policy_state.entry_done is True
         assert memory.policy_state.last_event == "tab click retry=군사 relocalized=yes"
-        assert memory.policy_state.last_relocalize_result == "군사:raw=(710,110) -> abs=(710,110)"
+        assert memory.policy_state.last_relocalize_result == (
+            f"군사:raw=(360,520) -> abs=({expected[0]},{expected[1]})"
+        )
+        assert provider.last_pil_size == _policy_crop_size(process, image, _POLICY_RIGHT_TAB_BAR_RATIOS)
 
     def test_first_tab_click_failure_upscales_legacy_relocalize_for_10000_range(self):
         process = get_multi_step_process("policy_primitive", "")
@@ -786,11 +839,13 @@ class TestPolicyProcess:
             wild_slot_active=False,
         )
         memory.begin_stage("click_cached_tab")
-        provider = FakeProvider([json.dumps({"found": True, "tab_name": "군사", "x": 694, "y": 268})])
+        image = Image.new("RGB", (100, 100))
+        provider = FakeProvider([json.dumps({"found": True, "tab_name": "군사", "x": 340, "y": 500})])
+        expected = _policy_tabbar_global_norm(process, image, x=3400, y=5000, normalizing_range=10000)
 
         resolution = process.handle_no_progress(
             provider,
-            Image.new("RGB", (100, 100)),
+            image,
             memory,
             last_action=type("A", (), {"action": "click"})(),
             normalizing_range=10000,
@@ -801,12 +856,13 @@ class TestPolicyProcess:
 
         assert resolution.handled is True
         assert memory.current_stage == "click_cached_tab"
-        assert memory.policy_state.tab_positions["군사"].screen_x == 6940
-        assert memory.policy_state.tab_positions["군사"].screen_y == 2680
+        assert memory.policy_state.tab_positions["군사"].screen_x == expected[0]
+        assert memory.policy_state.tab_positions["군사"].screen_y == expected[1]
         assert memory.policy_state.last_relocalize_result == (
-            "군사:raw=(694,268) -> (6940,2680) scaled(x10) -> abs=(6940,2680)"
+            f"군사:raw=(340,500) -> (3400,5000) scaled(x10) -> abs=({expected[0]},{expected[1]})"
         )
         assert memory.policy_state.last_event == "tab click retry=군사 relocalized=yes"
+        assert provider.last_pil_size == _policy_crop_size(process, image, _POLICY_RIGHT_TAB_BAR_RATIOS)
 
     def test_first_tab_click_failure_keeps_current_range_relocalize_for_10000_range(self):
         process = get_multi_step_process("policy_primitive", "")
@@ -824,11 +880,13 @@ class TestPolicyProcess:
             wild_slot_active=False,
         )
         memory.begin_stage("click_cached_tab")
-        provider = FakeProvider([json.dumps({"found": True, "tab_name": "군사", "x": 6942, "y": 2678})])
+        image = Image.new("RGB", (100, 100))
+        provider = FakeProvider([json.dumps({"found": True, "tab_name": "군사", "x": 3410, "y": 4980})])
+        expected = _policy_tabbar_global_norm(process, image, x=3410, y=4980, normalizing_range=10000)
 
         resolution = process.handle_no_progress(
             provider,
-            Image.new("RGB", (100, 100)),
+            image,
             memory,
             last_action=type("A", (), {"action": "click"})(),
             normalizing_range=10000,
@@ -838,9 +896,11 @@ class TestPolicyProcess:
         )
 
         assert resolution.handled is True
-        assert memory.policy_state.tab_positions["군사"].screen_x == 6942
-        assert memory.policy_state.tab_positions["군사"].screen_y == 2678
-        assert memory.policy_state.last_relocalize_result == "군사:raw=(6942,2678) -> abs=(6942,2678)"
+        assert memory.policy_state.tab_positions["군사"].screen_x == expected[0]
+        assert memory.policy_state.tab_positions["군사"].screen_y == expected[1]
+        assert memory.policy_state.last_relocalize_result == (
+            f"군사:raw=(3410,4980) -> abs=({expected[0]},{expected[1]})"
+        )
 
     def test_first_tab_click_failure_rejects_implausible_relocalize_for_10000_range(self):
         process = get_multi_step_process("policy_primitive", "")
@@ -886,11 +946,15 @@ class TestPolicyProcess:
         memory.start_task("policy_primitive", enable_policy_state=True)
         _set_default_policy_geometry(memory)
         memory.mark_policy_entry_done()
+        image = Image.new("RGB", (100, 100))
+        military_pos = _policy_tabbar_global_norm(process, image, x=340, y=500, normalizing_range=1000)
+        economic_pos = _policy_tabbar_global_norm(process, image, x=460, y=500, normalizing_range=1000)
+        diplomatic_pos = _policy_tabbar_global_norm(process, image, x=580, y=500, normalizing_range=1000)
         memory.init_policy_state(
             tab_positions=[
-                {"tab_name": "군사", "x": 700, "y": 100},
-                {"tab_name": "경제", "x": 760, "y": 100},
-                {"tab_name": "외교", "x": 820, "y": 100},
+                {"tab_name": "군사", "x": military_pos[0], "y": military_pos[1]},
+                {"tab_name": "경제", "x": economic_pos[0], "y": economic_pos[1]},
+                {"tab_name": "외교", "x": diplomatic_pos[0], "y": diplomatic_pos[1]},
             ],
             eligible_tabs_queue=["군사", "경제", "외교"],
             slot_inventory=[{"slot_id": "military_1", "slot_type": "군사", "is_empty": True}],
@@ -904,13 +968,14 @@ class TestPolicyProcess:
         memory.begin_stage("click_next_tab")
         provider = FakeProvider(
             [
-                json.dumps({"found": True, "tab_name": "경제", "x": 770, "y": 110}),
+                json.dumps({"found": True, "tab_name": "경제", "x": 470, "y": 520}),
             ]
         )
+        expected = _policy_tabbar_global_norm(process, image, x=470, y=520, normalizing_range=1000)
 
         resolution = process.handle_no_progress(
             provider,
-            Image.new("RGB", (100, 100)),
+            image,
             memory,
             last_action=type("A", (), {"action": "click"})(),
             normalizing_range=1000,
@@ -920,10 +985,14 @@ class TestPolicyProcess:
         )
 
         assert resolution.handled is True
-        assert memory.policy_state.tab_positions["군사"].screen_x == 700
-        assert memory.policy_state.tab_positions["경제"].screen_x == 770
+        assert memory.policy_state.tab_positions["군사"].screen_x == military_pos[0]
+        assert memory.policy_state.tab_positions["군사"].screen_y == military_pos[1]
+        assert memory.policy_state.tab_positions["경제"].screen_x == expected[0]
+        assert memory.policy_state.tab_positions["경제"].screen_y == expected[1]
         assert memory.get_policy_current_tab_name() == "경제"
-        assert memory.policy_state.last_relocalize_result == "경제:raw=(770,110) -> abs=(770,110)"
+        assert memory.policy_state.last_relocalize_result == (
+            f"경제:raw=(470,520) -> abs=({expected[0]},{expected[1]})"
+        )
 
     def test_second_tab_click_failure_switches_to_generic_fallback(self):
         process = get_multi_step_process("policy_primitive", "")
@@ -1028,10 +1097,11 @@ class TestPolicyProcess:
         )
         memory.begin_stage("calibrate_tabs")
         provider = FakeProvider([json.dumps({"match": True, "observed_tab": "경제", "reason": "노란 카드"})])
+        image = Image.new("RGB", (100, 100))
 
         verified = process.verify_action_success(
             provider,
-            Image.new("RGB", (100, 100)),
+            image,
             memory,
             type("A", (), {"action": "click"})(),
         )
@@ -1039,14 +1109,10 @@ class TestPolicyProcess:
         assert verified.handled is True
         assert verified.passed is True
         assert "기대 탭: 경제" in provider.last_text
-        assert "오른쪽 흰 종이 배경 질감 위에 카드가 여러 장 모여 있는 정책 카드 목록만 본다." in provider.last_text
-        assert (
-            "좌측 파란 슬롯 영역과 거기에 이미 장착된 카드들은 현재 탭 판정 근거에서 완전히 무시한다."
-            in provider.last_text
-        )
-        assert "좌측 슬롯에 다른 탭 카드가 끼워져 있어도 탭 전환 실패로 판단하지 마." in provider.last_text
-        assert "'전체' 또는 혼합 목록" in provider.last_text
-        assert "상단 탭 강조 상태와 오른쪽 정책 카드 목록의 분류를 우선 본다." not in provider.last_text
+        assert "이 이미지는 정책 화면 오른쪽 카드 목록만 crop한 이미지다." in provider.last_text
+        assert "이 crop에는 좌측 파란 슬롯 영역이 포함되지 않는다." in provider.last_text
+        assert "'전체'는 여러 색이 섞인 혼합 overview 목록" in provider.last_text
+        assert provider.last_pil_size == _policy_crop_size(process, image, _POLICY_RIGHT_CARD_LIST_RATIOS)
 
     def test_policy_calibration_verification_fails_for_wrong_tab(self):
         process = get_multi_step_process("policy_primitive", "")
