@@ -88,11 +88,38 @@ TURN_DETECTOR_DEFAULT = ImagePipelineConfig(
     jpeg_quality=0,
 )
 
+PLANNER_HIGH_QUALITY = ImagePipelineConfig(
+    max_long_edge=1280,
+    ui_filter_mode="ui_contrast",
+    color_policy="preserve",
+    encode_mode="none",
+    jpeg_quality=85,
+)
+
+OBSERVATION_FAST = ImagePipelineConfig(
+    max_long_edge=768,
+    ui_filter_mode="ui_contrast",
+    color_policy="preserve",
+    encode_mode="none",
+    jpeg_quality=70,
+)
+
+POLICY_TAB_CHECK_FAST = ImagePipelineConfig(
+    max_long_edge=640,
+    ui_filter_mode="ui_contrast",
+    color_policy="preserve",
+    encode_mode="none",
+    jpeg_quality=65,
+)
+
 PRESETS: dict[str, ImagePipelineConfig] = {
     "router_default": ROUTER_DEFAULT,
     "planner_default": PLANNER_DEFAULT,
     "context_default": CONTEXT_DEFAULT,
     "turn_detector_default": TURN_DETECTOR_DEFAULT,
+    "planner_high_quality": PLANNER_HIGH_QUALITY,
+    "observation_fast": OBSERVATION_FAST,
+    "policy_tab_check_fast": POLICY_TAB_CHECK_FAST,
 }
 
 # Map CLI site prefix → preset name

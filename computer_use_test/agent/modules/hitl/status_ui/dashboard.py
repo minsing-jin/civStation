@@ -2,6 +2,7 @@
 Dashboard — Single-page HTML/CSS/JS for the real-time status UI.
 
 Supports WebSocket (primary) with automatic HTTP polling fallback.
+New layout: Main Pipeline (left) + Background Workers (right) + Step Timing + Event Log.
 """
 
 DASHBOARD_HTML = """\
@@ -172,6 +173,38 @@ DASHBOARD_HTML = """\
     margin-top: 4px;
     font-style: italic;
   }
+  .kv-row { display: flex; gap: 8px; margin-bottom: 4px; font-size: 0.85rem; }
+  .kv-key { color: #4fc3f7; font-weight: 600; min-width: 80px; }
+  .kv-val { color: #ccc; }
+  .step-badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 3px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    background: #f0a500;
+    color: #000;
+  }
+  .stm-box {
+    margin-top: 6px;
+    padding: 8px;
+    background: #1a1a2e;
+    border-radius: 4px;
+    font-size: 0.78rem;
+    color: #aaa;
+    max-height: 120px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    font-family: monospace;
+  }
+  .step-timing-list {
+    font-size: 0.78rem;
+    color: #aaa;
+    max-height: 100px;
+    overflow-y: auto;
+    font-family: monospace;
+  }
+  .hidden { display: none; }
   /* QR Code */
   .qr-btn {
     padding: 6px 12px;
@@ -263,27 +296,83 @@ DASHBOARD_HTML = """\
   </div>
 </header>
 <div class="grid">
-  <!-- Strategy Panel -->
+  <!-- Main Pipeline Panel (left) -->
   <div class="panel">
-    <h2>Current Strategy</h2>
-    <p id="strategy-text">-</p>
-    <p style="margin-top:6px;font-size:0.82rem;color:#888">
-      Victory: <strong id="victory-goal">-</strong> | Phase: <strong id="game-phase">-</strong>
-    </p>
-  </div>
-  <!-- Queue Panel -->
-  <div class="panel">
-    <h2>Queued Directives</h2>
-    <ul id="queue-list"><li>No directives queued</li></ul>
-  </div>
-  <!-- Current Action Panel -->
-  <div class="panel">
-    <h2>Current Action</h2>
-    <p>Primitive: <strong id="cur-primitive">-</strong></p>
-    <p>Action: <strong id="cur-action">-</strong></p>
+    <h2>Main Pipeline</h2>
+    <div class="kv-row">
+      <span class="kv-key">Phase</span>
+      <span class="kv-val" id="cur-phase">-</span>
+    </div>
+    <div class="kv-row">
+      <span class="kv-key">Primitive</span>
+      <span class="kv-val" id="cur-primitive">-</span>
+    </div>
+    <!-- Multi-step section (hidden when inactive) -->
+    <div id="multi-step-section" class="hidden">
+      <div class="kv-row">
+        <span class="kv-key">Step</span>
+        <span class="kv-val"><span class="step-badge" id="step-info">-</span></span>
+      </div>
+      <div class="kv-row">
+        <span class="kv-key">Stage</span>
+        <span class="kv-val" id="step-stage">-</span>
+      </div>
+      <div class="kv-row">
+        <span class="kv-key">StepTime</span>
+        <span class="kv-val" id="step-time">-</span>
+      </div>
+      <div class="kv-row">
+        <span class="kv-key">Stall</span>
+        <span class="kv-val" id="step-stall">0</span>
+      </div>
+      <div class="kv-row">
+        <span class="kv-key">Best</span>
+        <span class="kv-val" id="step-best">-</span>
+      </div>
+      <div style="margin-top:4px;">
+        <span class="kv-key" style="font-size:0.82rem;">STM (Short-Term Memory)</span>
+        <div class="stm-box" id="stm-content">-</div>
+      </div>
+    </div>
+    <div class="kv-row" style="margin-top:8px;">
+      <span class="kv-key">Action</span>
+      <span class="kv-val" id="cur-action">-</span>
+    </div>
+    <div class="kv-row">
+      <span class="kv-key">Reasoning</span>
+    </div>
     <div class="reasoning" id="cur-reasoning">-</div>
   </div>
-  <!-- Recent Actions Panel -->
+  <!-- Background Workers Panel (right) -->
+  <div class="panel">
+    <h2>Background Workers</h2>
+    <div class="kv-row">
+      <span class="kv-key">Strategy</span>
+      <span class="kv-val" id="bg-strategy">-</span>
+    </div>
+    <div class="kv-row">
+      <span class="kv-key">Victory</span>
+      <span class="kv-val"><strong id="victory-goal">-</strong></span>
+    </div>
+    <div class="kv-row">
+      <span class="kv-key">Phase</span>
+      <span class="kv-val" id="game-phase">-</span>
+    </div>
+    <div style="margin-top:8px;">
+      <span class="kv-key" style="font-size:0.82rem;">Strategy Text</span>
+      <div class="reasoning" id="strategy-text">-</div>
+    </div>
+    <div class="kv-row" style="margin-top:8px;">
+      <span class="kv-key">Directives</span>
+    </div>
+    <ul id="queue-list"><li>No directives queued</li></ul>
+  </div>
+  <!-- Step Timing Panel (left) -->
+  <div class="panel">
+    <h2>Step Timing Log</h2>
+    <div class="step-timing-list" id="step-timing-log">No steps recorded</div>
+  </div>
+  <!-- Recent Actions Panel (right) -->
   <div class="panel">
     <h2>Recent Actions</h2>
     <ul id="recent-list"><li>No actions yet</li></ul>
@@ -323,6 +412,13 @@ const POLL_MS = 1500;
 let ws = null;
 let pollTimer = null;
 let currentMode = 'high_level';
+let stepTimings = [];
+const MAX_STEP_TIMINGS = 20;
+
+function fmtMs(ms) {
+  if (ms < 1000) return ms.toFixed(0) + 'ms';
+  return (ms / 1000).toFixed(1) + 's';
+}
 
 function badgeClass(t) {
   if (t === 'change_strategy') return 'badge-strategy';
@@ -342,6 +438,40 @@ function updateDashboard(d) {
   document.getElementById('cur-primitive').textContent = d.current_primitive || '-';
   document.getElementById('cur-action').textContent = d.current_action || '-';
   document.getElementById('cur-reasoning').textContent = d.current_reasoning || '-';
+  document.getElementById('cur-phase').textContent = d.agent_state || '-';
+
+  // Multi-step section
+  const msSection = document.getElementById('multi-step-section');
+  if (d.multi_step_active) {
+    msSection.classList.remove('hidden');
+    document.getElementById('step-info').textContent = d.multi_step_step + '/' + d.multi_step_max;
+    document.getElementById('step-stage').textContent = d.multi_step_stage || '-';
+    document.getElementById('step-time').textContent =
+      'P=' + fmtMs(d.step_plan_ms || 0) + '  E=' + fmtMs(d.step_exec_ms || 0);
+    document.getElementById('step-stall').textContent = String(d.multi_step_stall_count || 0);
+    document.getElementById('step-best').textContent = d.multi_step_best_choice || '-';
+    document.getElementById('stm-content').textContent = d.stm_summary || '-';
+
+    // Accumulate step timings
+    if (d.multi_step_step > 0) {
+      const last = stepTimings.length > 0 ? stepTimings[stepTimings.length - 1] : null;
+      if (!last || last.step !== d.multi_step_step || last.primitive !== d.current_primitive) {
+        stepTimings.push({
+          step: d.multi_step_step,
+          primitive: d.current_primitive,
+          plan: d.step_plan_ms || 0,
+          exec: d.step_exec_ms || 0
+        });
+        if (stepTimings.length > MAX_STEP_TIMINGS) stepTimings.shift();
+        const logEl = document.getElementById('step-timing-log');
+        logEl.innerHTML = stepTimings.map(s =>
+          `Step ${s.step} [${s.primitive}] P=${fmtMs(s.plan)} E=${fmtMs(s.exec)}`
+        ).join('\\n');
+      }
+    }
+  } else {
+    msSection.classList.add('hidden');
+  }
 
   const ql = document.getElementById('queue-list');
   if (d.queued_directives && d.queued_directives.length) {

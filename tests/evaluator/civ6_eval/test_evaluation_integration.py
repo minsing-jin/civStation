@@ -22,7 +22,6 @@ from computer_use_test.agent.modules.primitive.primitives import (
     CultureDecisionPrimitive,
     PopupPrimitive,
     ResearchSelectPrimitive,
-    ScienceDecisionPrimitive,
     UnitOpsPrimitive,
 )
 from computer_use_test.agent.modules.router.router import Civ6MockRouter
@@ -45,7 +44,6 @@ def primitives():
         "popup_primitive": PopupPrimitive(),
         "research_select_primitive": ResearchSelectPrimitive(),
         "city_production_primitive": CityProductionPrimitive(),
-        "science_decision_primitive": ScienceDecisionPrimitive(),
         "culture_decision_primitive": CultureDecisionPrimitive(),
     }
 
@@ -136,7 +134,7 @@ class TestPrimitiveRouting:
         """Test that science screenshots are routed to science primitive."""
         screenshot_path = str(SCREENSHOTS_DIR / "turn_10_science.png")
         result = router.route(screenshot_path)
-        assert result == "science_decision_primitive"
+        assert result == "research_select_primitive"
 
     def test_route_unit_screenshot(self, router):
         """Test that unit screenshots are routed to unit ops primitive."""
@@ -179,14 +177,14 @@ class TestPrimitivePlanGeneration:
         assert plan.reasoning != ""
 
     def test_science_primitive_generates_valid_plan(self, primitives):
-        """Test that ScienceDecisionPrimitive generates a valid AgentPlan."""
-        primitive = primitives["science_decision_primitive"]
+        """Test that ResearchSelectPrimitive generates a valid AgentPlan."""
+        primitive = primitives["research_select_primitive"]
         screenshot_path = str(SCREENSHOTS_DIR / "science_test.png")
 
         plan = primitive.generate_plan_and_action(screenshot_path)
 
         assert isinstance(plan, AgentPlan)
-        assert plan.primitive_name == "science_decision_primitive"
+        assert plan.primitive_name == "research_select_primitive"
         assert len(plan.actions) > 0
 
     def test_plan_generation_is_deterministic(self, primitives):
@@ -226,7 +224,7 @@ class TestEvaluationPipeline:
             "popup_primitive",
             "research_select_primitive",
             "city_production_primitive",
-            "science_decision_primitive",
+            "research_select_primitive",
             "culture_decision_primitive",
         ]
         assert isinstance(result.primitive_match, bool)
@@ -394,7 +392,7 @@ def evaluate_screenshot_directory(screenshots_dir: str, ground_truth_file: str, 
     # Initialize pipeline
     primitives = {
         "unit_ops_primitive": UnitOpsPrimitive(),
-        "science_decision_primitive": ScienceDecisionPrimitive(),
+        "research_select_primitive": ResearchSelectPrimitive(),
         "culture_decision_primitive": CultureDecisionPrimitive(),
     }
     router = Civ6MockRouter()

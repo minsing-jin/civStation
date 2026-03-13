@@ -36,8 +36,11 @@ from computer_use_test.agent.modules.hitl.turn_checkpoint import (
     TurnCheckpoint,
     TurnSummary,
 )
+from computer_use_test.agent.modules.memory.short_term_memory import ShortTermMemory
+from computer_use_test.agent.modules.primitive.multi_step_process import StageTransition, get_multi_step_process
 from computer_use_test.agent.modules.router.primitive_registry import (
     PRIMITIVE_NAMES,
+    PRIMITIVE_REGISTRY,
     ROUTER_PROMPT,
     RouterResult,
     get_directive_for_primitive,
@@ -48,7 +51,8 @@ from computer_use_test.utils.image_pipeline import ImagePipelineConfig, process_
 from computer_use_test.utils.llm_provider.base import BaseVLMProvider
 from computer_use_test.utils.llm_provider.parser import AgentAction, strip_markdown
 from computer_use_test.utils.rich_logger import RichLogger
-from computer_use_test.utils.screen import capture_screen_pil, execute_action
+from computer_use_test.utils.screen import capture_screen_pil, execute_action, move_cursor_to_center
+from computer_use_test.utils.ui_change_detector import screenshots_similar
 
 if TYPE_CHECKING:
     from computer_use_test.agent.modules.context.context_updater import ContextUpdater
@@ -83,6 +87,7 @@ class QueueCheckResult:
 
     should_stop: bool = False
     override_action: AgentAction | None = field(default=None)
+    override_primitive: str | None = None  # HITL forced primitive (e.g. "war_primitive")
     strategy_override: str | None = None
 
 
@@ -113,17 +118,23 @@ def _check_queue_for_interrupt(
         elif d.directive_type == DirectiveType.PRIMITIVE_OVERRIDE:
             try:
                 payload = json.loads(d.payload) if isinstance(d.payload, str) else d.payload
-                result.override_action = AgentAction(
-                    action=payload.get("action", "click"),
-                    x=int(payload.get("x", 0)),
-                    y=int(payload.get("y", 0)),
-                    end_x=int(payload.get("end_x", 0)),
-                    end_y=int(payload.get("end_y", 0)),
-                    button=payload.get("button", "left"),
-                    key=payload.get("key", ""),
-                    text=payload.get("text", ""),
-                    reasoning=f"[HITL Override] {payload.get('reasoning', 'User command')}",
-                )
+                # Check if this is a primitive-name override (e.g. {"primitive": "war_primitive"})
+                if "primitive" in payload and payload["primitive"] in PRIMITIVE_REGISTRY:
+                    result.override_primitive = payload["primitive"]
+                    logger.info(f"HITL primitive override: {result.override_primitive}")
+                else:
+                    # Legacy: coordinate-based action override
+                    result.override_action = AgentAction(
+                        action=payload.get("action", "click"),
+                        x=int(payload.get("x", 0)),
+                        y=int(payload.get("y", 0)),
+                        end_x=int(payload.get("end_x", 0)),
+                        end_y=int(payload.get("end_y", 0)),
+                        button=payload.get("button", "left"),
+                        key=payload.get("key", ""),
+                        text=payload.get("text", ""),
+                        reasoning=f"[HITL Override] {payload.get('reasoning', 'User command')}",
+                    )
             except (json.JSONDecodeError, ValueError) as e:
                 logger.warning(f"Invalid primitive override payload: {e}")
 
@@ -331,20 +342,744 @@ def plan_action(
         hitl_directive=hitl_directive,
     )
 
-    if primitive_name == "policy_primitive":
-        return provider.analyze_multi(
-            pil_image=pil_image,
-            instruction=instruction,
-            normalizing_range=normalizing_range,
-            img_config=img_config,
-        )
-
     return provider.analyze(
         pil_image=pil_image,
         instruction=instruction,
         normalizing_range=normalizing_range,
         img_config=img_config,
     )
+
+
+@dataclass
+class PrimitiveLoopResult:
+    """Result from a multi-step primitive execution loop."""
+
+    success: bool = False
+    steps_taken: int = 0
+    completed: bool = False  # task_status == "complete"
+    re_route: bool = False  # UI didn't change → wrong primitive
+    last_action: AgentAction | None = None
+    error_message: str = ""
+
+
+def run_primitive_loop(
+    planner_provider: BaseVLMProvider,
+    primitive_name: str,
+    screen_w: int,
+    screen_h: int,
+    normalizing_range: int,
+    x_offset: int,
+    y_offset: int,
+    strategy_string: str,
+    recent_actions_str: str,
+    hitl_directive: str | None,
+    memory: ShortTermMemory,
+    ctx: ContextManager,
+    max_steps: int,
+    completion_condition: str,
+    planner_img_config: ImagePipelineConfig | None = None,
+    command_queue: CommandQueue | None = None,
+    agent_gate: AgentGate | None = None,
+    state_bridge: AgentStateBridge | None = None,
+    delay_before_action: float = 0.5,
+) -> PrimitiveLoopResult:
+    """Execute a class-based multi-step primitive until completion, rollback, or reroute."""
+    rl = RichLogger.get()
+    result = PrimitiveLoopResult()
+    process = get_multi_step_process(primitive_name, completion_condition)
+    process.initialize(memory)
+    rollback_used = False
+    last_policy_event_emitted = ""
+
+    def _emit_policy_event_if_changed() -> None:
+        nonlocal last_policy_event_emitted
+        if primitive_name != "policy_primitive" or not memory.policy_state.enabled:
+            return
+        current_event = memory.policy_state.last_event.strip()
+        if current_event and current_event != last_policy_event_emitted:
+            rl.policy_event(current_event)
+            last_policy_event_emitted = current_event
+
+    def _policy_cache_summary() -> str:
+        if primitive_name != "policy_primitive" or not memory.policy_state.enabled:
+            return "-"
+        ordered_tabs = memory.policy_state.eligible_tabs_queue or list(memory.policy_state.tab_positions.keys())
+        parts: list[str] = []
+        for tab_name in ordered_tabs:
+            tab = memory.policy_state.tab_positions.get(tab_name)
+            if tab is None:
+                parts.append(f"{tab_name}=missing")
+                continue
+            marker = "*" if tab.confirmed else ("?" if tab_name in memory.policy_state.provisional_tabs else "")
+            parts.append(f"{tab_name}=({tab.screen_x},{tab.screen_y}){marker}")
+        return ", ".join(parts) if parts else "-"
+
+    def _sync_policy_cache_to_context() -> None:
+        if primitive_name != "policy_primitive" or not memory.policy_state.enabled:
+            return
+        payload = memory.export_policy_tab_cache()
+        ctx.replace_policy_tab_cache(
+            positions=payload.get("positions"),
+            confirmed_tabs=payload.get("confirmed_tabs"),
+            provisional_tabs=payload.get("provisional_tabs"),
+            capture_geometry=payload.get("capture_geometry"),
+            calibration_complete=bool(payload.get("calibration_complete", False)),
+        )
+        ctx.clear_policy_tab_cache_failures()
+        for tab_name in sorted(memory.policy_state.distinct_failed_tabs):
+            ctx.add_policy_tab_cache_failure(tab_name)
+
+    def _policy_action_summary(actions: list[AgentAction]) -> str:
+        parts: list[str] = []
+        for idx, planned_action in enumerate(actions, start=1):
+            coord = f"{planned_action.coord_space}:({planned_action.x},{planned_action.y})"
+            if planned_action.action == "drag":
+                coord = f"{coord}->{planned_action.coord_space}:({planned_action.end_x},{planned_action.end_y})"
+            parts.append(f"{idx}:{planned_action.action}{coord}")
+        return " | ".join(parts) if parts else "-"
+
+    def _log_policy_state(prefix: str, actions: list[AgentAction] | None = None) -> None:
+        if primitive_name != "policy_primitive" or not memory.policy_state.enabled:
+            return
+        queue = " -> ".join(memory.get_policy_remaining_queue()) or "<empty>"
+        completed = " -> ".join(memory.policy_state.completed_tabs) or "-"
+        current_tab = memory.get_policy_current_tab_name() or "-"
+        selected_tab = memory.get_policy_selected_tab() or "-"
+        logger.info(
+            "[POLICY] %s | mode=%s stage=%s queue_idx=%s remaining=%s "
+            "completed=%s current=%s selected=%s "
+            "bootstrap=%s cache_source=%s geometry=%s cache_geometry=%s "
+            "visible=%s cache=%s provisional=%s bundle_count=%s "
+            "similarity=%s tab_check=%s relocalize=%s fallback=%s event=%s actions=%s",
+            prefix,
+            memory.policy_state.mode,
+            memory.current_stage or "-",
+            memory.policy_state.current_tab_index,
+            queue,
+            completed,
+            current_tab,
+            selected_tab,
+            memory.policy_state.bootstrap_summary or "-",
+            memory.policy_state.cache_source or "-",
+            memory._format_policy_capture_geometry(memory.policy_state.capture_geometry),
+            memory._format_policy_capture_geometry(memory.policy_state.cache_geometry),
+            ",".join(memory.policy_state.visible_tabs) or "-",
+            _policy_cache_summary(),
+            ",".join(sorted(memory.policy_state.provisional_tabs)) or "-",
+            memory.policy_state.last_bundle_action_count,
+            memory.policy_state.last_similarity_result or "-",
+            memory.policy_state.last_tab_check_result or "-",
+            memory.policy_state.last_relocalize_result or "-",
+            ",".join(sorted(memory.policy_state.distinct_failed_tabs)) or "-",
+            memory.policy_state.last_event or "-",
+            _policy_action_summary(actions or []),
+        )
+
+    def _best_choice_summary() -> str:
+        best_choice = memory.get_best_choice()
+        if best_choice is None:
+            return ""
+        return f"{best_choice.label} ({best_choice.position_hint})"
+
+    def _refresh_multi_step_debug() -> None:
+        stm_raw = memory.to_prompt_string()
+        stm_str = stm_raw if primitive_name == "policy_primitive" else stm_raw[:150]
+        rl.update_multi_step(
+            active=True,
+            step=result.steps_taken,
+            max_steps=max_steps,
+            plan_ms=(plan_end - step_start) * 1000,
+            exec_ms=(exec_end - plan_end) * 1000,
+            stage=memory.current_stage,
+            stall_count=memory.failure_count,
+            best_choice=_best_choice_summary(),
+            stm_summary=stm_str,
+        )
+        if state_bridge:
+            state_bridge.update_multi_step(
+                active=True,
+                step=result.steps_taken,
+                max_steps=max_steps,
+                plan_ms=(plan_end - step_start) * 1000,
+                exec_ms=(exec_end - plan_end) * 1000,
+                stage=memory.current_stage,
+                stall_count=memory.failure_count,
+                best_choice=_best_choice_summary(),
+                stm_summary=stm_str,
+            )
+
+    for step in range(max_steps):
+        pre_image, screen_w, screen_h, x_offset, y_offset = capture_screen_pil()
+        if primitive_name == "policy_primitive":
+            memory.set_policy_capture_geometry(screen_w, screen_h, x_offset, y_offset)
+            if memory.policy_state.tab_positions and memory.policy_state.cache_geometry is not None:
+                if not memory.policy_cache_matches_current_geometry():
+                    preserve_entry_done = memory.is_policy_entry_done()
+                    memory.clear_policy_bootstrap(
+                        preserve_entry_done=preserve_entry_done,
+                        preserve_progress=True,
+                        preserve_tab_positions=False,
+                    )
+                    memory.set_policy_mode("structured")
+                    memory.set_policy_event("policy cache invalidated: geometry changed")
+                    memory.begin_stage("bootstrap_tabs" if preserve_entry_done else "policy_entry")
+                    _sync_policy_cache_to_context()
+        _log_policy_state(f"loop-start step={step + 1}")
+
+        if command_queue:
+            queue_check = _check_queue_for_interrupt(command_queue, agent_gate=agent_gate)
+            if queue_check.should_stop:
+                result.error_message = "STOP directive received during loop"
+                break
+
+        step_start = time.monotonic()
+        action: AgentAction | list[AgentAction] | None = None
+
+        if process.should_observe(memory):
+            observation = process.observe(
+                planner_provider,
+                pre_image,
+                memory,
+                normalizing_range=normalizing_range,
+                img_config=planner_img_config,
+            )
+            plan_end = time.monotonic()
+            if observation is None:
+                result.error_message = "Observation step failed"
+                break
+
+            action = process.consume_observation(memory, observation)
+            stm_raw = memory.to_prompt_string()
+            stm_str = stm_raw if primitive_name == "policy_primitive" else stm_raw[:150]
+            rl.update_multi_step(
+                active=True,
+                step=step + 1,
+                max_steps=max_steps,
+                plan_ms=(plan_end - step_start) * 1000,
+                exec_ms=0,
+                stage=memory.current_stage,
+                stall_count=memory.failure_count,
+                best_choice=_best_choice_summary(),
+                stm_summary=stm_str,
+            )
+            if state_bridge:
+                state_bridge.update_multi_step(
+                    active=True,
+                    step=step + 1,
+                    max_steps=max_steps,
+                    plan_ms=(plan_end - step_start) * 1000,
+                    exec_ms=0,
+                    stage=memory.current_stage,
+                    stall_count=memory.failure_count,
+                    best_choice=_best_choice_summary(),
+                    stm_summary=stm_str,
+                )
+            _emit_policy_event_if_changed()
+            _log_policy_state("post-observe")
+
+            if action is None:
+                continue
+        else:
+            if process.supports_observation and memory.choice_catalog.end_reached and memory.get_best_choice() is None:
+                decided = process.decide_from_memory(
+                    planner_provider,
+                    memory,
+                    high_level_strategy=strategy_string,
+                )
+                if not decided:
+                    result.error_message = "Failed to decide best choice from short-term memory"
+                    break
+
+            task_recent_actions = memory.recent_actions_prompt()
+            combined_recent_actions = recent_actions_str
+            if task_recent_actions != "없음":
+                if combined_recent_actions and combined_recent_actions != "없음":
+                    combined_recent_actions = f"{combined_recent_actions}\n{task_recent_actions}"
+                else:
+                    combined_recent_actions = task_recent_actions
+
+            action = process.plan_action(
+                planner_provider,
+                pre_image,
+                memory,
+                normalizing_range=normalizing_range,
+                high_level_strategy=strategy_string,
+                recent_actions=combined_recent_actions or "없음",
+                hitl_directive=hitl_directive,
+                img_config=planner_img_config,
+            )
+            plan_end = time.monotonic()
+            _sync_policy_cache_to_context()
+
+        if action is None:
+            logger.warning(f"Primitive loop step {step + 1}: VLM returned no action")
+            result.error_message = "VLM returned no action"
+            break
+
+        if isinstance(action, StageTransition):
+            if primitive_name == "policy_primitive" and action.reason:
+                memory.set_policy_event(action.reason)
+            logger.info(
+                "Primitive loop internal stage transition | primitive=%s stage=%s reason=%s",
+                primitive_name,
+                action.stage,
+                action.reason or "-",
+            )
+            rl.update_multi_step(
+                active=True,
+                step=result.steps_taken,
+                max_steps=max_steps,
+                plan_ms=(plan_end - step_start) * 1000,
+                exec_ms=0,
+                stage=memory.current_stage,
+                stall_count=memory.failure_count,
+                best_choice=_best_choice_summary(),
+                stm_summary=memory.to_prompt_string()
+                if primitive_name == "policy_primitive"
+                else memory.to_prompt_string()[:150],
+            )
+            if state_bridge:
+                state_bridge.update_multi_step(
+                    active=True,
+                    step=result.steps_taken,
+                    max_steps=max_steps,
+                    plan_ms=(plan_end - step_start) * 1000,
+                    exec_ms=0,
+                    stage=memory.current_stage,
+                    stall_count=memory.failure_count,
+                    best_choice=_best_choice_summary(),
+                    stm_summary=memory.to_prompt_string()
+                    if primitive_name == "policy_primitive"
+                    else memory.to_prompt_string()[:150],
+                )
+            _sync_policy_cache_to_context()
+            _emit_policy_event_if_changed()
+            _log_policy_state("stage-transition")
+            continue
+
+        is_action_bundle = isinstance(action, list)
+        actions_list = action if is_action_bundle else [action]
+        actions_list = process.resolve_actions(actions_list, memory)
+        display_action = actions_list[0]
+        result.last_action = actions_list[-1]
+        result.steps_taken += 1
+
+        action_extra = {"Step": f"{step + 1}/{max_steps}", "Status": display_action.task_status or "in_progress"}
+        if is_action_bundle:
+            action_extra["Multi-Action"] = f"{len(actions_list)} actions"
+        _log_policy_state("planned-actions", actions_list)
+        rl.action_result(
+            action_type=display_action.action,
+            coords=(display_action.x, display_action.y),
+            reasoning=display_action.reasoning or "",
+            extra=action_extra,
+        )
+
+        if state_bridge:
+            action_desc = f"{display_action.action} ({display_action.x}, {display_action.y})"
+            if is_action_bundle and len(actions_list) > 1:
+                action_desc = f"{action_desc} +{len(actions_list) - 1}"
+            state_bridge.update_current_action(primitive_name, action_desc, display_action.reasoning or "")
+
+        if delay_before_action > 0:
+            time.sleep(delay_before_action)
+
+        try:
+            for idx, planned_action in enumerate(actions_list):
+                if primitive_name == "policy_primitive":
+                    logger.info(
+                        "[POLICY] execute %s/%s | stage=%s current=%s action=%s "
+                        "coord_space=%s x=%s y=%s end_x=%s end_y=%s "
+                        "button=%s key=%s status=%s reason=%s",
+                        idx + 1,
+                        len(actions_list),
+                        memory.current_stage or "-",
+                        memory.get_policy_current_tab_name() or "-",
+                        planned_action.action,
+                        planned_action.coord_space,
+                        planned_action.x,
+                        planned_action.y,
+                        planned_action.end_x,
+                        planned_action.end_y,
+                        planned_action.button or "-",
+                        planned_action.key or "-",
+                        planned_action.task_status or "in_progress",
+                        (planned_action.reasoning or "")[:120],
+                    )
+                execute_action(planned_action, screen_w, screen_h, normalizing_range, x_offset, y_offset)
+                is_policy_tab_click = (
+                    primitive_name == "policy_primitive"
+                    and planned_action.action in ("click", "double_click")
+                    and memory.current_stage in {"calibrate_tabs", "click_cached_tab", "click_next_tab"}
+                )
+                if (
+                    primitive_name != "policy_primitive" and planned_action.action in ("click", "double_click")
+                ) or is_policy_tab_click:
+                    move_cursor_to_center(screen_w, screen_h, x_offset, y_offset)
+                if idx < len(actions_list) - 1:
+                    time.sleep(0.25)
+        except Exception as e:
+            logger.error(f"Primitive loop execution failed: {e}")
+            result.error_message = str(e)
+            break
+        exec_end = time.monotonic()
+
+        stm_raw = memory.to_prompt_string()
+        stm_str = stm_raw if primitive_name == "policy_primitive" else stm_raw[:150]
+        rl.update_multi_step(
+            active=True,
+            step=step + 1,
+            max_steps=max_steps,
+            plan_ms=(plan_end - step_start) * 1000,
+            exec_ms=(exec_end - plan_end) * 1000,
+            stage=memory.current_stage,
+            stall_count=memory.failure_count,
+            best_choice=_best_choice_summary(),
+            stm_summary=stm_str,
+        )
+        if state_bridge:
+            state_bridge.update_multi_step(
+                active=True,
+                step=step + 1,
+                max_steps=max_steps,
+                plan_ms=(plan_end - step_start) * 1000,
+                exec_ms=(exec_end - plan_end) * 1000,
+                stage=memory.current_stage,
+                stall_count=memory.failure_count,
+                best_choice=_best_choice_summary(),
+                stm_summary=stm_str,
+            )
+        _emit_policy_event_if_changed()
+        _log_policy_state("post-exec", actions_list)
+
+        for planned_action in actions_list:
+            ctx.record_action(
+                action_type=planned_action.action,
+                primitive=primitive_name,
+                x=planned_action.x,
+                y=planned_action.y,
+                end_x=planned_action.end_x if planned_action.action == "drag" else 0,
+                end_y=planned_action.end_y if planned_action.action == "drag" else 0,
+                key=planned_action.key,
+                text=planned_action.text,
+                result="success",
+            )
+
+        semantic = (display_action.reasoning or display_action.action)[:60]
+        action_summary = (
+            f"[bundle x{len(actions_list)}] {semantic}"
+            if len(actions_list) > 1
+            else f"[{display_action.action}] {semantic}"
+        )
+        memory.add_observation(
+            reasoning=display_action.reasoning or "",
+            action_summary=action_summary,
+            result=display_action.task_status or "in_progress",
+            stage=memory.current_stage,
+        )
+
+        post_action_wait = 0.5 if primitive_name == "policy_primitive" else min(delay_before_action, 0.3)
+        if post_action_wait > 0:
+            time.sleep(post_action_wait)
+        post_image, *_ = capture_screen_pil()
+        if primitive_name == "policy_primitive":
+            is_policy_tab_click = display_action.action in {
+                "click",
+                "double_click",
+            } and memory.current_stage in {"calibrate_tabs", "click_cached_tab", "click_next_tab"}
+            policy_requires_semantic_verify = is_policy_tab_click and process.should_verify_action_without_ui_change(
+                memory, display_action
+            )
+            semantic_verify_result = None
+            if policy_requires_semantic_verify:
+                semantic_verify_result = process.verify_action_success(
+                    planner_provider,
+                    post_image,
+                    memory,
+                    display_action,
+                    img_config=planner_img_config,
+                )
+                if semantic_verify_result.handled:
+                    memory.set_last_semantic_verify(
+                        "pass" if semantic_verify_result.passed else "fail",
+                        semantic_verify_result.reason,
+                    )
+                verify_status = (
+                    "pass"
+                    if semantic_verify_result.handled and semantic_verify_result.passed
+                    else "fail"
+                    if semantic_verify_result.handled
+                    else "unhandled"
+                )
+                memory.set_policy_last_similarity_result(f"skipped(policy semantic-only) tab-check {verify_status}")
+                logger.info(
+                    "[POLICY] post-action-check | stage=%s current=%s similarity=skipped semantic_status=%s",
+                    memory.current_stage or "-",
+                    memory.get_policy_current_tab_name() or "-",
+                    verify_status,
+                )
+                if not semantic_verify_result.handled or not semantic_verify_result.passed:
+                    logger.info(
+                        "Semantic verification failed for %s at stage %s: %s",
+                        primitive_name,
+                        memory.current_stage,
+                        semantic_verify_result.reason if semantic_verify_result else "unhandled",
+                    )
+                    no_progress_resolution = process.handle_no_progress(
+                        planner_provider,
+                        post_image,
+                        memory,
+                        last_action=actions_list[-1],
+                        normalizing_range=normalizing_range,
+                        high_level_strategy=strategy_string,
+                        recent_actions=recent_actions_str,
+                        hitl_directive=hitl_directive,
+                        img_config=planner_img_config,
+                    )
+                    if no_progress_resolution.handled:
+                        memory.failure_count = 0
+                        _sync_policy_cache_to_context()
+                        _refresh_multi_step_debug()
+                        _log_policy_state("semantic-no-progress handled", actions_list)
+                        continue
+                    if no_progress_resolution.reroute:
+                        result.re_route = True
+                        result.error_message = no_progress_resolution.error_message or "Semantic verification failed"
+                        _sync_policy_cache_to_context()
+                        _log_policy_state("semantic-no-progress reroute", actions_list)
+                        break
+            elif is_policy_tab_click:
+                skip_reason = (
+                    "skipped(policy confirmed absolute cache)"
+                    if display_action.coord_space == "absolute"
+                    else "skipped(policy semantic-only)"
+                )
+                memory.set_policy_last_similarity_result(skip_reason)
+                logger.info(
+                    "[POLICY] post-action-check | stage=%s current=%s similarity=%s semantic_status=not-required",
+                    memory.current_stage or "-",
+                    memory.get_policy_current_tab_name() or "-",
+                    skip_reason,
+                )
+            else:
+                logger.info(
+                    "[POLICY] post-action-check | stage=%s current=%s "
+                    "similarity=not-applicable semantic_status=not-required",
+                    memory.current_stage or "-",
+                    memory.get_policy_current_tab_name() or "-",
+                )
+
+            bundle_task_complete = any(planned_action.task_status == "complete" for planned_action in actions_list)
+            if bundle_task_complete:
+                verification = process.verify_completion(
+                    planner_provider,
+                    post_image,
+                    memory,
+                    img_config=planner_img_config,
+                )
+                if verification.complete:
+                    result.completed = True
+                    result.success = True
+                    logger.info(f"Primitive loop completed: {primitive_name} in {step + 1} steps")
+                    break
+                logger.warning(
+                    "Completion verification failed for %s at step %s: %s",
+                    primitive_name,
+                    step + 1,
+                    verification.reason,
+                )
+                no_progress_resolution = process.handle_no_progress(
+                    planner_provider,
+                    post_image,
+                    memory,
+                    last_action=actions_list[-1],
+                    normalizing_range=normalizing_range,
+                    high_level_strategy=strategy_string,
+                    recent_actions=recent_actions_str,
+                    hitl_directive=hitl_directive,
+                    img_config=planner_img_config,
+                )
+                if no_progress_resolution.handled:
+                    memory.failure_count = 0
+                    _sync_policy_cache_to_context()
+                    _refresh_multi_step_debug()
+                    _log_policy_state("completion-no-progress handled", actions_list)
+                    continue
+                if no_progress_resolution.reroute:
+                    result.re_route = True
+                    result.error_message = no_progress_resolution.error_message or "Completion verification failed"
+                    _sync_policy_cache_to_context()
+                    _log_policy_state("completion-no-progress reroute", actions_list)
+                    break
+
+            stage_before_success = memory.current_stage
+            if is_action_bundle:
+                process.on_actions_success(memory, actions_list)
+            else:
+                process.on_action_success(memory, display_action)
+            process.on_stage_success(memory, display_action, stage_name=stage_before_success)
+            memory.failure_count = 0
+            rollback_used = False
+            _sync_policy_cache_to_context()
+            _log_policy_state("stage-success", actions_list)
+            continue
+
+        raw_ui_changed = not screenshots_similar(
+            pre_image,
+            post_image,
+            action=display_action,
+            normalizing_range=normalizing_range,
+        )
+        effective_ui_changed = raw_ui_changed
+
+        verify_without_ui_change = not effective_ui_changed and process.should_verify_action_without_ui_change(
+            memory, display_action
+        )
+        semantic_verify_result = None
+        if verify_without_ui_change:
+            semantic_verify_result = process.verify_action_success(
+                planner_provider,
+                post_image,
+                memory,
+                display_action,
+                img_config=planner_img_config,
+            )
+            if semantic_verify_result.handled:
+                memory.set_last_semantic_verify(
+                    "pass" if semantic_verify_result.passed else "fail",
+                    semantic_verify_result.reason,
+                )
+                if semantic_verify_result.passed:
+                    effective_ui_changed = True
+
+        bundle_task_complete = any(planned_action.task_status == "complete" for planned_action in actions_list)
+        if bundle_task_complete:
+            verification = process.verify_completion(
+                planner_provider,
+                post_image,
+                memory,
+                img_config=planner_img_config,
+            )
+            if verification.complete:
+                result.completed = True
+                result.success = True
+                logger.info(f"Primitive loop completed: {primitive_name} in {step + 1} steps")
+                break
+            logger.warning(
+                "Completion verification failed for %s at step %s: %s",
+                primitive_name,
+                step + 1,
+                verification.reason,
+            )
+
+        if effective_ui_changed:
+            semantic_verify = semantic_verify_result
+            if semantic_verify is None or not verify_without_ui_change:
+                semantic_verify = process.verify_action_success(
+                    planner_provider,
+                    post_image,
+                    memory,
+                    display_action,
+                    img_config=planner_img_config,
+                )
+            if semantic_verify.handled:
+                memory.set_last_semantic_verify(
+                    "pass" if semantic_verify.passed else "fail",
+                    semantic_verify.reason,
+                )
+            if semantic_verify.handled and not semantic_verify.passed:
+                logger.info(
+                    "Semantic verification failed for %s at stage %s: %s",
+                    primitive_name,
+                    memory.current_stage,
+                    semantic_verify.reason,
+                )
+                no_progress_resolution = process.handle_no_progress(
+                    planner_provider,
+                    post_image,
+                    memory,
+                    last_action=actions_list[-1],
+                    normalizing_range=normalizing_range,
+                    high_level_strategy=strategy_string,
+                    recent_actions=recent_actions_str,
+                    hitl_directive=hitl_directive,
+                    img_config=planner_img_config,
+                )
+                if no_progress_resolution.handled:
+                    memory.failure_count = 0
+                    _sync_policy_cache_to_context()
+                    _refresh_multi_step_debug()
+                    _log_policy_state("semantic-no-progress handled", actions_list)
+                    continue
+                if no_progress_resolution.reroute:
+                    result.re_route = True
+                    result.error_message = no_progress_resolution.error_message or "Semantic verification failed"
+                    _sync_policy_cache_to_context()
+                    _log_policy_state("semantic-no-progress reroute", actions_list)
+                    break
+
+            stage_before_success = memory.current_stage
+            if is_action_bundle:
+                process.on_actions_success(memory, actions_list)
+            else:
+                process.on_action_success(memory, display_action)
+            process.on_stage_success(memory, display_action, stage_name=stage_before_success)
+            memory.failure_count = 0
+            rollback_used = False
+            _sync_policy_cache_to_context()
+            _log_policy_state("stage-success", actions_list)
+            continue
+
+        no_progress_resolution = process.handle_no_progress(
+            planner_provider,
+            post_image,
+            memory,
+            last_action=actions_list[-1],
+            normalizing_range=normalizing_range,
+            high_level_strategy=strategy_string,
+            recent_actions=recent_actions_str,
+            hitl_directive=hitl_directive,
+            img_config=planner_img_config,
+        )
+        if no_progress_resolution.handled:
+            memory.failure_count = 0
+            _sync_policy_cache_to_context()
+            _refresh_multi_step_debug()
+            _log_policy_state("no-progress handled", actions_list)
+            continue
+        if no_progress_resolution.reroute:
+            result.re_route = True
+            result.error_message = no_progress_resolution.error_message or "Process requested reroute"
+            _sync_policy_cache_to_context()
+            _log_policy_state("no-progress reroute", actions_list)
+            break
+
+        memory.failure_count += 1
+        logger.debug("No UI change detected for %s (count=%s)", primitive_name, memory.failure_count)
+
+        if memory.failure_count < 2:
+            continue
+
+        if process.supports_observation and not rollback_used and memory.restore_last_checkpoint():
+            rollback_used = True
+            logger.info("No progress twice -> rollback to last observation checkpoint for %s", primitive_name)
+            continue
+
+        result.re_route = True
+        result.error_message = "No UI change for 2 consecutive steps"
+        logger.info("No UI change for 2 steps — signaling re-route from %s", primitive_name)
+        break
+
+    if not result.completed and not result.re_route and not result.error_message:
+        result.error_message = f"Primitive loop reached max_steps ({max_steps}) without completion"
+        logger.warning(result.error_message)
+
+    _sync_policy_cache_to_context()
+    rl.update_multi_step(active=False)
+    if state_bridge:
+        state_bridge.update_multi_step(active=False)
+
+    return result
 
 
 def run_one_turn(
@@ -516,6 +1251,12 @@ def run_one_turn(
             strategy_string = f"[사용자 최우선 지시] {queue_result.strategy_override}\n\n{strategy_string or ''}"
         logger.debug(f"Strategy overridden by user: {queue_result.strategy_override[:80]}...")
 
+    # HITL primitive override — force a specific primitive (e.g. war_primitive, deal_primitive)
+    if queue_result.override_primitive:
+        primitive_name = queue_result.override_primitive
+        ctx.set_current_primitive(primitive_name)
+        rl.hitl_event("PRIMITIVE_OVERRIDE", f"Forced primitive: {primitive_name}")
+
     if queue_result.override_action:
         # Skip VLM planning — execute user's primitive override directly
         action = queue_result.override_action
@@ -525,90 +1266,328 @@ def run_one_turn(
                 primitive_name, f"[HITL] {action.action} ({action.x}, {action.y})", action.reasoning
             )
             state_bridge.broadcast_agent_phase("사용자 명령 실행 중")
+
+        # Execute single override action (existing path)
+        rl.update_phase("executing")
+        if delay_before_action > 0:
+            time.sleep(delay_before_action)
+        try:
+            execute_action(action, screen_w, screen_h, normalizing_range, x_offset, y_offset)
+            rl.execution_status(True)
+        except Exception as e:
+            rl.execution_status(False, str(e))
+
+        ctx.record_action(
+            action_type=action.action,
+            primitive=primitive_name,
+            x=action.x,
+            y=action.y,
+            result="success",
+        )
+        rl.update_phase("idle")
+        rl.turn_summary(turn_number, primitive_name, action.action, True)
+        return TurnSummary(
+            turn_number=turn_number,
+            primitive=primitive_name,
+            action_type=action.action,
+            success=True,
+            reasoning=action.reasoning or "",
+            coords=(action.x, action.y),
+        )
+
+    # --- Step 3: Build strategy & recent actions (shared by both paths) ---
+    rl.update_phase("planning")
+    if state_bridge:
+        state_bridge.broadcast_agent_phase("추론 중...")
+    logger.debug(f"Planning: generating action for {primitive_name}...")
+
+    # Build strategy with primitive-specific directive
+    if strategy_updater and not high_level_strategy:
+        strategy_string = _build_strategy_with_directive(ctx, primitive_name)
+    elif not strategy_string:
+        strategy_string = _build_strategy_with_directive(ctx, primitive_name)
+
+    # Build recent actions string (compressed, for repetition avoidance)
+    recent_actions_str = _build_recent_actions_string(ctx)
+
+    if dbg.log_context:
+        log_context(primitive_name, strategy_string, recent_actions_str)
     else:
-        # Step 3: Planning — strategy + directive + recent_actions
-        rl.update_phase("planning")
-        if state_bridge:
-            state_bridge.broadcast_agent_phase("추론 중...")
-        logger.debug(f"Planning: generating action for {primitive_name}...")
+        logger.debug(f"Recent actions for primitive: {recent_actions_str}")
 
-        # Build strategy with primitive-specific directive
-        if strategy_updater and not high_level_strategy:
-            strategy_string = _build_strategy_with_directive(ctx, primitive_name)
-        elif not strategy_string:
-            strategy_string = _build_strategy_with_directive(ctx, primitive_name)
+    # Optionally augment strategy with knowledge
+    if knowledge_manager and knowledge_manager.is_available():
+        query = f"{primitive_name} 전략 가이드"
+        try:
+            knowledge_result = knowledge_manager.query(query, top_k=2)
+            if not knowledge_result.is_empty():
+                knowledge_section = knowledge_result.to_prompt_string(max_chunks=2, max_tokens=300)
+                strategy_string = f"{strategy_string}\n\n{knowledge_section}"
+                logger.debug(f"Added {len(knowledge_result.chunks)} knowledge chunks")
+        except Exception as e:
+            logger.warning(f"Knowledge retrieval failed: {e}")
 
-        # Build recent actions string (compressed, for repetition avoidance)
-        recent_actions_str = _build_recent_actions_string(ctx)
+    # --- Check if this primitive is multi-step ---
+    registry_entry = PRIMITIVE_REGISTRY.get(primitive_name, {})
+    is_multi_step = registry_entry.get("multi_step", False)
 
-        if dbg.log_context:
-            log_context(primitive_name, strategy_string, recent_actions_str)
-        else:
-            logger.debug(f"Recent actions for primitive: {recent_actions_str}")
-
-        # Optionally augment strategy with knowledge
-        if knowledge_manager and knowledge_manager.is_available():
-            query = f"{primitive_name} 전략 가이드"
-            try:
-                knowledge_result = knowledge_manager.query(query, top_k=2)
-                if not knowledge_result.is_empty():
-                    knowledge_section = knowledge_result.to_prompt_string(max_chunks=2, max_tokens=300)
-                    strategy_string = f"{strategy_string}\n\n{knowledge_section}"
-                    logger.debug(f"Added {len(knowledge_result.chunks)} knowledge chunks")
-            except Exception as e:
-                logger.warning(f"Knowledge retrieval failed: {e}")
-
-        action = plan_action(
-            planner_provider,
-            pil_image,
+    if is_multi_step:
+        # === Multi-step primitive loop ===
+        memory = ShortTermMemory()
+        memory.start_task(
             primitive_name,
-            normalizing_range,
-            high_level_strategy=strategy_string,
-            recent_actions_string=recent_actions_str,
+            registry_entry.get("max_steps", 10),
+            normalizing_range=normalizing_range,
+            enable_choice_catalog=registry_entry.get("process_kind") == "observation_assisted",
+            enable_policy_state=primitive_name == "policy_primitive",
+        )
+        if primitive_name == "policy_primitive":
+            memory.set_policy_capture_geometry(screen_w, screen_h, x_offset, y_offset)
+            policy_cache = ctx.get_policy_tab_cache()
+            cache_geometry = getattr(policy_cache, "capture_geometry", None)
+            geometry_matches = (
+                cache_geometry is not None
+                and int(getattr(cache_geometry, "region_w", -1)) == screen_w
+                and int(getattr(cache_geometry, "region_h", -1)) == screen_h
+                and int(getattr(cache_geometry, "x_offset", -1)) == x_offset
+                and int(getattr(cache_geometry, "y_offset", -1)) == y_offset
+            )
+            if policy_cache.positions and not geometry_matches:
+                logger.info("Cleared stale session policy tab cache before loop start due to geometry mismatch")
+                ctx.clear_policy_tab_cache()
+                policy_cache = ctx.get_policy_tab_cache()
+            memory.seed_policy_tab_cache(policy_cache)
+
+        # Override image config if primitive has a specific preset
+        primitive_img_override = registry_entry.get("img_config_preset")
+        if primitive_img_override:
+            from computer_use_test.utils.image_pipeline import PRESETS
+
+            effective_img_config = PRESETS.get(primitive_img_override, planner_img_config)
+        else:
+            effective_img_config = planner_img_config
+
+        loop_result = run_primitive_loop(
+            planner_provider=planner_provider,
+            primitive_name=primitive_name,
+            screen_w=screen_w,
+            screen_h=screen_h,
+            normalizing_range=normalizing_range,
+            x_offset=x_offset,
+            y_offset=y_offset,
+            strategy_string=strategy_string or "",
+            recent_actions_str=recent_actions_str,
             hitl_directive=primitive_hint if primitive_hint else None,
-            img_config=planner_img_config,
+            memory=memory,
+            ctx=ctx,
+            max_steps=registry_entry.get("max_steps", 10),
+            completion_condition=registry_entry.get("completion_condition", ""),
+            planner_img_config=effective_img_config,
+            command_queue=command_queue,
+            agent_gate=agent_gate,
+            state_bridge=state_bridge,
+            delay_before_action=delay_before_action,
         )
 
-        # Handle None and empty list
-        if action is None or (isinstance(action, list) and len(action) == 0):
-            logger.error("  VLM returned no action. Turn aborted.")
-            rl.update_phase("idle")
-            ctx.record_action(
-                action_type="none",
-                primitive=primitive_name,
-                result="failed",
-                error_message="VLM returned no action",
-            )
-            return TurnSummary(
-                turn_number=turn_number,
-                primitive=primitive_name,
-                action_type="none",
-                success=False,
-                error_message="VLM returned no action",
-            )
+        # Handle re-routing if UI didn't change
+        if loop_result.re_route:
+            same_primitive_restart_used = False
+            for _ in range(2):
+                re_image, *_ = capture_screen_pil()
+                new_router = route_primitive(router_provider, re_image, img_config=router_img_config)
+                if new_router.primitive == primitive_name:
+                    if primitive_name == "policy_primitive" and not same_primitive_restart_used:
+                        same_primitive_restart_used = True
+                        logger.info("Policy requested re-route to same primitive -> restarting same primitive once")
+                        preserve_entry_done = memory.is_policy_entry_done()
+                        memory.clear_policy_bootstrap(
+                            preserve_entry_done=preserve_entry_done,
+                            preserve_progress=True,
+                        )
+                        memory.begin_stage("bootstrap_tabs" if preserve_entry_done else "policy_entry")
+                        memory.set_policy_mode("structured")
+                        memory.set_policy_event("same-primitive reroute -> preserved restart")
+                        loop_result = run_primitive_loop(
+                            planner_provider=planner_provider,
+                            primitive_name=primitive_name,
+                            screen_w=screen_w,
+                            screen_h=screen_h,
+                            normalizing_range=normalizing_range,
+                            x_offset=x_offset,
+                            y_offset=y_offset,
+                            strategy_string=strategy_string or "",
+                            recent_actions_str=recent_actions_str,
+                            hitl_directive=primitive_hint if primitive_hint else None,
+                            memory=memory,
+                            ctx=ctx,
+                            max_steps=registry_entry.get("max_steps", 10),
+                            completion_condition=registry_entry.get("completion_condition", ""),
+                            planner_img_config=effective_img_config,
+                            command_queue=command_queue,
+                            agent_gate=agent_gate,
+                            state_bridge=state_bridge,
+                            delay_before_action=delay_before_action,
+                        )
+                        if not loop_result.re_route:
+                            break
+                        continue
+                    break  # Same primitive → give up re-routing
+                primitive_name = new_router.primitive
+                ctx.set_current_primitive(primitive_name)
+                logger.info(f"Re-routed to: {primitive_name}")
 
-        # Display action result(s)
-        display_action = action[0] if isinstance(action, list) else action
-        extra = {}
-        if display_action.action == "drag":
-            extra["End Coords"] = f"({display_action.end_x}, {display_action.end_y})"
-        if display_action.key:
-            extra["Key"] = display_action.key
-        if display_action.text:
-            extra["Text"] = display_action.text
-        if isinstance(action, list) and len(action) > 1:
-            extra["Multi-Action"] = f"{len(action)} actions"
-        rl.action_result(
-            action_type=display_action.action,
-            coords=(display_action.x, display_action.y),
-            reasoning=display_action.reasoning or "",
-            extra=extra or None,
+                entry = PRIMITIVE_REGISTRY.get(primitive_name, {})
+                if not entry.get("multi_step", False):
+                    # Single-step primitive → run once and exit
+                    action = plan_action(
+                        planner_provider,
+                        re_image,
+                        primitive_name,
+                        normalizing_range,
+                        high_level_strategy=strategy_string,
+                        recent_actions_string=recent_actions_str,
+                        hitl_directive=primitive_hint if primitive_hint else None,
+                        img_config=planner_img_config,
+                    )
+                    if action is not None and not (isinstance(action, list) and len(action) == 0):
+                        single_act = action[0] if isinstance(action, list) else action
+                        if delay_before_action > 0:
+                            time.sleep(delay_before_action)
+                        execute_action(single_act, screen_w, screen_h, normalizing_range, x_offset, y_offset)
+                        ctx.record_action(
+                            action_type=single_act.action,
+                            primitive=primitive_name,
+                            x=single_act.x,
+                            y=single_act.y,
+                            result="success",
+                        )
+                    break
+
+                # Re-routed to another multi-step primitive
+                memory.reset()
+                memory.start_task(
+                    primitive_name,
+                    entry.get("max_steps", 10),
+                    normalizing_range=normalizing_range,
+                    enable_choice_catalog=entry.get("process_kind") == "observation_assisted",
+                    enable_policy_state=primitive_name == "policy_primitive",
+                )
+                if primitive_name == "policy_primitive":
+                    memory.set_policy_capture_geometry(screen_w, screen_h, x_offset, y_offset)
+                    policy_cache = ctx.get_policy_tab_cache()
+                    cache_geometry = getattr(policy_cache, "capture_geometry", None)
+                    geometry_matches = (
+                        cache_geometry is not None
+                        and int(getattr(cache_geometry, "region_w", -1)) == screen_w
+                        and int(getattr(cache_geometry, "region_h", -1)) == screen_h
+                        and int(getattr(cache_geometry, "x_offset", -1)) == x_offset
+                        and int(getattr(cache_geometry, "y_offset", -1)) == y_offset
+                    )
+                    if policy_cache.positions and not geometry_matches:
+                        logger.info(
+                            "Cleared stale session policy tab cache before rerouted loop due to geometry mismatch"
+                        )
+                        ctx.clear_policy_tab_cache()
+                        policy_cache = ctx.get_policy_tab_cache()
+                    memory.seed_policy_tab_cache(policy_cache)
+                loop_result = run_primitive_loop(
+                    planner_provider=planner_provider,
+                    primitive_name=primitive_name,
+                    screen_w=screen_w,
+                    screen_h=screen_h,
+                    normalizing_range=normalizing_range,
+                    x_offset=x_offset,
+                    y_offset=y_offset,
+                    strategy_string=strategy_string or "",
+                    recent_actions_str=recent_actions_str,
+                    hitl_directive=primitive_hint if primitive_hint else None,
+                    memory=memory,
+                    ctx=ctx,
+                    max_steps=entry.get("max_steps", 10),
+                    completion_condition=entry.get("completion_condition", ""),
+                    planner_img_config=planner_img_config,
+                    command_queue=command_queue,
+                    agent_gate=agent_gate,
+                    state_bridge=state_bridge,
+                    delay_before_action=delay_before_action,
+                )
+                if not loop_result.re_route:
+                    break
+
+        memory.reset()
+        rl.update_phase("idle")
+
+        # Build TurnSummary from loop result
+        last = loop_result.last_action
+        action_type = last.action if last else "none"
+        action_desc = f"{action_type}(loop:{loop_result.steps_taken})"
+        rl.turn_summary(turn_number, primitive_name, action_desc, loop_result.success)
+
+        if macro_turn_manager and last:
+            macro_turn_manager.record_micro_turn(primitive_name, last.reasoning or "")
+
+        return TurnSummary(
+            turn_number=turn_number,
+            primitive=primitive_name,
+            action_type=action_type,
+            success=loop_result.success,
+            reasoning=last.reasoning if last else "",
+            error_message=loop_result.error_message,
+            coords=(last.x, last.y) if last else (0, 0),
         )
 
-        # Update state bridge with current action info
-        if state_bridge:
-            action_desc = f"{display_action.action} ({display_action.x}, {display_action.y})"
-            state_bridge.update_current_action(primitive_name, action_desc, display_action.reasoning or "")
+    # === Single-step primitive (existing path) ===
+    action = plan_action(
+        planner_provider,
+        pil_image,
+        primitive_name,
+        normalizing_range,
+        high_level_strategy=strategy_string,
+        recent_actions_string=recent_actions_str,
+        hitl_directive=primitive_hint if primitive_hint else None,
+        img_config=planner_img_config,
+    )
+
+    # Handle None and empty list
+    if action is None or (isinstance(action, list) and len(action) == 0):
+        logger.error("  VLM returned no action. Turn aborted.")
+        rl.update_phase("idle")
+        ctx.record_action(
+            action_type="none",
+            primitive=primitive_name,
+            result="failed",
+            error_message="VLM returned no action",
+        )
+        return TurnSummary(
+            turn_number=turn_number,
+            primitive=primitive_name,
+            action_type="none",
+            success=False,
+            error_message="VLM returned no action",
+        )
+
+    # Display action result(s)
+    display_action = action[0] if isinstance(action, list) else action
+    extra = {}
+    if display_action.action == "drag":
+        extra["End Coords"] = f"({display_action.end_x}, {display_action.end_y})"
+    if display_action.key:
+        extra["Key"] = display_action.key
+    if display_action.text:
+        extra["Text"] = display_action.text
+    if isinstance(action, list) and len(action) > 1:
+        extra["Multi-Action"] = f"{len(action)} actions"
+    rl.action_result(
+        action_type=display_action.action,
+        coords=(display_action.x, display_action.y),
+        reasoning=display_action.reasoning or "",
+        extra=extra or None,
+    )
+
+    # Update state bridge with current action info
+    if state_bridge:
+        action_desc = f"{display_action.action} ({display_action.x}, {display_action.y})"
+        state_bridge.update_current_action(primitive_name, action_desc, display_action.reasoning or "")
 
     # Step 4: Execution — handle both single action and multi-action lists
     rl.update_phase("executing")
@@ -738,6 +1717,7 @@ def run_multi_turn(
     )
 
     strategy_changed = False
+    completed_all_turns = True
 
     try:
         for turn in range(1, num_turns + 1):
@@ -781,6 +1761,7 @@ def run_multi_turn(
 
             if summary is None or not summary.success:
                 logger.warning(f"Turn {turn} failed. Stopping.")
+                completed_all_turns = False
                 break
 
             # Check command queue at checkpoint (preferred over InterruptMonitor)
@@ -817,6 +1798,7 @@ def run_multi_turn(
                         strategy_changed = True
                         rl.strategy_update("User Override", d.payload or "")
             if stop_requested:
+                completed_all_turns = False
                 break
 
             # Fallback: Check for async interrupt between turns (legacy)
@@ -825,6 +1807,7 @@ def run_multi_turn(
 
                 if decision == CheckpointDecision.STOP:
                     rl.hitl_event("STOP", "User requested stop at checkpoint.")
+                    completed_all_turns = False
                     break
                 elif decision == CheckpointDecision.CHANGE_STRATEGY:
                     new_strategy = checkpoint.prompt_new_strategy()
@@ -843,5 +1826,8 @@ def run_multi_turn(
         if interrupt_monitor:
             interrupt_monitor.stop()
 
-    rl.console.print("[bold green]All turns completed.[/bold green]")
+    if completed_all_turns:
+        rl.console.print("[bold green]All turns completed.[/bold green]")
+    else:
+        rl.console.print("[bold yellow]Run stopped before all turns completed.[/bold yellow]")
     logger.debug(f"Context summary: {ctx}")

@@ -21,14 +21,19 @@ from computer_use_test.utils.prompts.primitive_prompt import (
     CITY_PRODUCTION_PROMPT,
     COMBAT_PROMPT,
     CULTURE_MANAGER_PROMPT,
+    DEAL_PROMPT,
     DIPLOMATIC_PROMPT,
+    ERA_PROMPT,
     GOVERNOR_PROMPT,
     JSON_FORMAT_INSTRUCTION,
-    MULTI_ACTION_SEQUENCE_JSON_FORMAT_INSTRUCTION,
+    MULTI_STEP_JSON_FORMAT_INSTRUCTION,
     POLICY_PROMPT,
     POPUP_PROMPT,
+    RELIGION_PROMPT,
     RESEARCH_MANAGER_PROMPT,
     UNIT_OPS_PROMPT,
+    VOTING_PROMPT,
+    WAR_PROMPT,
 )
 
 logger = logging.getLogger(__name__)
@@ -49,55 +54,134 @@ class RouterResult:
 # Primitive Registry (TODO: Criteria will be replaced by small vlm model or image similarity metric)
 # ==============================================================================
 PRIMITIVE_REGISTRY: dict[str, dict] = {
-    "popup_primitive": {
-        "criteria": "팝업 표시됨. 또는 우하단에 '다음 턴'/'연구 선택'/'생산 품목' 버튼 보임.",
-        "prompt": POPUP_PROMPT,
+    # --- Router-included primitives (sorted by priority) ---
+    "religion_primitive": {
+        "criteria": "종교관 선택 화면. 종교관 목록 또는 '종교관 세우기' 버튼 표시.",
+        "prompt": RELIGION_PROMPT,
         "priority": 1,
+        "multi_step": True,
+        "process_kind": "observation_assisted",
+        "max_steps": 10,
+        "completion_condition": "초록색 '종교관 세우기' 버튼 클릭 완료 시 task_status='complete'.",
     },
     "governor_primitive": {
         "criteria": "총독 카드 나열 또는 '총독 배정' 텍스트 표시. 총독 임명 팝업 포함.",
         "prompt": GOVERNOR_PROMPT,
         "priority": 2,
+        "multi_step": True,
+        "process_kind": "scripted",
+        "max_steps": 8,
+        "completion_condition": "[배정] 버튼 클릭 완료 시 task_status='complete'.",
+    },
+    "voting_primitive": {
+        "criteria": "세계의회 투표 화면. 정책 A/B 선택, 찬성/반대 기호, 합의안 투표.",
+        "prompt": VOTING_PROMPT,
+        "priority": 3,
+        "multi_step": True,
+        "process_kind": "observation_assisted",
+        "max_steps": 14,
+        "completion_condition": "'게임으로 돌아가기' 클릭 또는 esc 시 task_status='complete'.",
+    },
+    "era_primitive": {
+        "criteria": "시대 전략 선택 화면. 시대 헌신 4개 박스 표시, 확정 버튼.",
+        "prompt": ERA_PROMPT,
+        "priority": 4,
+        "multi_step": True,
+        "process_kind": "scripted",
+        "max_steps": 6,
+        "completion_condition": "'확정' 버튼 클릭 완료 시 task_status='complete'.",
     },
     "unit_ops_primitive": {
         "criteria": "유닛 선택됨 (우하단 유닛정보). 이동/공격/건설 필요. 하늘색 타일 또는 적 인접.",
         "prompt": UNIT_OPS_PROMPT,
-        "priority": 3,
+        "priority": 20,
+        "multi_step": False,
+        "max_steps": 1,
+        "completion_condition": "",
     },
     "research_select_primitive": {
-        "criteria": "연구 선택 팝업 표시. 기술 목록 보임.",
+        "criteria": "연구 선택 팝업 표시 또는 기술 트리 화면 열림. 기술 목록/노드 보임.",
         "prompt": RESEARCH_MANAGER_PROMPT,
-        "priority": 4,
+        "priority": 5,
+        "multi_step": True,
+        "process_kind": "scripted",
+        "max_steps": 6,
+        "completion_condition": "기술 클릭 완료 시 task_status='complete'.",
     },
     "city_production_primitive": {
         "criteria": "생산 품목 선택 팝업 표시. 건물/유닛 목록 보임.",
         "prompt": CITY_PRODUCTION_PROMPT,
-        "priority": 5,
-    },
-    "science_decision_primitive": {
-        "criteria": "기술 트리 화면 열림. 기술 노드 트리 형태.",
-        "prompt": RESEARCH_MANAGER_PROMPT,
         "priority": 6,
+        "multi_step": True,
+        "process_kind": "observation_assisted",
+        "max_steps": 12,
+        "completion_condition": "생산 품목 클릭 완료 또는 배치 확인 시 task_status='complete'.",
+        "img_config_preset": "planner_high_quality",
     },
     "culture_decision_primitive": {
         "criteria": "사회 제도 트리 화면 열림. 사회 제도 노드 트리 형태.",
         "prompt": CULTURE_MANAGER_PROMPT,
-        "priority": 7,
+        "priority": 8,
+        "multi_step": True,
+        "process_kind": "scripted",
+        "max_steps": 6,
+        "completion_condition": "사회 제도 클릭 완료 시 task_status='complete'.",
     },
     "diplomatic_primitive": {
-        "criteria": "외교 화면. 대화/거래/전쟁 선포 등 외교 상호작용.",
+        "criteria": "외교 화면. 도시국가 사절파견 또는 외교 상호작용.",
         "prompt": DIPLOMATIC_PROMPT,
-        "priority": 8,
+        "priority": 9,
+        "multi_step": True,
+        "process_kind": "scripted",
+        "max_steps": 10,
+        "completion_condition": "모든 화살표가 어두워짐 시 task_status='complete'.",
     },
     "combat_primitive": {
         "criteria": "전투 유닛이 적 인접. 공격/방어 결정 필요.",
         "prompt": COMBAT_PROMPT,
-        "priority": 9,
+        "priority": 21,
+        "multi_step": False,
+        "max_steps": 1,
+        "completion_condition": "",
     },
     "policy_primitive": {
-        "criteria": "정부/정책 변경 화면. 정부 선택 또는 '정책변경 미확정' 팝업.",
+        "criteria": "'사회제도 완성'/'정책변경' 팝업, 새 정부 선택 화면, 또는 정부/정책 카드 배정 화면.",
         "prompt": POLICY_PROMPT,
-        "priority": 10,
+        "priority": 7,
+        "multi_step": True,
+        "process_kind": "scripted",
+        "max_steps": 24,
+        "completion_condition": (
+            "'모든 정책 배정' 후 확인 팝업의 '예' 또는 확인 버튼 클릭 완료 시 task_status='complete'."
+        ),
+        "img_config_preset": "planner_high_quality",
+    },
+    "popup_primitive": {
+        "criteria": "기타 일반 팝업 표시됨. 또는 우하단에 '다음 턴'/'연구 선택'/'생산 품목' 버튼 보임.",
+        "prompt": POPUP_PROMPT,
+        "priority": 99,
+        "multi_step": False,
+        "max_steps": 1,
+        "completion_condition": "",
+    },
+    # --- HITL-only primitives (no router criteria) ---
+    "war_primitive": {
+        "criteria": "",  # Not included in router — HITL forced only
+        "prompt": WAR_PROMPT,
+        "priority": -1,
+        "multi_step": True,
+        "process_kind": "scripted",
+        "max_steps": 8,
+        "completion_condition": "전쟁선포 완료 후 esc 시 task_status='complete'.",
+    },
+    "deal_primitive": {
+        "criteria": "",  # Not included in router — HITL forced only
+        "prompt": DEAL_PROMPT,
+        "priority": -1,
+        "multi_step": True,
+        "process_kind": "scripted",
+        "max_steps": 10,
+        "completion_condition": "거래수락 + esc 또는 esc x2 취소 시 task_status='complete'.",
     },
 }
 
@@ -108,8 +192,12 @@ PRIMITIVE_NAMES: list[str] = list(PRIMITIVE_REGISTRY.keys())
 
 
 def _build_router_prompt() -> str:
-    """Build router prompt automatically from PRIMITIVE_REGISTRY."""
-    sorted_entries = sorted(PRIMITIVE_REGISTRY.items(), key=lambda x: x[1]["priority"])
+    """Build router prompt automatically from PRIMITIVE_REGISTRY.
+
+    Excludes HITL-only primitives (those with empty criteria).
+    """
+    routable = {k: v for k, v in PRIMITIVE_REGISTRY.items() if v.get("criteria")}
+    sorted_entries = sorted(routable.items(), key=lambda x: x[1]["priority"])
 
     criteria_lines = []
     for i, (name, entry) in enumerate(sorted_entries, 1):
@@ -139,12 +227,16 @@ PRIMITIVE_TO_KOREAN: dict[str, str] = {
     "popup_primitive": "팝업",
     "governor_primitive": "총독",
     "research_select_primitive": "기술 연구",
-    "science_decision_primitive": "기술 연구",  # shares key with research_select
     "city_production_primitive": "도시 생산",
     "culture_decision_primitive": "사회 제도",
     "diplomatic_primitive": "외교",
     "combat_primitive": "전투",
     "policy_primitive": "정책",
+    "religion_primitive": "종교",
+    "war_primitive": "전쟁 선포",
+    "deal_primitive": "거래",
+    "voting_primitive": "세계의회",
+    "era_primitive": "시대 전략",
 }
 
 
@@ -174,6 +266,8 @@ def get_primitive_prompt(
     high_level_strategy: str | None = None,
     recent_actions: str | None = None,
     hitl_directive: str | None = None,
+    short_term_memory: str | None = None,
+    json_instruction_override: str | None = None,
     # Deprecated — kept for backward compat
     context: str | None = None,
     **kwargs,
@@ -189,6 +283,8 @@ def get_primitive_prompt(
         recent_actions: Compressed string of recent actions (for repetition avoidance).
         hitl_directive: Optional micro-level HITL directive (e.g., "병영을 최우선 선택").
                        Injected into the prompt with highest priority.
+        short_term_memory: Optional short-term memory string from previous steps.
+                          Used by multi-step primitives for step-to-step context.
         context: **Deprecated** — ignored. Use recent_actions instead.
 
     Returns:
@@ -210,18 +306,28 @@ def get_primitive_prompt(
     if high_level_strategy is None:
         high_level_strategy = "과학 승리를 목표로 함"
 
+    registry_entry = PRIMITIVE_REGISTRY[primitive_name]
+    is_multi_step = registry_entry.get("multi_step", False)
+
     hitl_directive_section = hitl_directive or ""
     recent_actions_section = recent_actions or "없음"
+    short_term_memory_section = short_term_memory or "없음"
+    completion_condition_section = registry_entry.get("completion_condition", "")
 
-    if primitive_name == "policy_primitive":
-        json_instruction = MULTI_ACTION_SEQUENCE_JSON_FORMAT_INSTRUCTION.format(normalizing_range=normalizing_range)
+    if json_instruction_override is not None:
+        json_instruction = json_instruction_override.format(normalizing_range=normalizing_range)
+    elif is_multi_step:
+        json_instruction = MULTI_STEP_JSON_FORMAT_INSTRUCTION.format(normalizing_range=normalizing_range)
     else:
         json_instruction = JSON_FORMAT_INSTRUCTION.format(normalizing_range=normalizing_range)
-    prompt_template = PRIMITIVE_REGISTRY[primitive_name]["prompt"]
+
+    prompt_template = registry_entry["prompt"]
     return prompt_template.format(
         json_instruction=json_instruction,
         high_level_strategy=high_level_strategy,
         recent_actions=recent_actions_section,
         hitl_directive=hitl_directive_section,
+        short_term_memory=short_term_memory_section,
+        completion_condition=completion_condition_section,
         **kwargs,
     )

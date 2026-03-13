@@ -24,7 +24,6 @@ from computer_use_test.agent.modules.primitive.primitives import (
     CultureDecisionPrimitive,
     PopupPrimitive,
     ResearchSelectPrimitive,
-    ScienceDecisionPrimitive,
     UnitOpsPrimitive,
 )
 from computer_use_test.agent.modules.router.router import Civ6MockRouter
@@ -174,7 +173,6 @@ def main(
         "popup_primitive": PopupPrimitive(vlm_provider=vlm_provider),
         "research_select_primitive": ResearchSelectPrimitive(vlm_provider=vlm_provider),
         "city_production_primitive": CityProductionPrimitive(vlm_provider=vlm_provider),
-        "science_decision_primitive": ScienceDecisionPrimitive(vlm_provider=vlm_provider),
         "culture_decision_primitive": CultureDecisionPrimitive(vlm_provider=vlm_provider),
     }
 

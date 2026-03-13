@@ -268,9 +268,12 @@ class BaseVLMProvider(ABC):
                     )
 
                 actions = parse_action_json_list(response.content)
-                if not actions:
+                if actions is None:
                     self.logger.warning(f"[Attempt {attempt}/{self.MAX_RETRIES}] Multi-parse failed, retrying...")
                     continue
+
+                if not actions:
+                    return []
 
                 # Validate each action
                 all_valid = True

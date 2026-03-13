@@ -17,8 +17,8 @@ just the game area, eliminating desktop noise (Dock, menu bar, etc.).
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
 
-import pyautogui
 from PIL import Image
 
 from computer_use_test.utils.llm_provider.base import AgentAction
@@ -32,6 +32,29 @@ VLM_JPEG_QUALITY: int = 80
 
 # Keywords to match the Civilization VI window (case-insensitive)
 _GAME_WINDOW_KEYWORDS = ("civilization", "civ6", "civ vi")
+
+
+def _unavailable_pyautogui_method(*args, **kwargs):
+    raise RuntimeError("pyautogui is unavailable in this environment")
+
+
+try:
+    import pyautogui as _pyautogui
+except Exception:  # pragma: no cover - depends on runtime display availability
+    pyautogui = SimpleNamespace(
+        size=_unavailable_pyautogui_method,
+        screenshot=_unavailable_pyautogui_method,
+        moveTo=_unavailable_pyautogui_method,
+        click=_unavailable_pyautogui_method,
+        doubleClick=_unavailable_pyautogui_method,
+        mouseDown=_unavailable_pyautogui_method,
+        mouseUp=_unavailable_pyautogui_method,
+        scroll=_unavailable_pyautogui_method,
+        press=_unavailable_pyautogui_method,
+        write=_unavailable_pyautogui_method,
+    )
+else:
+    pyautogui = _pyautogui
 
 
 def _detect_game_window() -> tuple[int, int, int, int] | None:
@@ -152,7 +175,7 @@ def resize_for_vlm(
 def norm_to_real(norm_val: int, screen_size: int, normalizing_range: int = 1000) -> int:
     """Convert a normalized coordinate to real screen coordinate."""
     clamped = max(0, min(normalizing_range, norm_val))
-    return int((clamped / normalizing_range) * screen_size)
+    return round((clamped / normalizing_range) * screen_size)
 
 
 def execute_action(
@@ -167,12 +190,14 @@ def execute_action(
     Execute an AgentAction by converting normalized coordinates to screen coordinates.
 
     Normalized coords (0-1000) → region coords (0-screen_w) → absolute screen coords (+offset)
+    Absolute coords bypass the normalization step and are treated as logical
+    monitor coordinates directly.
 
     When the screenshot was cropped to a game window, x_offset/y_offset shift
     the coordinates back to absolute screen positions for PyAutoGUI.
 
     Args:
-        action: AgentAction with normalized coordinates (0-{normalizing_range})
+        action: AgentAction with normalized or absolute coordinates
         screen_w: Logical width of the captured region (game window or full screen)
         screen_h: Logical height of the captured region
         normalizing_range: Coordinate range used in the prompt (default: 1000)
@@ -200,37 +225,89 @@ def execute_action(
     logger.debug(f"Action: {action_type} | Reasoning: {reasoning}")
 
     # Validate action type
-    if not action_type or action_type not in ["click", "double_click", "drag", "press", "type"]:
+    if not action_type or action_type not in ["click", "double_click", "drag", "scroll", "press", "type"]:
         logger.error(f"Invalid or empty action type: '{action_type}'")
         logger.error(f"Full action object: {action}")
-        logger.error("Valid action types are: click, double_click, drag, press, type")
+        logger.error("Valid action types are: click, double_click, drag, scroll, press, type")
         return
 
-    if action_type == "click":
-        real_x = norm_to_real(action.x, screen_w, normalizing_range) + x_offset
-        real_y = norm_to_real(action.y, screen_h, normalizing_range) + y_offset
+    coord_space = getattr(action, "coord_space", "normalized") or "normalized"
 
-        logger.debug(f"Click: normalized({action.x}, {action.y}) → real({real_x}, {real_y}) - {action.button}")
+    if action_type == "click":
+        if coord_space == "absolute":
+            real_x = action.x
+            real_y = action.y
+            logger.debug(
+                "Click: absolute(%s, %s) -> real(%s, %s) - %s",
+                action.x,
+                action.y,
+                real_x,
+                real_y,
+                action.button,
+            )
+        else:
+            real_x = norm_to_real(action.x, screen_w, normalizing_range) + x_offset
+            real_y = norm_to_real(action.y, screen_h, normalizing_range) + y_offset
+            logger.debug(
+                "Click: normalized(%s, %s) -> real(%s, %s) - %s",
+                action.x,
+                action.y,
+                real_x,
+                real_y,
+                action.button,
+            )
         pyautogui.moveTo(real_x, real_y, duration=0.5)
         pyautogui.click(button=action.button)
 
     elif action_type == "double_click":
-        real_x = norm_to_real(action.x, screen_w, normalizing_range) + x_offset
-        real_y = norm_to_real(action.y, screen_h, normalizing_range) + y_offset
-
-        logger.debug(f"Double-click: normalized({action.x}, {action.y}) → real({real_x}, {real_y}) - {action.button}")
+        if coord_space == "absolute":
+            real_x = action.x
+            real_y = action.y
+            logger.debug(
+                "Double-click: absolute(%s, %s) -> real(%s, %s) - %s",
+                action.x,
+                action.y,
+                real_x,
+                real_y,
+                action.button,
+            )
+        else:
+            real_x = norm_to_real(action.x, screen_w, normalizing_range) + x_offset
+            real_y = norm_to_real(action.y, screen_h, normalizing_range) + y_offset
+            logger.debug(
+                "Double-click: normalized(%s, %s) -> real(%s, %s) - %s",
+                action.x,
+                action.y,
+                real_x,
+                real_y,
+                action.button,
+            )
         pyautogui.moveTo(real_x, real_y, duration=0.5)
         pyautogui.doubleClick(button=action.button)
 
     elif action_type == "drag":
-        start_x = norm_to_real(action.x, screen_w, normalizing_range) + x_offset
-        start_y = norm_to_real(action.y, screen_h, normalizing_range) + y_offset
-        end_x = norm_to_real(action.end_x, screen_w, normalizing_range) + x_offset
-        end_y = norm_to_real(action.end_y, screen_h, normalizing_range) + y_offset
+        if coord_space == "absolute":
+            start_x = action.x
+            start_y = action.y
+            end_x = action.end_x
+            end_y = action.end_y
+        else:
+            start_x = norm_to_real(action.x, screen_w, normalizing_range) + x_offset
+            start_y = norm_to_real(action.y, screen_h, normalizing_range) + y_offset
+            end_x = norm_to_real(action.end_x, screen_w, normalizing_range) + x_offset
+            end_y = norm_to_real(action.end_y, screen_h, normalizing_range) + y_offset
 
         logger.debug(
-            f"Drag: ({action.x},{action.y})→({action.end_x},{action.end_y}) "
-            f"real ({start_x},{start_y})→({end_x},{end_y})"
+            "Drag: %s(%s,%s)->(%s,%s) real (%s,%s)->(%s,%s)",
+            coord_space,
+            action.x,
+            action.y,
+            action.end_x,
+            action.end_y,
+            start_x,
+            start_y,
+            end_x,
+            end_y,
         )
 
         # Move to start position
@@ -241,6 +318,25 @@ def execute_action(
         pyautogui.moveTo(end_x, end_y, duration=0.5)
         # Release mouse button
         pyautogui.mouseUp(button=action.button)
+
+    elif action_type == "scroll":
+        if coord_space == "absolute":
+            real_x = action.x
+            real_y = action.y
+        else:
+            real_x = norm_to_real(action.x, screen_w, normalizing_range) + x_offset
+            real_y = norm_to_real(action.y, screen_h, normalizing_range) + y_offset
+        logger.debug(
+            "Scroll: %s(%s, %s) -> real(%s, %s) amount=%s",
+            coord_space,
+            action.x,
+            action.y,
+            real_x,
+            real_y,
+            action.scroll_amount,
+        )
+        pyautogui.moveTo(real_x, real_y, duration=0.2)
+        pyautogui.scroll(action.scroll_amount)
 
     elif action_type == "press":
         key = action.key
@@ -257,6 +353,13 @@ def execute_action(
             pyautogui.write(text, interval=0.1)
         else:
             logger.error(f"Type action missing 'text' field. Full action: {action}")
+
+
+def move_cursor_to_center(screen_w: int, screen_h: int, x_offset: int = 0, y_offset: int = 0) -> None:
+    """Move cursor to screen center after click to prevent hover tooltips."""
+    center_x = screen_w // 2 + x_offset
+    center_y = screen_h // 2 + y_offset
+    pyautogui.moveTo(center_x, center_y, duration=0.1)
 
 
 def agent_loop(

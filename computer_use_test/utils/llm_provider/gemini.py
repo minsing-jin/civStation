@@ -33,9 +33,9 @@ class GeminiVLMProvider(BaseVLMProvider):
         super().__init__(api_key, model)
 
         if self.api_key is None:
-            self.api_key = os.getenv("GOOGLE_API_KEY")
+            self.api_key = os.getenv("GENAI_API_KEY")
             if not self.api_key:
-                raise ValueError("Google API key must be provided or set in GOOGLE_API_KEY environment variable")
+                raise ValueError("Gemini API key must be provided or set in GENAI_API_KEY environment variable")
 
         if self.model is None:
             self.model = self.DEFAULT_MODEL
@@ -43,11 +43,25 @@ class GeminiVLMProvider(BaseVLMProvider):
         try:
             from google import genai
 
-            self.client = genai.Client(api_key=os.getenv("GENAI_API_KEY"))
+            self.client = genai.Client(api_key=self.api_key)
         except ImportError as e:
             raise ImportError(
                 "google-generativeai package not installed. Install with: pip install google-generativeai"
             ) from e
+
+    def _build_thinking_config(self, use_thinking: bool) -> types.ThinkingConfig:
+        """Return a model-compatible thinking config.
+
+        Gemini 3.1 Pro Preview does not support a fully disabled thinking budget,
+        so use MEDIUM thinking even when the caller requests "no thinking".
+        """
+        model_name = (self.model or "").lower()
+        if "gemini-3.1-pro" in model_name:
+            return types.ThinkingConfig(thinking_level=types.ThinkingLevel.MEDIUM)
+
+        if use_thinking:
+            return types.ThinkingConfig()
+        return types.ThinkingConfig(thinking_budget=0)
 
     # ==================== Abstract method implementations ====================
 
@@ -73,10 +87,7 @@ class GeminiVLMProvider(BaseVLMProvider):
                 config_kwargs["response_json_schema"] = response_json_schema
 
             # Add thinking config
-            if use_thinking:
-                config_kwargs["thinking_config"] = types.ThinkingConfig()
-            else:
-                config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
+            config_kwargs["thinking_config"] = self._build_thinking_config(use_thinking)
 
             response = self.client.models.generate_content(
                 contents=content_parts,

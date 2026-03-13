@@ -12,7 +12,7 @@ class Civ6Router(PrimitiveRouter):
         if "mayor" in screenshot_path:
             return "country_mayer_primitive"
         if "science" in screenshot_path:
-            return "science_decision_primitive"
+            return "research_select_primitive"
         return "culture_decision_primitive"
 
 
@@ -44,7 +44,7 @@ class Civ6MockRouter(PrimitiveRouter):
         if "popup" in filename or "next_turn" in filename or "dialog" in filename:
             return "popup_primitive"
         if "science" in filename or "tech" in filename:
-            return "science_decision_primitive"
+            return "research_select_primitive"
         if "culture" in filename or "civic" in filename:
             return "culture_decision_primitive"
         if "unit" in filename:

@@ -12,6 +12,7 @@ Falls back to plain console output when Live is not active.
 
 from __future__ import annotations
 
+import logging
 import time
 from collections import deque
 
@@ -21,6 +22,8 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+
+logger = logging.getLogger(__name__)
 
 
 def _fmt_ms(seconds: float | None) -> str:
@@ -56,6 +59,15 @@ class RichLogger:
             "action_reasoning": "-",
             "status": "-",
             "turn_info": "-",
+            "multi_step_active": False,
+            "multi_step_step": 0,
+            "multi_step_max": 0,
+            "step_plan_ms": 0.0,
+            "step_exec_ms": 0.0,
+            "multi_step_stage": "",
+            "multi_step_stall_count": 0,
+            "multi_step_best_choice": "",
+            "stm_summary": "",
         }
 
         # Per-phase timing (main pipeline)
@@ -63,10 +75,12 @@ class RichLogger:
             "routing": None,
             "planning": None,
             "executing": None,
+            "loop": None,
         }
         self._phase_start: float | None = None
         self._turn_start: float | None = None
         self._turn_total: float | None = None
+        self._loop_start: float | None = None
 
         # Background worker state
         self._bg_state: dict = {
@@ -127,23 +141,108 @@ class RichLogger:
     def _build_dashboard(self) -> Layout:
         """Build the split-view dashboard layout."""
         layout = Layout()
-        layout.split_column(
-            Layout(name="top", ratio=4),
-            Layout(name="log", ratio=1, minimum_size=5),
-        )
-        layout["top"].split_row(
-            Layout(name="main", ratio=1),
-            Layout(name="bg", ratio=1),
-        )
-
-        layout["main"].update(self._build_main_panel())
-        layout["bg"].update(self._build_bg_panel())
+        layout.split_column(Layout(name="top", ratio=4), Layout(name="log", ratio=1, minimum_size=5))
+        policy_debug = self._main_state["multi_step_active"] and self._main_state["primitive"] == "policy_primitive"
+        if policy_debug:
+            layout["top"].update(self._build_policy_panel())
+        else:
+            layout["top"].split_row(
+                Layout(name="main", ratio=1),
+                Layout(name="bg", ratio=1),
+            )
+            layout["main"].update(self._build_main_panel())
+            layout["bg"].update(self._build_bg_panel())
 
         # --- Recent Log Panel ---
         log_text = "\n".join(self._log_lines) if self._log_lines else "[dim]No logs yet[/dim]"
         layout["log"].update(Panel(log_text, title="[bold]Recent Log[/bold]", border_style="bright_black"))
 
         return layout
+
+    def _build_policy_panel(self) -> Panel:
+        """Build a dedicated policy debug panel while the policy primitive is active."""
+        section_map: dict[str, list[str]] = {
+            "bootstrap": [],
+            "queue": [],
+            "cache": [],
+            "assignments": [],
+            "events": [],
+        }
+        for raw_line in (self._main_state["stm_summary"] or "").splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            if (
+                line.startswith("[policy]")
+                or line.startswith("overview_mode=")
+                or line.startswith("bootstrap=")
+                or line.startswith("bootstrap_failures=")
+                or line.startswith("cache_source=")
+                or line.startswith("entry_done=")
+                or line.startswith("visible_tabs:")
+                or line.startswith("calibration_pending:")
+            ):
+                section_map["bootstrap"].append(line)
+            elif (
+                line.startswith("current_tab=")
+                or line.startswith("remaining_queue:")
+                or line.startswith("completed_tabs:")
+                or line.startswith("selected_tab=")
+                or line.startswith("last_popped=")
+                or line.startswith("confirmed_tabs:")
+            ):
+                section_map["queue"].append(line)
+            elif (
+                line.startswith("tab_cache:")
+                or line.startswith("provisional_tabs:")
+                or line.startswith("similarity=")
+                or line.startswith("tab_check=")
+                or line.startswith("relocalize=")
+                or line.startswith("fallback_state=")
+            ):
+                section_map["cache"].append(line)
+            elif line.startswith("[pending assignments]") or line.startswith("- "):
+                section_map["assignments"].append(line)
+            elif line.startswith("bundle_actions=") or line.startswith("event="):
+                section_map["events"].append(line)
+            else:
+                section_map["events"].append(line)
+
+        layout = Layout()
+        layout.split_column(Layout(name="top", ratio=2), Layout(name="bottom", ratio=3))
+        layout["top"].split_row(Layout(name="runtime", ratio=1), Layout(name="bootstrap", ratio=1))
+        layout["bottom"].split_row(
+            Layout(name="queue", ratio=1),
+            Layout(name="cache", ratio=1),
+            Layout(name="events", ratio=1),
+        )
+
+        runtime = Table(show_header=False, expand=True, box=None, padding=(0, 1))
+        runtime.add_column("K", style="bold bright_yellow", width=11)
+        runtime.add_column("V", ratio=1)
+        runtime.add_row("Primitive", f"[bold green]{self._main_state['primitive']}[/]")
+        runtime.add_row("Phase", f"[bold blue]{self._main_state['phase'].upper()}[/]")
+        runtime.add_row("Stage", self._main_state["multi_step_stage"] or "-")
+        runtime.add_row("Step", f"{self._main_state['multi_step_step']}/{self._main_state['multi_step_max']}")
+        runtime.add_row("Action", self._main_state["action"])
+        runtime.add_row("Status", self._main_state["status"])
+        runtime.add_row(
+            "Plan/Exec",
+            f"{_fmt_ms(self._main_state['step_plan_ms'] / 1000)} / {_fmt_ms(self._main_state['step_exec_ms'] / 1000)}",
+        )
+        runtime.add_row("Reason", f"[white]{self._main_state['reasoning'][:110]}[/]")
+        layout["runtime"].update(Panel(runtime, title="[bold cyan]Runtime[/]", border_style="cyan"))
+
+        def _lines_panel(title: str, lines: list[str], color: str) -> Panel:
+            body = "\n".join(lines) if lines else "[dim]-[/dim]"
+            return Panel(body, title=f"[bold {color}]{title}[/]", border_style=color, padding=(0, 1))
+
+        layout["bootstrap"].update(_lines_panel("Bootstrap", section_map["bootstrap"], "magenta"))
+        layout["queue"].update(_lines_panel("Queue", section_map["queue"], "green"))
+        layout["cache"].update(_lines_panel("Cache", section_map["cache"], "yellow"))
+        layout["events"].update(_lines_panel("Events", section_map["events"] + section_map["assignments"], "white"))
+
+        return Panel(layout, title="[bold yellow]◼ Policy Debug[/]", border_style="yellow", padding=(0, 1))
 
     def _build_main_panel(self) -> Panel:
         """Build the Main Pipeline panel with phase timing."""
@@ -167,6 +266,28 @@ class RichLogger:
         t.add_row("Reasoning", f"[white]{self._main_state['reasoning'][:55]}[/]")
         t.add_row("", "")  # spacer
 
+        # Multi-step info (conditional)
+        if self._main_state["multi_step_active"]:
+            ms_step = self._main_state["multi_step_step"]
+            ms_max = self._main_state["multi_step_max"]
+            t.add_row("MultiStep", f"[bold yellow]Step {ms_step}/{ms_max}[/]")
+            plan_ms = self._main_state["step_plan_ms"]
+            exec_ms = self._main_state["step_exec_ms"]
+            t.add_row("StepTime", f"P={_fmt_ms(plan_ms / 1000)}  E={_fmt_ms(exec_ms / 1000)}")
+            stage = self._main_state["multi_step_stage"]
+            if stage:
+                t.add_row("Stage", f"[bold white]{stage}[/]")
+            stall_count = self._main_state["multi_step_stall_count"]
+            t.add_row("Stall", str(stall_count))
+            best_choice = self._main_state["multi_step_best_choice"]
+            if best_choice:
+                t.add_row("Best", best_choice[:55])
+            stm = self._main_state["stm_summary"]
+            if stm:
+                for line in stm.split("\n")[:3]:
+                    t.add_row("STM", f"[dim]{line[:55]}[/]")
+            t.add_row("", "")
+
         t.add_row("Action", f"[bold cyan]{self._main_state['action']}[/]")
         t.add_row("Reason", f"[white]{self._main_state['action_reasoning'][:55]}[/]")
         t.add_row("Status", self._main_state["status"])
@@ -181,7 +302,7 @@ class RichLogger:
     def _build_timing_bar(self) -> str:
         """Build a compact timing summary for main pipeline phases."""
         parts = []
-        labels = [("R", "routing"), ("P", "planning"), ("E", "executing")]
+        labels = [("R", "routing"), ("P", "planning"), ("E", "executing"), ("L", "loop")]
         for label, key in labels:
             val = self._phase_timings.get(key)
             if val is not None:
@@ -322,6 +443,35 @@ class RichLogger:
         self._main_state["phase"] = phase
         self._refresh()
 
+    def update_multi_step(
+        self,
+        active: bool,
+        step: int = 0,
+        max_steps: int = 0,
+        plan_ms: float = 0.0,
+        exec_ms: float = 0.0,
+        stage: str = "",
+        stall_count: int = 0,
+        best_choice: str = "",
+        stm_summary: str = "",
+    ) -> None:
+        """Update multi-step execution state in the dashboard."""
+        if active and self._loop_start is None:
+            self._loop_start = time.monotonic()
+        if not active and self._loop_start is not None:
+            self._phase_timings["loop"] = time.monotonic() - self._loop_start
+            self._loop_start = None
+        self._main_state["multi_step_active"] = active
+        self._main_state["multi_step_step"] = step
+        self._main_state["multi_step_max"] = max_steps
+        self._main_state["step_plan_ms"] = plan_ms
+        self._main_state["step_exec_ms"] = exec_ms
+        self._main_state["multi_step_stage"] = stage
+        self._main_state["multi_step_stall_count"] = stall_count
+        self._main_state["multi_step_best_choice"] = best_choice
+        self._main_state["stm_summary"] = stm_summary
+        self._refresh()
+
     def turn_header(self, turn: int, total: int) -> None:
         """Display turn start header."""
         self._main_state["turn_info"] = f"{turn}/{total}"
@@ -436,6 +586,13 @@ class RichLogger:
 
         if self._live is None:
             self.console.print(msg)
+
+    def policy_event(self, detail: str) -> None:
+        """Append a policy-specific event to the bottom log while policy debug is active."""
+        ts = time.strftime("%H:%M:%S")
+        self._log_lines.append(f"[{ts}] [POLICY] {detail}")
+        logger.info("[POLICY] event | %s", detail)
+        self._refresh()
 
     def turn_summary(self, turn: int, primitive: str, action: str, success: bool) -> None:
         """Display one-line turn completion summary."""

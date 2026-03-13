@@ -72,7 +72,7 @@ def run_civ6_evaluation():
     primitives = {
         "unit_ops_primitive": Civ6Primitive("unit_ops_primitive"),
         "country_mayer_primitive": Civ6Primitive("country_mayer_primitive"),
-        "science_decision_primitive": Civ6Primitive("science_decision_primitive"),
+        "research_select_primitive": Civ6Primitive("research_select_primitive"),
         "culture_decision_primitive": Civ6Primitive("culture_decision_primitive"),
     }
 

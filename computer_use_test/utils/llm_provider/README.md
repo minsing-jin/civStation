@@ -32,7 +32,7 @@ pip install openai
 export ANTHROPIC_API_KEY="your-api-key"
 
 # Gemini
-export GOOGLE_API_KEY="your-api-key"
+export GENAI_API_KEY="your-api-key"
 
 # GPT
 export OPENAI_API_KEY="your-api-key"

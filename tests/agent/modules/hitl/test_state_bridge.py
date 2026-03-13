@@ -38,6 +38,24 @@ class TestAgentStateBridge:
         assert status.micro_turn == 5
         assert status.macro_turn == 3
 
+    def test_update_multi_step_fields(self):
+        self.bridge.update_multi_step(
+            active=True,
+            step=3,
+            max_steps=8,
+            plan_ms=120.0,
+            exec_ms=80.0,
+            stage="choose_from_memory",
+            stall_count=1,
+            best_choice="기념비 (above)",
+            stm_summary="후보 5개",
+        )
+        status = self.bridge.get_status()
+        assert status.multi_step_active is True
+        assert status.multi_step_stage == "choose_from_memory"
+        assert status.multi_step_stall_count == 1
+        assert status.multi_step_best_choice == "기념비 (above)"
+
     def test_queued_directives_reflected(self):
         self.queue.push(Directive(directive_type=DirectiveType.CHANGE_STRATEGY, payload="문화 승리", source="test"))
         status = self.bridge.get_status()
@@ -70,5 +88,14 @@ class TestAgentStateBridge:
             "macro_turn",
             "recent_actions",
             "last_updated",
+            "multi_step_active",
+            "multi_step_step",
+            "multi_step_max",
+            "step_plan_ms",
+            "step_exec_ms",
+            "multi_step_stage",
+            "multi_step_stall_count",
+            "multi_step_best_choice",
+            "stm_summary",
         }
         assert set(d.keys()) == expected_keys
