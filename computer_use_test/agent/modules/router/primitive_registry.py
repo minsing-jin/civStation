@@ -55,27 +55,21 @@ class RouterResult:
 # ==============================================================================
 PRIMITIVE_REGISTRY: dict[str, dict] = {
     # --- Router-included primitives (sorted by priority) ---
-    "popup_primitive": {
-        "criteria": "팝업 표시됨. 또는 우하단에 '다음 턴'/'연구 선택'/'생산 품목' 버튼 보임.",
-        "prompt": POPUP_PROMPT,
-        "priority": 1,
-        "multi_step": False,
-        "max_steps": 1,
-        "completion_condition": "",
-    },
     "religion_primitive": {
         "criteria": "종교관 선택 화면. 종교관 목록 또는 '종교관 세우기' 버튼 표시.",
         "prompt": RELIGION_PROMPT,
-        "priority": 2,
+        "priority": 1,
         "multi_step": True,
+        "process_kind": "observation_assisted",
         "max_steps": 10,
         "completion_condition": "초록색 '종교관 세우기' 버튼 클릭 완료 시 task_status='complete'.",
     },
     "governor_primitive": {
         "criteria": "총독 카드 나열 또는 '총독 배정' 텍스트 표시. 총독 임명 팝업 포함.",
         "prompt": GOVERNOR_PROMPT,
-        "priority": 3,
+        "priority": 2,
         "multi_step": True,
+        "process_kind": "scripted",
         "max_steps": 8,
         "completion_condition": "[배정] 버튼 클릭 완료 시 task_status='complete'.",
     },
@@ -84,21 +78,23 @@ PRIMITIVE_REGISTRY: dict[str, dict] = {
         "prompt": VOTING_PROMPT,
         "priority": 3,
         "multi_step": True,
-        "max_steps": 12,
+        "process_kind": "observation_assisted",
+        "max_steps": 14,
         "completion_condition": "'게임으로 돌아가기' 클릭 또는 esc 시 task_status='complete'.",
     },
     "era_primitive": {
         "criteria": "시대 전략 선택 화면. 시대 헌신 4개 박스 표시, 확정 버튼.",
         "prompt": ERA_PROMPT,
-        "priority": 3,
+        "priority": 4,
         "multi_step": True,
+        "process_kind": "scripted",
         "max_steps": 6,
         "completion_condition": "'확정' 버튼 클릭 완료 시 task_status='complete'.",
     },
     "unit_ops_primitive": {
         "criteria": "유닛 선택됨 (우하단 유닛정보). 이동/공격/건설 필요. 하늘색 타일 또는 적 인접.",
         "prompt": UNIT_OPS_PROMPT,
-        "priority": 4,
+        "priority": 20,
         "multi_step": False,
         "max_steps": 1,
         "completion_condition": "",
@@ -108,6 +104,7 @@ PRIMITIVE_REGISTRY: dict[str, dict] = {
         "prompt": RESEARCH_MANAGER_PROMPT,
         "priority": 5,
         "multi_step": True,
+        "process_kind": "scripted",
         "max_steps": 6,
         "completion_condition": "기술 클릭 완료 시 task_status='complete'.",
     },
@@ -116,14 +113,17 @@ PRIMITIVE_REGISTRY: dict[str, dict] = {
         "prompt": CITY_PRODUCTION_PROMPT,
         "priority": 6,
         "multi_step": True,
-        "max_steps": 8,
+        "process_kind": "observation_assisted",
+        "max_steps": 12,
         "completion_condition": "생산 품목 클릭 완료 또는 배치 확인 시 task_status='complete'.",
+        "img_config_preset": "planner_high_quality",
     },
     "culture_decision_primitive": {
         "criteria": "사회 제도 트리 화면 열림. 사회 제도 노드 트리 형태.",
         "prompt": CULTURE_MANAGER_PROMPT,
         "priority": 8,
         "multi_step": True,
+        "process_kind": "scripted",
         "max_steps": 6,
         "completion_condition": "사회 제도 클릭 완료 시 task_status='complete'.",
     },
@@ -132,24 +132,37 @@ PRIMITIVE_REGISTRY: dict[str, dict] = {
         "prompt": DIPLOMATIC_PROMPT,
         "priority": 9,
         "multi_step": True,
+        "process_kind": "scripted",
         "max_steps": 10,
         "completion_condition": "모든 화살표가 어두워짐 시 task_status='complete'.",
     },
     "combat_primitive": {
         "criteria": "전투 유닛이 적 인접. 공격/방어 결정 필요.",
         "prompt": COMBAT_PROMPT,
-        "priority": 10,
+        "priority": 21,
         "multi_step": False,
         "max_steps": 1,
         "completion_condition": "",
     },
     "policy_primitive": {
-        "criteria": "정부/정책 변경 화면. 정부 선택 또는 '정책변경 미확정' 팝업.",
+        "criteria": "'사회제도 완성'/'정책변경' 팝업, 새 정부 선택 화면, 또는 정부/정책 카드 배정 화면.",
         "prompt": POLICY_PROMPT,
-        "priority": 11,
+        "priority": 7,
         "multi_step": True,
-        "max_steps": 8,
-        "completion_condition": "'모든 정책 배정' 버튼 클릭 또는 esc 시 task_status='complete'.",
+        "process_kind": "scripted",
+        "max_steps": 24,
+        "completion_condition": (
+            "'모든 정책 배정' 후 확인 팝업의 '예' 또는 확인 버튼 클릭 완료 시 task_status='complete'."
+        ),
+        "img_config_preset": "planner_high_quality",
+    },
+    "popup_primitive": {
+        "criteria": "기타 일반 팝업 표시됨. 또는 우하단에 '다음 턴'/'연구 선택'/'생산 품목' 버튼 보임.",
+        "prompt": POPUP_PROMPT,
+        "priority": 99,
+        "multi_step": False,
+        "max_steps": 1,
+        "completion_condition": "",
     },
     # --- HITL-only primitives (no router criteria) ---
     "war_primitive": {
@@ -157,6 +170,7 @@ PRIMITIVE_REGISTRY: dict[str, dict] = {
         "prompt": WAR_PROMPT,
         "priority": -1,
         "multi_step": True,
+        "process_kind": "scripted",
         "max_steps": 8,
         "completion_condition": "전쟁선포 완료 후 esc 시 task_status='complete'.",
     },
@@ -165,6 +179,7 @@ PRIMITIVE_REGISTRY: dict[str, dict] = {
         "prompt": DEAL_PROMPT,
         "priority": -1,
         "multi_step": True,
+        "process_kind": "scripted",
         "max_steps": 10,
         "completion_condition": "거래수락 + esc 또는 esc x2 취소 시 task_status='complete'.",
     },
@@ -252,6 +267,7 @@ def get_primitive_prompt(
     recent_actions: str | None = None,
     hitl_directive: str | None = None,
     short_term_memory: str | None = None,
+    json_instruction_override: str | None = None,
     # Deprecated — kept for backward compat
     context: str | None = None,
     **kwargs,
@@ -298,8 +314,9 @@ def get_primitive_prompt(
     short_term_memory_section = short_term_memory or "없음"
     completion_condition_section = registry_entry.get("completion_condition", "")
 
-    # Select JSON format based on multi-step capability
-    if is_multi_step:
+    if json_instruction_override is not None:
+        json_instruction = json_instruction_override.format(normalizing_range=normalizing_range)
+    elif is_multi_step:
         json_instruction = MULTI_STEP_JSON_FORMAT_INSTRUCTION.format(normalizing_range=normalizing_range)
     else:
         json_instruction = JSON_FORMAT_INSTRUCTION.format(normalizing_range=normalizing_range)

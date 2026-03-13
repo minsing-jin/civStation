@@ -48,6 +48,17 @@ class AgentStatus:
     # Agent lifecycle
     agent_state: str = "idle"
 
+    # Multi-step state
+    multi_step_active: bool = False
+    multi_step_step: int = 0
+    multi_step_max: int = 0
+    step_plan_ms: float = 0.0
+    step_exec_ms: float = 0.0
+    multi_step_stage: str = ""
+    multi_step_stall_count: int = 0
+    multi_step_best_choice: str = ""
+    stm_summary: str = ""
+
     last_updated: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -64,6 +75,15 @@ class AgentStatus:
             "micro_turn": self.micro_turn,
             "macro_turn": self.macro_turn,
             "recent_actions": self.recent_actions,
+            "multi_step_active": self.multi_step_active,
+            "multi_step_step": self.multi_step_step,
+            "multi_step_max": self.multi_step_max,
+            "step_plan_ms": self.step_plan_ms,
+            "step_exec_ms": self.step_exec_ms,
+            "multi_step_stage": self.multi_step_stage,
+            "multi_step_stall_count": self.multi_step_stall_count,
+            "multi_step_best_choice": self.multi_step_best_choice,
+            "stm_summary": self.stm_summary,
             "last_updated": self.last_updated,
         }
 
@@ -97,6 +117,17 @@ class AgentStateBridge:
         self._micro_turn: int = 0
         self._macro_turn: int = 1
 
+        # Multi-step state
+        self._multi_step_active: bool = False
+        self._multi_step_step: int = 0
+        self._multi_step_max: int = 0
+        self._step_plan_ms: float = 0.0
+        self._step_exec_ms: float = 0.0
+        self._multi_step_stage: str = ""
+        self._multi_step_stall_count: int = 0
+        self._multi_step_best_choice: str = ""
+        self._stm_summary: str = ""
+
     def _broadcast_if_connected(self) -> None:
         """Push current status to all WebSocket clients and the relay server."""
         if self._ws_manager and self._ws_manager.connection_count > 0:
@@ -127,6 +158,31 @@ class AgentStateBridge:
         """Called when a macro-turn boundary is detected."""
         with self._lock:
             self._macro_turn = n
+        self._broadcast_if_connected()
+
+    def update_multi_step(
+        self,
+        active: bool,
+        step: int = 0,
+        max_steps: int = 0,
+        plan_ms: float = 0.0,
+        exec_ms: float = 0.0,
+        stage: str = "",
+        stall_count: int = 0,
+        best_choice: str = "",
+        stm_summary: str = "",
+    ) -> None:
+        """Update multi-step execution state for the dashboard."""
+        with self._lock:
+            self._multi_step_active = active
+            self._multi_step_step = step
+            self._multi_step_max = max_steps
+            self._step_plan_ms = plan_ms
+            self._step_exec_ms = exec_ms
+            self._multi_step_stage = stage
+            self._multi_step_stall_count = stall_count
+            self._multi_step_best_choice = best_choice
+            self._stm_summary = stm_summary
         self._broadcast_if_connected()
 
     def broadcast_agent_phase(self, phase: str) -> None:
@@ -172,5 +228,14 @@ class AgentStateBridge:
                 macro_turn=self._macro_turn,
                 recent_actions=recent,
                 agent_state=agent_state,
+                multi_step_active=self._multi_step_active,
+                multi_step_step=self._multi_step_step,
+                multi_step_max=self._multi_step_max,
+                step_plan_ms=self._step_plan_ms,
+                step_exec_ms=self._step_exec_ms,
+                multi_step_stage=self._multi_step_stage,
+                multi_step_stall_count=self._multi_step_stall_count,
+                multi_step_best_choice=self._multi_step_best_choice,
+                stm_summary=self._stm_summary,
                 last_updated=datetime.now().isoformat(),
             )

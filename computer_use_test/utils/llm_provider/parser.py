@@ -18,20 +18,27 @@ logger = logging.getLogger(__name__)
 @dataclass
 class AgentAction:
     """
-    Single action from VLM using normalized coordinates (0-1000).
+    Single action from VLM using normalized or absolute coordinates.
 
-    Supports: click, double_click, drag, press, type
+    Supports: click, double_click, drag, scroll, press, type
     """
 
-    action: str = ""  # "click", "double_click", "drag", "press", "type"
-    x: int = 0  # Normalized x (0-1000)
-    y: int = 0  # Normalized y (0-1000)
-    end_x: int = 0  # Drag end x (0-1000)
-    end_y: int = 0  # Drag end y (0-1000)
+    action: str = ""  # "click", "double_click", "drag", "scroll", "press", "type"
+    coord_space: str = "normalized"  # "normalized" or "absolute"
+    x: int = 0  # X coordinate in coord_space
+    y: int = 0  # Y coordinate in coord_space
+    end_x: int = 0  # Drag end x in coord_space
+    end_y: int = 0  # Drag end y in coord_space
+    scroll_amount: int = 0  # Mouse wheel delta. Positive=up, negative=down.
     button: str = "left"  # "left" or "right"
     key: str = ""  # Key name for "press"
     text: str = ""  # Text for "type"
     reasoning: str = ""
+    task_status: str = ""  # "in_progress", "complete", or "" (single-step)
+    policy_card_name: str = ""
+    policy_source_tab: str = ""
+    policy_target_slot_id: str = ""
+    policy_reasoning: str = ""
 
 
 def strip_markdown(text: str) -> str:
@@ -86,6 +93,8 @@ def validate_action(action: AgentAction, normalizing_range: int = 1000) -> list[
         List of error strings. Empty list means valid.
     """
     errors: list[str] = []
+    if action.coord_space not in ("normalized", "absolute"):
+        errors.append(f"coord_space='{action.coord_space}' is invalid, must be 'normalized' or 'absolute'")
 
     # --- Required fields per action type ---
     if action.action in ("click", "double_click"):
@@ -98,6 +107,12 @@ def validate_action(action: AgentAction, normalizing_range: int = 1000) -> list[
         if action.x == action.end_x and action.y == action.end_y:
             errors.append(f"drag start==end ({action.x},{action.y}), no movement")
 
+    elif action.action == "scroll":
+        if not isinstance(action.scroll_amount, int):
+            errors.append("scroll requires int scroll_amount")
+        elif action.scroll_amount == 0:
+            errors.append("scroll_amount must be non-zero")
+
     elif action.action == "press":
         if not action.key:
             errors.append("press action requires non-empty 'key' field")
@@ -106,16 +121,22 @@ def validate_action(action: AgentAction, normalizing_range: int = 1000) -> list[
         if not action.text:
             errors.append("type action requires non-empty 'text' field")
 
-    # --- Coordinate range (only for actions that use coordinates) ---
-    if action.action in ("click", "double_click", "drag"):
+    # --- Coordinate validation (only for actions that use coordinates) ---
+    if action.action in ("click", "double_click", "drag", "scroll"):
         for name, val in [("x", action.x), ("y", action.y)]:
-            if not (0 <= val <= normalizing_range):
-                errors.append(f"{name}={val} out of range [0, {normalizing_range}]")
+            if action.coord_space == "normalized":
+                if not (0 <= val <= normalizing_range):
+                    errors.append(f"{name}={val} out of range [0, {normalizing_range}]")
+            elif val < 0:
+                errors.append(f"{name}={val} must be >= 0 for absolute coordinates")
 
     if action.action == "drag":
         for name, val in [("end_x", action.end_x), ("end_y", action.end_y)]:
-            if not (0 <= val <= normalizing_range):
-                errors.append(f"{name}={val} out of range [0, {normalizing_range}]")
+            if action.coord_space == "normalized":
+                if not (0 <= val <= normalizing_range):
+                    errors.append(f"{name}={val} out of range [0, {normalizing_range}]")
+            elif val < 0:
+                errors.append(f"{name}={val} must be >= 0 for absolute coordinates")
 
     # --- Button validation ---
     if action.action in ("click", "double_click", "drag"):
@@ -166,7 +187,7 @@ def parse_action_json(response_text: str) -> AgentAction | None:
             logger.warning(f"Parse: missing or invalid 'action' field: {data.get('action')!r}")
             return None
 
-        valid_actions = ["click", "double_click", "drag", "press", "type"]
+        valid_actions = ["click", "double_click", "drag", "scroll", "press", "type"]
         if action_value not in valid_actions:
             logger.warning(f"Parse: unknown action '{action_value}', expected one of {valid_actions}")
             return None
@@ -205,10 +226,17 @@ def parse_action_json(response_text: str) -> AgentAction | None:
         y = _parse_int("y")
         end_x = _parse_int("end_x")
         end_y = _parse_int("end_y")
+        scroll_amount = _parse_int("scroll_amount")
+        coord_space = _parse_str("coord_space", "normalized")
         button = _parse_str("button", "left")
         key = _parse_str("key")
         text = _parse_str("text")
         reasoning = _parse_str("reasoning")
+        task_status = _parse_str("task_status")
+        policy_card_name = _parse_str("policy_card_name")
+        policy_source_tab = _parse_str("policy_source_tab")
+        policy_target_slot_id = _parse_str("policy_target_slot_id")
+        policy_reasoning = _parse_str("policy_reasoning")
 
         if parse_errors:
             for err in parse_errors:
@@ -218,14 +246,21 @@ def parse_action_json(response_text: str) -> AgentAction | None:
 
         agent_action = AgentAction(
             action=action_value,
+            coord_space=coord_space,
             x=x,
             y=y,
             end_x=end_x,
             end_y=end_y,
+            scroll_amount=scroll_amount,
             button=button,
             key=key,
             text=text,
             reasoning=reasoning,
+            task_status=task_status,
+            policy_card_name=policy_card_name,
+            policy_source_tab=policy_source_tab,
+            policy_target_slot_id=policy_target_slot_id,
+            policy_reasoning=policy_reasoning,
         )
 
         logger.debug(f"Successfully parsed action: {agent_action}")
@@ -237,7 +272,7 @@ def parse_action_json(response_text: str) -> AgentAction | None:
         return None
 
 
-def parse_action_json_list(response_text: str) -> list[AgentAction]:
+def parse_action_json_list(response_text: str) -> list[AgentAction] | None:
     """
     Parse VLM response into a list of AgentActions (for multi-action primitives).
 
@@ -245,7 +280,8 @@ def parse_action_json_list(response_text: str) -> list[AgentAction]:
     (which is wrapped into a one-element list).
 
     Returns:
-        List of AgentAction objects. Empty list on parse failure.
+        List of AgentAction objects. Returns an empty list for a valid no-op `[]`
+        response, or None on parse failure.
     """
     content = ""
     try:
@@ -274,6 +310,9 @@ def parse_action_json_list(response_text: str) -> list[AgentAction]:
 
         if not isinstance(data, list):
             logger.warning(f"Parse multi: expected list or dict, got {type(data).__name__}")
+            return None
+
+        if not data:
             return []
 
         actions: list[AgentAction] = []
@@ -290,13 +329,14 @@ def parse_action_json_list(response_text: str) -> list[AgentAction]:
 
         if not actions:
             logger.warning("Parse multi: no valid actions parsed from list")
+            return None
 
         return actions
 
     except json.JSONDecodeError as e:
         logger.warning(f"Parse multi: invalid JSON: {e}")
         logger.debug(f"Raw: {response_text}\nStripped: {content}")
-        return []
+        return None
 
 
 def parse_to_agent_plan(response_content: str, primitive_name: str) -> AgentPlan:

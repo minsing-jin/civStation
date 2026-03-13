@@ -16,6 +16,7 @@ Provides a unified interface to access and update all context types:
 
 from __future__ import annotations
 
+import copy
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -42,6 +43,75 @@ class TurnRecord:
     success: bool
     timestamp: datetime = field(default_factory=datetime.now)
     notes: str = ""
+
+
+@dataclass
+class PolicyTabCalibrationEntry:
+    """One session-persistent policy tab coordinate."""
+
+    tab_name: str
+    screen_x: int
+    screen_y: int
+    confirmed: bool = False
+    provisional: bool = False
+
+
+@dataclass
+class PolicyCaptureGeometry:
+    """Game-window geometry used when the policy tab cache was recorded."""
+
+    region_w: int
+    region_h: int
+    x_offset: int
+    y_offset: int
+
+    def to_dict(self) -> dict[str, int]:
+        return {
+            "region_w": self.region_w,
+            "region_h": self.region_h,
+            "x_offset": self.x_offset,
+            "y_offset": self.y_offset,
+        }
+
+
+@dataclass
+class PolicyTabCalibrationCache:
+    """Session-wide calibrated policy tab cache."""
+
+    positions: dict[str, PolicyTabCalibrationEntry] = field(default_factory=dict)
+    confirmed_tabs: set[str] = field(default_factory=set)
+    provisional_tabs: set[str] = field(default_factory=set)
+    capture_geometry: PolicyCaptureGeometry | None = None
+    calibration_complete: bool = False
+    distinct_failures: set[str] = field(default_factory=set)
+
+    def is_full(self) -> bool:
+        required = {"군사", "경제", "외교", "와일드카드", "암흑"}
+        return (
+            set(self.positions) == required
+            and self.confirmed_tabs == required
+            and not self.provisional_tabs
+            and self.calibration_complete
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "positions": {
+                tab_name: {
+                    "tab_name": entry.tab_name,
+                    "screen_x": entry.screen_x,
+                    "screen_y": entry.screen_y,
+                    "confirmed": entry.confirmed,
+                    "provisional": entry.provisional,
+                }
+                for tab_name, entry in self.positions.items()
+            },
+            "confirmed_tabs": sorted(self.confirmed_tabs),
+            "provisional_tabs": sorted(self.provisional_tabs),
+            "capture_geometry": self.capture_geometry.to_dict() if self.capture_geometry is not None else None,
+            "calibration_complete": self.calibration_complete,
+            "distinct_failures": sorted(self.distinct_failures),
+        }
 
 
 class ContextManager:
@@ -88,6 +158,9 @@ class ContextManager:
 
         # Macro-turn summaries (LLM-generated summaries of completed game turns)
         self._macro_turn_summaries: list[str] = []
+
+        # Session-persistent policy tab calibration cache
+        self._policy_tab_cache: PolicyTabCalibrationCache = PolicyTabCalibrationCache()
 
         # Metadata
         self._session_start: datetime = datetime.now()
@@ -281,6 +354,14 @@ class ContextManager:
         """Get the current strategy as a prompt string."""
         return self.high_level_context.get_strategy_string()
 
+    def get_policy_tab_cache(self) -> PolicyTabCalibrationCache:
+        """Return a deep copy of the session-persistent policy tab cache."""
+        return copy.deepcopy(self._policy_tab_cache)
+
+    def has_full_policy_tab_cache(self) -> bool:
+        """Whether all five policy tab coordinates are confirmed for this session."""
+        return self._policy_tab_cache.is_full()
+
     # ==================== Write Methods ====================
 
     def update_global_context(self, **kwargs: Any) -> None:
@@ -353,6 +434,71 @@ class ContextManager:
     def update_selected_unit(self, unit_info: dict[str, Any]) -> None:
         """Update the currently selected unit information."""
         self.primitive_context.update_selected_unit(unit_info)
+
+    def replace_policy_tab_cache(
+        self,
+        *,
+        positions: dict[str, dict[str, Any]] | None = None,
+        confirmed_tabs: set[str] | list[str] | None = None,
+        provisional_tabs: set[str] | list[str] | None = None,
+        capture_geometry: dict[str, Any] | None = None,
+        calibration_complete: bool | None = None,
+    ) -> None:
+        """Replace the full session policy tab cache."""
+        cache = PolicyTabCalibrationCache()
+        for tab_name, payload in (positions or {}).items():
+            if not isinstance(payload, dict):
+                continue
+            try:
+                screen_x = int(payload.get("screen_x", 0))
+                screen_y = int(payload.get("screen_y", 0))
+            except (TypeError, ValueError):
+                continue
+            cache.positions[tab_name] = PolicyTabCalibrationEntry(
+                tab_name=tab_name,
+                screen_x=screen_x,
+                screen_y=screen_y,
+                confirmed=bool(payload.get("confirmed", False)),
+                provisional=bool(payload.get("provisional", False)),
+            )
+        if confirmed_tabs is not None:
+            cache.confirmed_tabs = {str(tab) for tab in confirmed_tabs}
+        else:
+            cache.confirmed_tabs = {
+                tab_name for tab_name, entry in cache.positions.items() if entry.confirmed and not entry.provisional
+            }
+        if provisional_tabs is not None:
+            cache.provisional_tabs = {str(tab) for tab in provisional_tabs}
+        else:
+            cache.provisional_tabs = {tab_name for tab_name, entry in cache.positions.items() if entry.provisional}
+        if isinstance(capture_geometry, dict):
+            try:
+                cache.capture_geometry = PolicyCaptureGeometry(
+                    region_w=int(capture_geometry.get("region_w", 0)),
+                    region_h=int(capture_geometry.get("region_h", 0)),
+                    x_offset=int(capture_geometry.get("x_offset", 0)),
+                    y_offset=int(capture_geometry.get("y_offset", 0)),
+                )
+            except (TypeError, ValueError):
+                cache.capture_geometry = None
+        cache.calibration_complete = bool(calibration_complete) if calibration_complete is not None else cache.is_full()
+        self._policy_tab_cache = cache
+        self._last_update = datetime.now()
+
+    def add_policy_tab_cache_failure(self, tab_name: str) -> None:
+        """Record that a cached tab failed to switch cleanly."""
+        self._policy_tab_cache.distinct_failures.add(tab_name)
+        self._last_update = datetime.now()
+
+    def clear_policy_tab_cache_failures(self) -> None:
+        """Clear accumulated distinct tab failures."""
+        self._policy_tab_cache.distinct_failures.clear()
+        self._last_update = datetime.now()
+
+    def clear_policy_tab_cache(self) -> None:
+        """Clear the full session policy tab cache."""
+        self._policy_tab_cache = PolicyTabCalibrationCache()
+        self._last_update = datetime.now()
 
     def advance_turn(
         self, primitive_used: str = "", success: bool = True, notes: str = "", flush_actions: bool = False
@@ -460,6 +606,7 @@ class ContextManager:
             "global": self.global_context.to_dict(),
             "high_level": self.high_level_context.to_dict(),
             "primitive": self.primitive_context.to_dict(),
+            "policy_tab_cache": self._policy_tab_cache.to_dict(),
             "session_start": self._session_start.isoformat(),
             "last_update": self._last_update.isoformat(),
             "turn_history_count": len(self._turn_history),
