@@ -17,8 +17,8 @@ just the game area, eliminating desktop noise (Dock, menu bar, etc.).
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
 
-import pyautogui
 from PIL import Image
 
 from computer_use_test.utils.llm_provider.base import AgentAction
@@ -32,6 +32,29 @@ VLM_JPEG_QUALITY: int = 80
 
 # Keywords to match the Civilization VI window (case-insensitive)
 _GAME_WINDOW_KEYWORDS = ("civilization", "civ6", "civ vi")
+
+
+def _unavailable_pyautogui_method(*args, **kwargs):
+    raise RuntimeError("pyautogui is unavailable in this environment")
+
+
+try:
+    import pyautogui as _pyautogui
+except Exception:  # pragma: no cover - depends on runtime display availability
+    pyautogui = SimpleNamespace(
+        size=_unavailable_pyautogui_method,
+        screenshot=_unavailable_pyautogui_method,
+        moveTo=_unavailable_pyautogui_method,
+        click=_unavailable_pyautogui_method,
+        doubleClick=_unavailable_pyautogui_method,
+        mouseDown=_unavailable_pyautogui_method,
+        mouseUp=_unavailable_pyautogui_method,
+        scroll=_unavailable_pyautogui_method,
+        press=_unavailable_pyautogui_method,
+        write=_unavailable_pyautogui_method,
+    )
+else:
+    pyautogui = _pyautogui
 
 
 def _detect_game_window() -> tuple[int, int, int, int] | None:
