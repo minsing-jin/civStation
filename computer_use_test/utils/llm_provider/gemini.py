@@ -33,9 +33,9 @@ class GeminiVLMProvider(BaseVLMProvider):
         super().__init__(api_key, model)
 
         if self.api_key is None:
-            self.api_key = os.getenv("GOOGLE_API_KEY")
+            self.api_key = os.getenv("GENAI_API_KEY")
             if not self.api_key:
-                raise ValueError("Google API key must be provided or set in GOOGLE_API_KEY environment variable")
+                raise ValueError("Gemini API key must be provided or set in GENAI_API_KEY environment variable")
 
         if self.model is None:
             self.model = self.DEFAULT_MODEL
@@ -43,7 +43,7 @@ class GeminiVLMProvider(BaseVLMProvider):
         try:
             from google import genai
 
-            self.client = genai.Client(api_key=os.getenv("GENAI_API_KEY"))
+            self.client = genai.Client(api_key=self.api_key)
         except ImportError as e:
             raise ImportError(
                 "google-generativeai package not installed. Install with: pip install google-generativeai"

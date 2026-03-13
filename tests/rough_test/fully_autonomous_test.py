@@ -465,9 +465,9 @@ class GeminiProvider(BaseVLMProvider):
         super().__init__("gemini", model)
         if genai is None or genai_types is None:
             raise ProviderError("google-genai library is not installed")
-        api_key = os.getenv("GENAI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        api_key = os.getenv("GENAI_API_KEY")
         if not api_key:
-            raise ProviderError("GENAI_API_KEY or GOOGLE_API_KEY is not set")
+            raise ProviderError("GENAI_API_KEY is not set")
         self.client = genai.Client(api_key=api_key)
 
     def _generate(self, contents: list[Any], *, temperature: float, max_tokens: int) -> Any:
