@@ -65,7 +65,10 @@ PRIMITIVE_REGISTRY: dict[str, dict] = {
         "completion_condition": "초록색 '종교관 세우기' 버튼 클릭 완료 시 task_status='complete'.",
     },
     "governor_primitive": {
-        "criteria": "총독 카드 나열 또는 '총독 배정' 텍스트 표시. 총독 임명 팝업 포함.",
+        "criteria": (
+            "총독 카드 나열 또는 '총독 배정' 텍스트 표시. 총독 임명 팝업 포함. "
+            "또는 우하단 '총독 타이틀' 버튼/펜 아이콘 보임."
+        ),
         "prompt": GOVERNOR_PROMPT,
         "priority": 2,
         "multi_step": True,
@@ -100,7 +103,9 @@ PRIMITIVE_REGISTRY: dict[str, dict] = {
         "completion_condition": "",
     },
     "research_select_primitive": {
-        "criteria": "연구 선택 팝업 표시 또는 기술 트리 화면 열림. 기술 목록/노드 보임.",
+        "criteria": (
+            "연구 선택 팝업 표시 또는 기술 트리 화면 열림. 기술 목록/노드 보임. 또는 우하단 '연구 선택' 버튼 보임."
+        ),
         "prompt": RESEARCH_MANAGER_PROMPT,
         "priority": 5,
         "multi_step": True,
@@ -109,7 +114,10 @@ PRIMITIVE_REGISTRY: dict[str, dict] = {
         "completion_condition": "기술 클릭 완료 시 task_status='complete'.",
     },
     "city_production_primitive": {
-        "criteria": "생산 품목 선택 팝업 표시. 건물/유닛 목록 보임.",
+        "criteria": (
+            "생산 품목 선택 팝업 표시 또는 배치 화면 열림. 건물/유닛 목록/배치 타일 보임. "
+            "또는 우하단 '생산 품목' 버튼 보임."
+        ),
         "prompt": CITY_PRODUCTION_PROMPT,
         "priority": 6,
         "multi_step": True,
@@ -119,7 +127,7 @@ PRIMITIVE_REGISTRY: dict[str, dict] = {
         "img_config_preset": "planner_high_quality",
     },
     "culture_decision_primitive": {
-        "criteria": "사회 제도 트리 화면 열림. 사회 제도 노드 트리 형태.",
+        "criteria": "사회 제도 트리 화면 열림. 사회 제도 노드 트리 형태. 또는 우하단 '사회 제도 선택' 버튼 보임.",
         "prompt": CULTURE_MANAGER_PROMPT,
         "priority": 8,
         "multi_step": True,
@@ -157,7 +165,7 @@ PRIMITIVE_REGISTRY: dict[str, dict] = {
         "img_config_preset": "planner_high_quality",
     },
     "popup_primitive": {
-        "criteria": "기타 일반 팝업 표시됨. 또는 우하단에 '다음 턴'/'연구 선택'/'생산 품목' 버튼 보임.",
+        "criteria": "기타 일반 팝업 표시됨. 또는 우하단에 '다음 턴' 버튼 보임.",
         "prompt": POPUP_PROMPT,
         "priority": 99,
         "multi_step": False,

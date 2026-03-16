@@ -438,6 +438,17 @@ def run_primitive_loop(
             parts.append(f"{idx}:{planned_action.action}{coord}")
         return " | ".join(parts) if parts else "-"
 
+    def _publish_error_state(message: str) -> None:
+        if not message:
+            return
+        rl.action_result(
+            action_type="error",
+            coords=None,
+            reasoning=message,
+        )
+        if state_bridge:
+            state_bridge.update_current_action(primitive_name, "error", message)
+
     def _log_policy_state(prefix: str, actions: list[AgentAction] | None = None) -> None:
         if primitive_name != "policy_primitive" or not memory.policy_state.enabled:
             return
@@ -481,9 +492,33 @@ def run_primitive_loop(
             return ""
         return f"{best_choice.label} ({best_choice.position_hint})"
 
-    def _refresh_multi_step_debug() -> None:
+    def _multi_step_stm_summary() -> str:
         stm_raw = memory.to_prompt_string()
-        stm_str = stm_raw if primitive_name == "policy_primitive" else stm_raw[:150]
+        if primitive_name in {"policy_primitive", "city_production_primitive"}:
+            return stm_raw
+        return stm_raw[:150]
+
+    def _format_debug_action_summary(action: AgentAction) -> str:
+        parts = [action.action]
+        if action.action in {"click", "double_click", "scroll"}:
+            parts.append(f"@ ({action.x}, {action.y})")
+        if action.action == "drag":
+            parts.append(f"@ ({action.x}, {action.y}) -> ({action.end_x}, {action.end_y})")
+        if action.action == "scroll":
+            parts.append(f"amount={action.scroll_amount}")
+        if action.action == "press" and action.key:
+            parts.append(f"key={action.key}")
+        if action.reasoning:
+            parts.append(action.reasoning[:120])
+        return " | ".join(parts)
+
+    def _emit_city_production_event(label: str, detail: str) -> None:
+        if primitive_name != "city_production_primitive":
+            return
+        rl.primitive_event("CITY_PROD", f"{label} | {detail}")
+
+    def _refresh_multi_step_debug() -> None:
+        stm_str = _multi_step_stm_summary()
         rl.update_multi_step(
             active=True,
             step=result.steps_taken,
@@ -536,6 +571,10 @@ def run_primitive_loop(
         action: AgentAction | list[AgentAction] | None = None
 
         if process.should_observe(memory):
+            move_cursor_to_center(screen_w, screen_h, x_offset, y_offset)
+            pre_image, screen_w, screen_h, x_offset, y_offset = capture_screen_pil()
+            if primitive_name == "policy_primitive":
+                memory.set_policy_capture_geometry(screen_w, screen_h, x_offset, y_offset)
             observation = process.observe(
                 planner_provider,
                 pre_image,
@@ -549,8 +588,12 @@ def run_primitive_loop(
                 break
 
             action = process.consume_observation(memory, observation)
-            stm_raw = memory.to_prompt_string()
-            stm_str = stm_raw if primitive_name == "policy_primitive" else stm_raw[:150]
+            _emit_city_production_event(
+                "observe",
+                f"stage={memory.current_stage or '-'} | {memory.last_observation_summary or '-'} | "
+                f"anchor={memory.last_observation_anchor or '-'}",
+            )
+            stm_str = _multi_step_stm_summary()
             rl.update_multi_step(
                 active=True,
                 step=step + 1,
@@ -625,6 +668,10 @@ def run_primitive_loop(
                 action.stage,
                 action.reason or "-",
             )
+            _emit_city_production_event(
+                "stage",
+                f"{memory.current_stage or '-'} | reason={action.reason or '-'}",
+            )
             rl.update_multi_step(
                 active=True,
                 step=result.steps_taken,
@@ -634,9 +681,7 @@ def run_primitive_loop(
                 stage=memory.current_stage,
                 stall_count=memory.failure_count,
                 best_choice=_best_choice_summary(),
-                stm_summary=memory.to_prompt_string()
-                if primitive_name == "policy_primitive"
-                else memory.to_prompt_string()[:150],
+                stm_summary=_multi_step_stm_summary(),
             )
             if state_bridge:
                 state_bridge.update_multi_step(
@@ -648,9 +693,7 @@ def run_primitive_loop(
                     stage=memory.current_stage,
                     stall_count=memory.failure_count,
                     best_choice=_best_choice_summary(),
-                    stm_summary=memory.to_prompt_string()
-                    if primitive_name == "policy_primitive"
-                    else memory.to_prompt_string()[:150],
+                    stm_summary=_multi_step_stm_summary(),
                 )
             _sync_policy_cache_to_context()
             _emit_policy_event_if_changed()
@@ -661,12 +704,22 @@ def run_primitive_loop(
         actions_list = action if is_action_bundle else [action]
         actions_list = process.resolve_actions(actions_list, memory)
         display_action = actions_list[0]
+        planned_summary = (
+            f"{_format_debug_action_summary(display_action)} +{len(actions_list) - 1}"
+            if is_action_bundle and len(actions_list) > 1
+            else _format_debug_action_summary(display_action)
+        )
+        memory.set_last_planned_action_debug(planned_summary)
         result.last_action = actions_list[-1]
         result.steps_taken += 1
 
         action_extra = {"Step": f"{step + 1}/{max_steps}", "Status": display_action.task_status or "in_progress"}
         if is_action_bundle:
             action_extra["Multi-Action"] = f"{len(actions_list)} actions"
+        _emit_city_production_event(
+            "plan",
+            f"stage={memory.current_stage or '-'} | {memory.last_planned_action or planned_summary}",
+        )
         _log_policy_state("planned-actions", actions_list)
         rl.action_result(
             action_type=display_action.action,
@@ -724,8 +777,20 @@ def run_primitive_loop(
             break
         exec_end = time.monotonic()
 
-        stm_raw = memory.to_prompt_string()
-        stm_str = stm_raw if primitive_name == "policy_primitive" else stm_raw[:150]
+        executed_summary = (
+            " || ".join(_format_debug_action_summary(planned_action) for planned_action in actions_list[:2])
+            if len(actions_list) > 1
+            else _format_debug_action_summary(actions_list[0])
+        )
+        if len(actions_list) > 2:
+            executed_summary = f"{executed_summary} || +{len(actions_list) - 2} more"
+        memory.set_last_executed_action_debug(executed_summary)
+        _emit_city_production_event(
+            "exec",
+            f"stage={memory.current_stage or '-'} | {memory.last_executed_action or executed_summary}",
+        )
+
+        stm_str = _multi_step_stm_summary()
         rl.update_multi_step(
             active=True,
             step=step + 1,
@@ -1073,6 +1138,9 @@ def run_primitive_loop(
     if not result.completed and not result.re_route and not result.error_message:
         result.error_message = f"Primitive loop reached max_steps ({max_steps}) without completion"
         logger.warning(result.error_message)
+
+    if result.error_message:
+        _publish_error_state(result.error_message)
 
     _sync_policy_cache_to_context()
     rl.update_multi_step(active=False)

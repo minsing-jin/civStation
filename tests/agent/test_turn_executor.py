@@ -1,9 +1,12 @@
 from PIL import Image
 
 from computer_use_test.agent.modules.context.context_manager import ContextManager
+from computer_use_test.agent.modules.hitl.command_queue import CommandQueue
+from computer_use_test.agent.modules.hitl.status_ui.state_bridge import AgentStateBridge
 from computer_use_test.agent.modules.memory.short_term_memory import ShortTermMemory
 from computer_use_test.agent.modules.primitive.multi_step_process import (
     BaseMultiStepProcess,
+    ObservationBundle,
     SemanticVerifyResult,
     StageTransition,
     VerificationResult,
@@ -183,6 +186,52 @@ class PolicyDragProcess(BaseMultiStepProcess):
 
     def verify_completion(self, provider, pil_image, memory, **kwargs) -> VerificationResult:
         return VerificationResult(True, "ok")
+
+
+class ObservationPrepProcess(BaseMultiStepProcess):
+    supports_observation = True
+
+    def __init__(self):
+        super().__init__("world_congress_primitive", "")
+        self.observed_image = None
+
+    def initialize(self, memory: ShortTermMemory) -> None:
+        memory.begin_stage("observe_choices")
+
+    def should_observe(self, memory: ShortTermMemory) -> bool:
+        return self.observed_image is None
+
+    def observe(self, provider, pil_image, memory, **kwargs) -> ObservationBundle | None:
+        self.observed_image = pil_image
+        return ObservationBundle(visible_options=[{"label": "안건"}], end_of_list=True)
+
+    def consume_observation(self, memory: ShortTermMemory, observation: ObservationBundle) -> AgentAction | None:
+        return AgentAction(
+            action="click",
+            x=800,
+            y=400,
+            reasoning="complete after observation",
+            task_status="complete",
+        )
+
+    def verify_completion(self, provider, pil_image, memory, **kwargs) -> VerificationResult:
+        return VerificationResult(True, "ok")
+
+
+class MemoryDecisionFailureProcess(BaseMultiStepProcess):
+    supports_observation = True
+
+    def __init__(self):
+        super().__init__("city_production_primitive", "")
+
+    def initialize(self, memory: ShortTermMemory) -> None:
+        memory.begin_stage("choose_from_memory")
+
+    def decide_from_memory(self, provider, memory, *, high_level_strategy: str) -> bool:
+        return False
+
+    def plan_action(self, provider, pil_image, memory, **kwargs):
+        raise AssertionError("plan_action should not run when decide_from_memory fails first")
 
 
 class TestRunPrimitiveLoop:
@@ -395,3 +444,109 @@ class TestRunPrimitiveLoop:
         assert result.success is True
         assert process.drag_success_called is True
         assert memory.policy_state.last_similarity_result == ""
+
+    def test_multistep_observation_moves_cursor_to_center_before_observe(self, monkeypatch):
+        process = ObservationPrepProcess()
+        provider = DummyProvider()
+        initial_image = Image.new("RGB", (100, 100), "red")
+        observation_image = Image.new("RGB", (100, 100), "blue")
+        post_image = Image.new("RGB", (100, 100), "green")
+        memory = ShortTermMemory()
+        memory.start_task("world_congress_primitive", enable_choice_catalog=True)
+        call_order: list[str] = []
+        captures = iter(
+            [
+                (initial_image, 1440, 900, 0, 0),
+                (observation_image, 1440, 900, 0, 0),
+                (post_image, 1440, 900, 0, 0),
+            ]
+        )
+
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+
+        def fake_capture():
+            index = len([item for item in call_order if item.startswith("capture")]) + 1
+            call_order.append(f"capture{index}")
+            return next(captures)
+
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.capture_screen_pil", fake_capture)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.move_cursor_to_center",
+            lambda *args: call_order.append("center"),
+        )
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
+
+        result = run_primitive_loop(
+            planner_provider=provider,
+            primitive_name="world_congress_primitive",
+            screen_w=1440,
+            screen_h=900,
+            normalizing_range=1000,
+            x_offset=0,
+            y_offset=0,
+            strategy_string="",
+            recent_actions_str="없음",
+            hitl_directive=None,
+            memory=memory,
+            ctx=self.ctx,
+            max_steps=2,
+            completion_condition="",
+            planner_img_config=None,
+            delay_before_action=0,
+        )
+
+        assert result.success is True
+        assert call_order[:3] == ["capture1", "center", "capture2"]
+        assert process.observed_image is observation_image
+
+    def test_multistep_memory_decision_failure_updates_status_with_real_error(self, monkeypatch):
+        process = MemoryDecisionFailureProcess()
+        provider = DummyProvider()
+        image = Image.new("RGB", (100, 100))
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.remember_choices(
+            [{"id": "cand1", "label": "기념비"}],
+            end_of_list=True,
+            scroll_direction="down",
+        )
+        memory.choice_catalog.end_reached = True
+        bridge = AgentStateBridge(self.ctx, CommandQueue())
+        bridge.update_current_action("city_production_primitive", "scroll (8800, 5100)", "숨은 선택지 확인")
+
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            lambda: (image, 1440, 900, 0, 0),
+        )
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
+
+        result = run_primitive_loop(
+            planner_provider=provider,
+            primitive_name="city_production_primitive",
+            screen_w=1440,
+            screen_h=900,
+            normalizing_range=1000,
+            x_offset=0,
+            y_offset=0,
+            strategy_string="",
+            recent_actions_str="없음",
+            hitl_directive=None,
+            memory=memory,
+            ctx=self.ctx,
+            max_steps=4,
+            completion_condition="",
+            planner_img_config=None,
+            state_bridge=bridge,
+            delay_before_action=0,
+        )
+
+        status = bridge.get_status()
+
+        assert result.success is False
+        assert result.error_message == "Failed to decide best choice from short-term memory"
+        assert status.current_action == "error"
+        assert status.current_reasoning == "Failed to decide best choice from short-term memory"

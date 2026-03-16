@@ -16,7 +16,7 @@ import json
 import logging
 from dataclasses import dataclass
 
-from computer_use_test.agent.modules.memory.short_term_memory import ShortTermMemory
+from computer_use_test.agent.modules.memory.short_term_memory import ScrollAnchor, ShortTermMemory
 from computer_use_test.agent.modules.primitive.runtime_hooks import (
     NoopSemanticVerifyHook,
     NoProgressResolution,
@@ -36,6 +36,10 @@ _POLICY_TAB_NAMES = ["군사", "경제", "외교", "와일드카드", "암흑"]
 _POLICY_TAB_BAR_ORDER = ["전체", "군사", "경제", "외교", "와일드카드", "암흑", "황금기"]
 _POLICY_RIGHT_TAB_BAR_RATIOS = (0.57, 0.24, 0.97, 0.31)
 _POLICY_RIGHT_CARD_LIST_RATIOS = (0.57, 0.29, 0.97, 0.84)
+_PRODUCTION_LIST_DEFAULT_RATIOS = (0.68, 0.10, 0.94, 0.92)
+_PRODUCTION_LIST_HOVER_X_RATIO = 0.88
+_PRODUCTION_LIST_HOVER_RIGHT_INSET_RATIO = 0.02
+_PRODUCTION_LIST_HOVER_WIDTH_BIAS = 0.72
 
 
 def _normalized_coord_note(normalizing_range: int, *, fields: str) -> str:
@@ -69,6 +73,7 @@ def _build_observation_json_instruction(normalizing_range: int) -> str:
 - 지금 화면에 실제로 보이는 항목만 적어.
 - 절대 최종 선택을 하지 마.
 - scroll_anchor는 스크롤해야 하는 팝업/리스트의 중앙 hover 지점이다.
+- 스크롤할 팝업/리스트가 명확하지 않으면 scroll_anchor는 null 로 반환해도 된다.
 - 목록 아래에 아직 새 항목이 남아 있으면 end_of_list=false.
 - 더 아래에 새 항목이 없으면 end_of_list=true.
 {_normalized_coord_note(normalizing_range, fields="scroll_anchor.x/y 와 scroll_anchor.left/top/right/bottom")}
@@ -190,6 +195,20 @@ class ScrollableChoiceObserver(BaseObserver):
             "- 이미 선택되었거나 체크된 항목은 selected=true로 표시.\n"
             "- 스크롤해야 하는 실제 패널 중앙을 scroll_anchor로 반환.\n"
             "- 숨겨진 항목을 아직 못 본 상태면 end_of_list=false.\n"
+        )
+
+
+class CityProductionObserver(ScrollableChoiceObserver):
+    """Observer specialized for the tall city-production list popup."""
+
+    def build_prompt(self, primitive_name: str, memory: ShortTermMemory, *, normalizing_range: int) -> str:
+        base_prompt = super().build_prompt(primitive_name, memory, normalizing_range=normalizing_range)
+        return (
+            f"{base_prompt}\n"
+            "- 생산 목록은 화면 오른쪽에 세로로 길게 뜨는 생산 품목 패널이다. "
+            "건물/유닛/지구 이름과 턴 수가 보이는 실제 목록 내부만 기준으로 봐.\n"
+            "- scroll_anchor는 반드시 그 생산 목록 내부 중앙이어야 한다.\n"
+            "- 지도 육각형, 좌측 빈 영역, 우측 HUD 바깥, 우하단 '생산 품목' 알림 버튼을 scroll_anchor로 주지 마.\n"
         )
 
 
@@ -565,28 +584,37 @@ class ObservationAssistedProcess(BaseMultiStepProcess):
             return True
 
         memory.begin_stage("decide_best_choice")
+        max_tokens = memory.choice_catalog_decision_max_tokens()
         prompt = (
             "너는 문명6 선택 결정 서브에이전트야. 아래 short-term memory에 누적된 전체 후보 중 "
             "상위 전략에 가장 적합한 하나를 고르고 JSON만 출력해.\n"
-            'JSON: {"best_option_label":"후보 이름","reason":"짧은 이유"}\n\n'
+            'JSON: {"best_option_id":"stable_id","reason":"짧은 이유"}\n'
+            "- best_option_id는 후보 catalog에 적힌 id를 그대로 복사해.\n"
+            "- 체크됨, 이미 지음, 비활성 후보는 고르지 마.\n\n"
             f"Primitive: {self.primitive_name}\n"
             f"상위 전략:\n{high_level_strategy}\n\n"
-            f"후보 memory:\n{memory.to_prompt_string()}\n"
+            f"후보 catalog:\n{memory.choice_catalog_decision_prompt()}\n"
         )
         try:
-            response = provider.call_vlm(prompt=prompt, image_path=None, temperature=0.2, max_tokens=512)
+            response = provider.call_vlm(
+                prompt=prompt,
+                image_path=None,
+                temperature=0.2,
+                max_tokens=max_tokens,
+                use_thinking=False,
+            )
             content = strip_markdown(response.content)
             data = json.loads(content)
-            label = str(data.get("best_option_label", "")).strip()
+            option_id = str(data.get("best_option_id", "")).strip()
             reason = str(data.get("reason", "")).strip()
         except Exception as exc:  # noqa: BLE001
             logger.warning("Best-choice decision failed for %s: %s", self.primitive_name, exc)
             return False
 
-        if not label:
+        if not option_id:
             return False
 
-        memory.set_best_choice(label=label, reason=reason)
+        memory.set_best_choice(option_id=option_id, reason=reason)
         return memory.get_best_choice() is not None
 
 
@@ -2297,13 +2325,756 @@ class PolicyProcess(ScriptedMultiStepProcess):
         )
 
 
-class ResearchSelectProcess(ScriptedMultiStepProcess):
-    """Research selection intentionally skips the observer path."""
+class CityProductionProcess(ObservationAssistedProcess):
+    """Observation-assisted production flow with an explicit entry gate."""
+
+    _ENTRY_SUBSTEP = "production_entry_done"
+    _LIST_BRANCH = "choice_list"
+    _PLACEMENT_BRANCH = "placement_map"
+    _PLACEMENT_STAGE = "production_place"
+    _PLACEMENT_CONFIRM_STAGE = "production_place_confirm"
+    _HOVER_SCROLL_STAGE = "hover_scroll_anchor"
+    _SCROLL_DOWN_STAGE = "scroll_down_for_hidden_choices"
+    _RESTORE_HOVER_STAGE = "restore_hover_scroll_anchor"
+    _RESTORE_SCROLL_STAGE = "restore_best_choice_visibility"
+
+    def __init__(self, primitive_name: str, completion_condition: str = ""):
+        super().__init__(
+            primitive_name,
+            completion_condition,
+            target_description="화면 오른쪽의 세로로 긴 생산 품목 선택 패널",
+        )
+        self.observer = CityProductionObserver("화면 오른쪽의 세로로 긴 생산 품목 선택 패널")
+
+    def initialize(self, memory: ShortTermMemory) -> None:
+        if not memory.current_stage:
+            memory.begin_stage("production_entry")
+
+    def should_observe(self, memory: ShortTermMemory) -> bool:
+        if self._ENTRY_SUBSTEP not in memory.completed_substeps:
+            return False
+        if memory.branch and memory.branch != self._LIST_BRANCH:
+            return False
+        if memory.current_stage in {
+            "generic_fallback",
+            self._HOVER_SCROLL_STAGE,
+            self._SCROLL_DOWN_STAGE,
+            self._RESTORE_HOVER_STAGE,
+            self._RESTORE_SCROLL_STAGE,
+        }:
+            return False
+        if memory.current_stage == "observe_choices":
+            return True
+        return super().should_observe(memory)
 
     def build_stage_note(self, memory: ShortTermMemory) -> str:
+        if self._ENTRY_SUBSTEP not in memory.completed_substeps:
+            return (
+                "현재 stage: production_entry\n"
+                "- 생산 선택 팝업 또는 배치 화면이 실제로 열렸는지 먼저 확인해.\n"
+                "- 우하단 '생산 품목' 알림만 보이면 press enter로 진입해.\n"
+                "- 아직 목록 관찰/스크롤/품목 선택을 하지 마."
+            )
+        if memory.current_stage == self._PLACEMENT_CONFIRM_STAGE:
+            return (
+                "현재 stage: production_place_confirm\n"
+                "- 직전에 고른 배치 타일에 대한 건설/구매 확인 팝업만 처리한다.\n"
+                "- '이곳에 ... 을 건설하겠습니까?' 또는 구매 후 건설 확인이면 '예'/확인 버튼만 클릭해.\n"
+                "- 이 단계에서만 task_status='complete'로 끝내라."
+            )
+        if memory.branch == self._PLACEMENT_BRANCH:
+            return (
+                "현재 stage: production_place\n"
+                "- 지금은 스크롤 목록이 아니라 특수지구/불가사의 배치 화면이다.\n"
+                "- 초록색 즉시 배치 가능 타일과 파란색 구매 후 배치 가능 타일을 비교하되, "
+                "파란 타일은 현재 골드 소모 대비 효용이 충분할 때만 고른다.\n"
+                "- 타일 선택 action을 바로 1회 수행하고, 아직 task_status를 complete로 끝내지 마.\n"
+                "- 생산 목록 관찰/스크롤은 하지 마."
+            )
+        if memory.current_stage == self._HOVER_SCROLL_STAGE:
+            return (
+                "현재 stage: hover_scroll_anchor\n"
+                "- 방금 찾은 오른쪽 생산 목록 패널 중앙으로 커서만 이동해 hover를 고정한다.\n"
+                "- 클릭하지 말고, 다음 단계에서만 스크롤한다."
+            )
+        if memory.current_stage == self._SCROLL_DOWN_STAGE:
+            return (
+                "현재 stage: scroll_down_for_hidden_choices\n"
+                "- 이미 hover된 생산 목록 패널 중앙에서 아래로 스크롤해 숨은 선택지를 더 본다."
+            )
+        if memory.current_stage == self._RESTORE_HOVER_STAGE:
+            return (
+                "현재 stage: restore_hover_scroll_anchor\n"
+                "- 선택한 생산 품목이 현재 안 보인다. 생산 목록 패널 중앙에 다시 hover를 고정한다."
+            )
+        if memory.current_stage == self._RESTORE_SCROLL_STAGE:
+            best_choice = memory.get_best_choice()
+            best_label = best_choice.label if best_choice is not None else "-"
+            return (
+                "현재 stage: restore_best_choice_visibility\n"
+                f"- 선택한 생산 품목 '{best_label}' 이 다시 보이도록 패널을 재복원 스크롤한다.\n"
+                "- 스크롤 후에는 다시 observation으로 돌아가 실제로 보이는지 확인한다."
+            )
+        return super().build_stage_note(memory)
+
+    def _production_screen_state(self, provider: BaseVLMProvider, pil_image, *, img_config=None) -> dict | None:
+        prompt = (
+            "너는 문명6 도시 생산 진입 상태 판별기야. 현재 화면이 실제 생산 선택 화면인지 여부만 판단해.\n"
+            'JSON만 출력: {"production_mode":"list|placement|notification|other",'
+            ' "production_screen_ready": true/false,'
+            ' "notification_visible": true/false, "reasoning": "짧은 이유"}\n'
+            "- 생산 품목 목록(건물/유닛/지구 리스트)이 실제로 보이면 "
+            "production_mode='list', production_screen_ready=true.\n"
+            "- 특수지구/불가사의 배치 타일 화면이면 "
+            "production_mode='placement', production_screen_ready=true.\n"
+            "- 우하단 '생산 품목' 알림만 보이고 목록/배치 화면이 안 열렸으면 "
+            "production_mode='notification', production_screen_ready=false.\n"
+            "- 어떤 생산 UI도 확실하지 않으면 production_mode='other', production_screen_ready=false.\n"
+            "- 우하단 '생산 품목' 알림이 분명히 보이면 notification_visible=true.\n"
+        )
+        try:
+            return _analyze_structured_json(provider, pil_image, prompt, img_config=img_config, max_tokens=256)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Production entry check failed: %s", exc)
+            return None
+
+    @staticmethod
+    def _anchor_components(
+        scroll_anchor: dict | ScrollAnchor | None,
+        *,
+        normalizing_range: int,
+    ) -> tuple[int, int, int, int, int, int] | None:
+        """Return validated normalized anchor coordinates for dict or memory-backed anchors."""
+        if isinstance(scroll_anchor, dict):
+            getter = scroll_anchor.get
+        elif isinstance(scroll_anchor, ScrollAnchor):
+
+            def getter(key: str, default: int = 0) -> int:
+                return getattr(scroll_anchor, key, default)
+        else:
+            return None
+        try:
+            x = int(getter("x", 0))
+            y = int(getter("y", 0))
+            left = int(getter("left", 0))
+            top = int(getter("top", 0))
+            right = int(getter("right", normalizing_range))
+            bottom = int(getter("bottom", normalizing_range))
+        except (TypeError, ValueError):
+            return None
+        if 0 <= left <= x <= right <= normalizing_range and 0 <= top <= y <= bottom <= normalizing_range:
+            return x, y, left, top, right, bottom
+        return None
+
+    @classmethod
+    def _is_valid_anchor_dict(cls, scroll_anchor: dict | None, *, normalizing_range: int) -> bool:
+        """Return whether a raw anchor dict fits the normalized coordinate contract."""
+        return cls._anchor_components(scroll_anchor, normalizing_range=normalizing_range) is not None
+
+    @classmethod
+    def _is_plausible_list_anchor(
+        cls,
+        scroll_anchor: dict | ScrollAnchor | None,
+        *,
+        normalizing_range: int,
+    ) -> bool:
+        """Reject anchors that do not look like the right-side tall production list panel."""
+        components = cls._anchor_components(scroll_anchor, normalizing_range=normalizing_range)
+        if components is None:
+            return False
+        x, _, left, top, right, bottom = components
+        width = right - left
+        height = bottom - top
+        return (
+            x >= round(normalizing_range * 0.55)
+            and left >= round(normalizing_range * 0.40)
+            and width >= round(normalizing_range * 0.15)
+            and height >= round(normalizing_range * 0.45)
+            and height >= width
+        )
+
+    @staticmethod
+    def _ratio_to_norm(value: float, normalizing_range: int) -> int:
+        """Convert a UI ratio into a normalized coordinate."""
+        return round(value * normalizing_range)
+
+    def _default_list_scroll_anchor(self, normalizing_range: int) -> dict[str, int]:
+        """Return a conservative fallback anchor inside the typical production popup."""
+        left = self._ratio_to_norm(_PRODUCTION_LIST_DEFAULT_RATIOS[0], normalizing_range)
+        top = self._ratio_to_norm(_PRODUCTION_LIST_DEFAULT_RATIOS[1], normalizing_range)
+        right = self._ratio_to_norm(_PRODUCTION_LIST_DEFAULT_RATIOS[2], normalizing_range)
+        bottom = self._ratio_to_norm(_PRODUCTION_LIST_DEFAULT_RATIOS[3], normalizing_range)
+        hover_anchor = self._project_anchor_to_right_hover_lane(
+            {
+                "x": (left + right) // 2,
+                "y": (top + bottom) // 2,
+                "left": left,
+                "top": top,
+                "right": right,
+                "bottom": bottom,
+            },
+            normalizing_range=normalizing_range,
+        )
+        return {
+            "x": hover_anchor.x,
+            "y": hover_anchor.y,
+            "left": left,
+            "top": top,
+            "right": right,
+            "bottom": bottom,
+        }
+
+    @classmethod
+    def _project_anchor_to_right_hover_lane(
+        cls,
+        scroll_anchor: dict | ScrollAnchor,
+        *,
+        normalizing_range: int,
+    ) -> ScrollAnchor:
+        """Project a validated production anchor onto a reliable right-edge hover lane."""
+        components = cls._anchor_components(scroll_anchor, normalizing_range=normalizing_range)
+        if components is None:
+            raise ValueError("scroll_anchor must be validated before projection")
+        _, y, left, top, right, bottom = components
+        width = right - left
+        inset = max(round(normalizing_range * _PRODUCTION_LIST_HOVER_RIGHT_INSET_RATIO), 12)
+        preferred_x = max(
+            round(normalizing_range * _PRODUCTION_LIST_HOVER_X_RATIO),
+            left + round(width * _PRODUCTION_LIST_HOVER_WIDTH_BIAS),
+        )
+        x = min(right - inset, preferred_x)
+        x = max(left + inset, x)
+        y = max(top + inset, min(bottom - inset, y))
+        return ScrollAnchor(x=x, y=y, left=left, top=top, right=right, bottom=bottom)
+
+    def _get_runtime_scroll_anchor(self, memory: ShortTermMemory) -> ScrollAnchor:
+        """Return a production-list anchor, repairing invalid memory with the safe right-side fallback."""
+        anchor = memory.get_scroll_anchor()
+        if self._is_plausible_list_anchor(anchor, normalizing_range=memory.normalizing_range):
+            projected_anchor = self._project_anchor_to_right_hover_lane(
+                anchor, normalizing_range=memory.normalizing_range
+            )
+            memory.choice_catalog.scroll_anchor = projected_anchor
+            return projected_anchor
+        default_anchor = ScrollAnchor(**self._default_list_scroll_anchor(memory.normalizing_range))
+        memory.choice_catalog.scroll_anchor = default_anchor
+        return default_anchor
+
+    def _locate_list_scroll_anchor(
+        self,
+        provider: BaseVLMProvider,
+        pil_image,
+        *,
+        normalizing_range: int,
+        img_config=None,
+    ) -> dict | None:
+        """Locate the right-side production-list hover anchor with a dedicated high-precision pass."""
+        prompt = f"""너는 문명6 도시 생산 목록의 scroll hover anchor 위치만 찾는 서브에이전트야.
+응답은 JSON 하나만 출력해.
+{{
+  "scroll_anchor": {{
+    "x": 0, "y": 0,
+    "left": 0, "top": 0, "right": {normalizing_range}, "bottom": {normalizing_range}
+  }},
+  "reasoning": "짧은 이유"
+}}
+- 생산 목록이 실제로 보이면 화면 오른쪽에 세로로 길게 있는 패널 내부 중앙을 scroll_anchor로 반환해.
+- 지도 육각형, 좌측 빈 영역, 우측 HUD, 우하단 버튼/알림은 절대 scroll_anchor로 반환하지 마.
+- 생산 목록이 확실하지 않으면 scroll_anchor는 null 로 반환해.
+{_normalized_coord_note(normalizing_range, fields="scroll_anchor.x/y 와 scroll_anchor.left/top/right/bottom")}
+"""
+        try:
+            data = _analyze_structured_json(provider, pil_image, prompt, img_config=img_config, max_tokens=256)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Production scroll-anchor locator failed: %s", exc)
+            return None
+        scroll_anchor = data.get("scroll_anchor")
+        if self._is_plausible_list_anchor(scroll_anchor, normalizing_range=normalizing_range):
+            return scroll_anchor
+        return None
+
+    @staticmethod
+    def _summarize_visible_options(observation: ObservationBundle) -> str:
+        """Return a compact debug summary for the current visible production options."""
+        labels = [
+            str(item.get("label", "")).strip()
+            for item in observation.visible_options
+            if str(item.get("label", "")).strip()
+        ]
+        labels = labels[:5]
+        prefix = ", ".join(labels) if labels else "보이는 품목 없음"
+        if len(observation.visible_options) > len(labels):
+            prefix = f"{prefix} 외 {len(observation.visible_options) - len(labels)}개"
+        return f"{len(observation.visible_options)} visible / end={observation.end_of_list} / {prefix}"
+
+    @staticmethod
+    def _format_action_debug(action: AgentAction) -> str:
+        """Return a compact one-line action summary for Rich/status debug."""
+        parts = [action.action]
+        if action.action in {"click", "double_click", "scroll"}:
+            parts.append(f"@ ({action.x}, {action.y})")
+        if action.action == "drag":
+            parts.append(f"@ ({action.x}, {action.y}) -> ({action.end_x}, {action.end_y})")
+        if action.action == "scroll":
+            parts.append(f"amount={action.scroll_amount}")
+        if action.action == "press" and action.key:
+            parts.append(f"key={action.key}")
+        if action.reasoning:
+            parts.append(action.reasoning[:120])
+        return " | ".join(parts)
+
+    def _queue_generic_fallback(self, memory: ShortTermMemory, *, reason: str) -> None:
+        """Queue a safe generic fallback when deterministic anchor-based flow cannot proceed."""
+        memory.begin_stage("generic_fallback")
+        memory.set_last_planned_action_debug(reason)
+
+    def _build_anchor_move_action(self, memory: ShortTermMemory, *, stage_name: str, reason: str) -> AgentAction | None:
+        """Return a hover-only cursor move to the saved list anchor."""
+        anchor = self._get_runtime_scroll_anchor(memory)
+        memory.begin_stage(stage_name)
+        action = AgentAction(
+            action="move",
+            x=anchor.x,
+            y=anchor.y,
+            reasoning=reason,
+            task_status="in_progress",
+        )
+        memory.set_last_planned_action_debug(self._format_action_debug(action))
+        return action
+
+    def _build_anchor_scroll_action(
+        self,
+        memory: ShortTermMemory,
+        *,
+        direction: str,
+        reason: str,
+    ) -> AgentAction | None:
+        """Return a deterministic scroll action from the saved list anchor."""
+        anchor = self._get_runtime_scroll_anchor(memory)
+        memory.choice_catalog.last_scroll_direction = direction
+        action = AgentAction(
+            action="scroll",
+            x=anchor.x,
+            y=anchor.y,
+            scroll_amount=-650 if direction == "down" else 650,
+            reasoning=reason,
+            task_status="in_progress",
+        )
+        memory.set_last_planned_action_debug(self._format_action_debug(action))
+        return action
+
+    def _build_restore_scroll_action(self, memory: ShortTermMemory) -> AgentAction | None:
+        """Return a deterministic scroll that restores the chosen option into view."""
+        best_choice = memory.get_best_choice()
+        if best_choice is None:
+            self._queue_generic_fallback(memory, reason="best choice missing during restore -> generic_fallback")
+            return None
+        if best_choice.position_hint == "above":
+            memory.begin_stage(self._RESTORE_SCROLL_STAGE)
+            return self._build_anchor_scroll_action(
+                memory,
+                direction="up",
+                reason=f"선택한 생산 품목 '{best_choice.label}' 이 다시 보이도록 위로 재복원 스크롤",
+            )
+        if best_choice.position_hint == "below":
+            memory.begin_stage(self._RESTORE_SCROLL_STAGE)
+            return self._build_anchor_scroll_action(
+                memory,
+                direction="down",
+                reason=f"선택한 생산 품목 '{best_choice.label}' 이 다시 보이도록 아래로 재복원 스크롤",
+            )
+        self._queue_generic_fallback(memory, reason="best choice visibility unknown -> generic_fallback")
+        return None
+
+    def observe(
+        self,
+        provider: BaseVLMProvider,
+        pil_image,
+        memory: ShortTermMemory,
+        *,
+        normalizing_range: int,
+        img_config=None,
+    ) -> ObservationBundle | None:
+        observation = super().observe(
+            provider,
+            pil_image,
+            memory,
+            normalizing_range=normalizing_range,
+            img_config=img_config,
+        )
+        if observation is None or memory.branch != self._LIST_BRANCH:
+            return observation
+
+        if not self._is_plausible_list_anchor(observation.scroll_anchor, normalizing_range=normalizing_range):
+            observation.scroll_anchor = None
+
+        saved_anchor = memory.get_scroll_anchor()
+        if not self._is_plausible_list_anchor(saved_anchor, normalizing_range=normalizing_range):
+            saved_anchor = None
+
+        located_anchor = self._locate_list_scroll_anchor(
+            provider,
+            pil_image,
+            normalizing_range=normalizing_range,
+            img_config=img_config,
+        )
+        if located_anchor is not None:
+            observation.scroll_anchor = located_anchor
+        elif observation.scroll_anchor is None and saved_anchor is None:
+            observation.scroll_anchor = self._default_list_scroll_anchor(normalizing_range)
+        return observation
+
+    def consume_observation(self, memory: ShortTermMemory, observation: ObservationBundle) -> AgentAction | None:
+        summary = self._summarize_visible_options(observation)
+        debug_anchor = observation.scroll_anchor or memory.get_scroll_anchor()
+        if debug_anchor is None:
+            debug_anchor = self._default_list_scroll_anchor(memory.normalizing_range)
+        memory.set_last_observation_debug(summary, scroll_anchor=debug_anchor)
+
+        memory.begin_stage("observe_choices")
+        scroll_direction = memory.choice_catalog.last_scroll_direction or "down"
+        memory.remember_choices(
+            observation.visible_options,
+            end_of_list=observation.end_of_list,
+            scroll_anchor=observation.scroll_anchor or debug_anchor,
+            scroll_direction=scroll_direction,
+        )
+
+        best_choice = memory.get_best_choice()
+        if best_choice is not None:
+            if best_choice.visible_now:
+                memory.begin_stage("select_from_memory")
+                memory.set_last_planned_action_debug(f"best choice '{best_choice.label}' visible -> select_from_memory")
+                return None
+            return self._build_anchor_move_action(
+                memory,
+                stage_name=self._RESTORE_HOVER_STAGE,
+                reason=f"선택한 생산 품목 '{best_choice.label}' 을 다시 찾기 전에 생산 목록 패널 중앙 hover를 고정",
+            )
+
+        if observation.end_of_list or memory.choice_catalog.end_reached:
+            memory.mark_substep("full_scan_complete")
+            memory.begin_stage("choose_from_memory")
+            memory.set_last_planned_action_debug("scan complete -> choose_from_memory")
+            return None
+
+        return self._build_anchor_move_action(
+            memory,
+            stage_name=self._HOVER_SCROLL_STAGE,
+            reason="생산 목록 패널 중앙으로 커서를 먼저 이동해 hover를 고정",
+        )
+
+    def plan_action(
+        self,
+        provider: BaseVLMProvider,
+        pil_image,
+        memory: ShortTermMemory,
+        *,
+        normalizing_range: int,
+        high_level_strategy: str,
+        recent_actions: str,
+        hitl_directive: str | None,
+        img_config=None,
+    ) -> AgentAction | list[AgentAction] | StageTransition | None:
+        if self._ENTRY_SUBSTEP not in memory.completed_substeps:
+            state = self._production_screen_state(provider, pil_image, img_config=img_config)
+            production_mode = str(state.get("production_mode", "")).strip() if state else ""
+            if state and bool(state.get("production_screen_ready", False)):
+                memory.mark_substep(self._ENTRY_SUBSTEP)
+                if production_mode == "placement":
+                    memory.set_branch(self._PLACEMENT_BRANCH)
+                    memory.begin_stage(self._PLACEMENT_STAGE)
+                    return super().plan_action(
+                        provider,
+                        pil_image,
+                        memory,
+                        normalizing_range=normalizing_range,
+                        high_level_strategy=high_level_strategy,
+                        recent_actions=recent_actions,
+                        hitl_directive=hitl_directive,
+                        img_config=img_config,
+                    )
+                memory.set_branch(self._LIST_BRANCH)
+                memory.begin_stage("observe_choices")
+                return StageTransition(stage="observe_choices", reason="production list screen ready")
+            if state and bool(state.get("notification_visible", False)):
+                memory.begin_stage("production_entry")
+                memory.set_last_planned_action_debug("press enter | lower-right production notification")
+                return AgentAction(
+                    action="press",
+                    key="enter",
+                    reasoning="우하단 '생산 품목' 알림을 열어 생산 선택 화면으로 진입",
+                    task_status="in_progress",
+                )
+            memory.begin_stage("production_entry")
+            return self._plan_generic_fallback_action(
+                provider,
+                pil_image,
+                memory,
+                normalizing_range=normalizing_range,
+                high_level_strategy=high_level_strategy,
+                recent_actions=recent_actions,
+                hitl_directive=hitl_directive,
+                img_config=img_config,
+                extra_note=(
+                    "지금은 production entry 단계다. 생산 선택 팝업 또는 배치 화면으로 진입하기 위한 "
+                    "가장 안전한 단일 action만 수행해. 아직 목록 스캔/스크롤/품목 선택은 하지 마."
+                ),
+            )
+
+        if memory.branch == self._LIST_BRANCH:
+            if memory.current_stage == self._HOVER_SCROLL_STAGE:
+                return self._build_anchor_move_action(
+                    memory,
+                    stage_name=self._HOVER_SCROLL_STAGE,
+                    reason="생산 목록 패널 중앙으로 커서를 먼저 이동해 hover를 고정",
+                )
+
+            if memory.current_stage == self._SCROLL_DOWN_STAGE:
+                memory.begin_stage(self._SCROLL_DOWN_STAGE)
+                return self._build_anchor_scroll_action(
+                    memory,
+                    direction="down",
+                    reason="hover된 생산 목록 패널 중앙에서 아래로 스크롤해 숨은 선택지를 확인",
+                )
+
+            best_choice = memory.get_best_choice()
+            if best_choice is not None and not best_choice.visible_now:
+                if memory.current_stage == self._RESTORE_HOVER_STAGE:
+                    return self._build_anchor_move_action(
+                        memory,
+                        stage_name=self._RESTORE_HOVER_STAGE,
+                        reason=(
+                            f"선택한 생산 품목 '{best_choice.label}' 을 다시 찾기 전에 생산 목록 패널 중앙 hover를 고정"
+                        ),
+                    )
+                if memory.current_stage == self._RESTORE_SCROLL_STAGE:
+                    return self._build_restore_scroll_action(memory)
+                return self._build_anchor_move_action(
+                    memory,
+                    stage_name=self._RESTORE_HOVER_STAGE,
+                    reason=f"선택한 생산 품목 '{best_choice.label}' 을 다시 찾기 전에 생산 목록 패널 중앙 hover를 고정",
+                )
+
+        return super().plan_action(
+            provider,
+            pil_image,
+            memory,
+            normalizing_range=normalizing_range,
+            high_level_strategy=high_level_strategy,
+            recent_actions=recent_actions,
+            hitl_directive=hitl_directive,
+            img_config=img_config,
+        )
+
+    def should_verify_action_without_ui_change(self, memory: ShortTermMemory, action: AgentAction) -> bool:
+        """Treat hover-only cursor moves as successful even when screenshots do not change."""
+        if action.action == "move":
+            return True
+        return super().should_verify_action_without_ui_change(memory, action)
+
+    def verify_action_success(
+        self,
+        provider: BaseVLMProvider,
+        pil_image,
+        memory: ShortTermMemory,
+        action: AgentAction,
+        *,
+        img_config=None,
+    ) -> SemanticVerifyResult:
+        """Cursor-only hover moves are intentional non-visual actions."""
+        if action.action == "move":
+            return SemanticVerifyResult(handled=True, passed=True, reason="hover move is non-visual by design")
+        return super().verify_action_success(provider, pil_image, memory, action, img_config=img_config)
+
+    def resolve_action(self, action: AgentAction, memory: ShortTermMemory) -> AgentAction:
+        """Keep city-production scrolls bound to a plausible right-side list anchor."""
+        if action.action == "scroll":
+            anchor = self._get_runtime_scroll_anchor(memory)
+            if not anchor.contains(action.x, action.y) or (action.x == 0 and action.y == 0):
+                action.x = anchor.x
+                action.y = anchor.y
+            return action
+        return super().resolve_action(action, memory)
+
+    def on_action_success(self, memory: ShortTermMemory, action: AgentAction) -> None:
+        """Advance deterministic hover/scroll stages for city production."""
+        if action.action == "move":
+            if memory.current_stage == self._HOVER_SCROLL_STAGE:
+                memory.begin_stage(self._SCROLL_DOWN_STAGE)
+                return
+            if memory.current_stage == self._RESTORE_HOVER_STAGE:
+                memory.begin_stage(self._RESTORE_SCROLL_STAGE)
+                return
+
+        if (
+            memory.branch == self._PLACEMENT_BRANCH
+            and memory.current_stage == self._PLACEMENT_STAGE
+            and action.action in {"click", "double_click"}
+        ):
+            memory.begin_stage(self._PLACEMENT_CONFIRM_STAGE)
+            return
+
+        if action.action == "scroll":
+            if memory.current_stage == self._SCROLL_DOWN_STAGE:
+                memory.register_choice_scroll(direction="down")
+                memory.begin_stage("observe_choices")
+                return
+            if memory.current_stage == self._RESTORE_SCROLL_STAGE:
+                memory.begin_stage("observe_choices")
+                return
+
+
+class CultureDecisionProcess(ScriptedMultiStepProcess):
+    """Culture flow with an explicit lower-right notification entry stage."""
+
+    _ENTRY_SUBSTEP = "culture_entry_done"
+
+    def initialize(self, memory: ShortTermMemory) -> None:
+        if not memory.current_stage:
+            memory.begin_stage("culture_entry")
+
+    def build_stage_note(self, memory: ShortTermMemory) -> str:
+        if self._ENTRY_SUBSTEP not in memory.completed_substeps:
+            return (
+                "현재 stage: culture_entry\n"
+                "- 사회 제도 트리/선택 화면이 실제로 열렸는지 먼저 확인해.\n"
+                "- 우하단 '사회 제도 선택' 알림만 보이면 press enter로 진입해.\n"
+                "- 아직 제도 선택을 하지 마."
+            )
+        return "현재 멀티스텝 stage: direct_culture_select\n- 사회 제도 화면이 열린 상태다. 전략에 맞는 제도를 선택해."
+
+    def _culture_screen_state(self, provider: BaseVLMProvider, pil_image, *, img_config=None) -> dict | None:
+        prompt = (
+            "너는 문명6 사회 제도 진입 상태 판별기야. 현재 화면이 실제 제도 선택 화면인지 여부만 판단해.\n"
+            'JSON만 출력: {"culture_screen_ready": true/false,'
+            ' "notification_visible": true/false, "reasoning": "짧은 이유"}\n'
+            "- 사회 제도 트리 또는 제도 선택 팝업이 실제로 보이면 culture_screen_ready=true.\n"
+            "- 우하단 '사회 제도 선택' 알림만 보이고 제도 트리가 안 열렸으면 culture_screen_ready=false.\n"
+            "- 우하단 '사회 제도 선택' 알림이 분명히 보이면 notification_visible=true.\n"
+        )
+        try:
+            return _analyze_structured_json(provider, pil_image, prompt, img_config=img_config, max_tokens=256)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Culture entry check failed: %s", exc)
+            return None
+
+    def plan_action(
+        self,
+        provider: BaseVLMProvider,
+        pil_image,
+        memory: ShortTermMemory,
+        *,
+        normalizing_range: int,
+        high_level_strategy: str,
+        recent_actions: str,
+        hitl_directive: str | None,
+        img_config=None,
+    ) -> AgentAction | list[AgentAction] | StageTransition | None:
+        if self._ENTRY_SUBSTEP not in memory.completed_substeps:
+            state = self._culture_screen_state(provider, pil_image, img_config=img_config)
+            if state and bool(state.get("culture_screen_ready", False)):
+                memory.mark_substep(self._ENTRY_SUBSTEP)
+                memory.begin_stage("direct_culture_select")
+                return StageTransition(stage="direct_culture_select", reason="culture screen ready")
+            if state and bool(state.get("notification_visible", False)):
+                memory.begin_stage("culture_entry")
+                return AgentAction(
+                    action="press",
+                    key="enter",
+                    reasoning="우하단 '사회 제도 선택' 알림을 열어 제도 선택 화면으로 진입",
+                    task_status="in_progress",
+                )
+            memory.begin_stage("culture_entry")
+        else:
+            memory.begin_stage("direct_culture_select")
+        return super().plan_action(
+            provider,
+            pil_image,
+            memory,
+            normalizing_range=normalizing_range,
+            high_level_strategy=high_level_strategy,
+            recent_actions=recent_actions,
+            hitl_directive=hitl_directive,
+            img_config=img_config,
+        )
+
+
+class ResearchSelectProcess(ScriptedMultiStepProcess):
+    """Research selection with an explicit lower-right notification entry stage."""
+
+    _ENTRY_SUBSTEP = "research_entry_done"
+
+    def initialize(self, memory: ShortTermMemory) -> None:
+        if not memory.current_stage:
+            memory.begin_stage("research_entry")
+
+    def build_stage_note(self, memory: ShortTermMemory) -> str:
+        if self._ENTRY_SUBSTEP not in memory.completed_substeps:
+            return (
+                "현재 stage: research_entry\n"
+                "- 기술 트리/연구 선택 팝업이 실제로 열렸는지 먼저 확인해.\n"
+                "- 우하단 '연구 선택' 알림만 보이면 press enter로 진입해.\n"
+                "- 아직 기술 선택을 하지 마."
+            )
         return (
             "현재 멀티스텝 stage: direct_research_select\n"
             "- research selection은 별도 observation 없이 바로 적절한 연구를 선택한다."
+        )
+
+    def _research_screen_state(self, provider: BaseVLMProvider, pil_image, *, img_config=None) -> dict | None:
+        prompt = (
+            "너는 문명6 연구 진입 상태 판별기야. 현재 화면이 실제 연구 선택 화면인지 여부만 판단해.\n"
+            'JSON만 출력: {"research_screen_ready": true/false,'
+            ' "notification_visible": true/false, "reasoning": "짧은 이유"}\n'
+            "- 기술 트리 또는 연구 선택 팝업이 실제로 보이면 research_screen_ready=true.\n"
+            "- 우하단 '연구 선택' 알림만 보이고 기술 트리가 안 열렸으면 research_screen_ready=false.\n"
+            "- 우하단 '연구 선택' 알림이 분명히 보이면 notification_visible=true.\n"
+        )
+        try:
+            return _analyze_structured_json(provider, pil_image, prompt, img_config=img_config, max_tokens=256)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Research entry check failed: %s", exc)
+            return None
+
+    def plan_action(
+        self,
+        provider: BaseVLMProvider,
+        pil_image,
+        memory: ShortTermMemory,
+        *,
+        normalizing_range: int,
+        high_level_strategy: str,
+        recent_actions: str,
+        hitl_directive: str | None,
+        img_config=None,
+    ) -> AgentAction | list[AgentAction] | StageTransition | None:
+        if self._ENTRY_SUBSTEP not in memory.completed_substeps:
+            state = self._research_screen_state(provider, pil_image, img_config=img_config)
+            if state and bool(state.get("research_screen_ready", False)):
+                memory.mark_substep(self._ENTRY_SUBSTEP)
+                memory.begin_stage("direct_research_select")
+                return StageTransition(stage="direct_research_select", reason="research screen ready")
+            if state and bool(state.get("notification_visible", False)):
+                memory.begin_stage("research_entry")
+                return AgentAction(
+                    action="press",
+                    key="enter",
+                    reasoning="우하단 '연구 선택' 알림을 열어 기술 선택 화면으로 진입",
+                    task_status="in_progress",
+                )
+            memory.begin_stage("research_entry")
+        else:
+            memory.begin_stage("direct_research_select")
+        return super().plan_action(
+            provider,
+            pil_image,
+            memory,
+            normalizing_range=normalizing_range,
+            high_level_strategy=high_level_strategy,
+            recent_actions=recent_actions,
+            hitl_directive=hitl_directive,
+            img_config=img_config,
         )
 
 
@@ -2316,11 +3087,7 @@ def get_multi_step_process(primitive_name: str, completion_condition: str = "") 
             target_description="왼쪽 종교관 팝업의 종교관 박스와 '종교관 세우기' 직전 리스트",
         )
     if primitive_name == "city_production_primitive":
-        return ObservationAssistedProcess(
-            primitive_name,
-            completion_condition,
-            target_description="생산 품목 선택 팝업의 스크롤 가능한 생산 목록",
-        )
+        return CityProductionProcess(primitive_name, completion_condition)
     if primitive_name == "voting_primitive":
         return ObservationAssistedProcess(
             primitive_name,
@@ -2331,4 +3098,6 @@ def get_multi_step_process(primitive_name: str, completion_condition: str = "") 
         return PolicyProcess(primitive_name, completion_condition)
     if primitive_name == "research_select_primitive":
         return ResearchSelectProcess(primitive_name, completion_condition)
+    if primitive_name == "culture_decision_primitive":
+        return CultureDecisionProcess(primitive_name, completion_condition)
     return ScriptedMultiStepProcess(primitive_name, completion_condition)

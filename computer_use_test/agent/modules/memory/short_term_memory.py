@@ -78,6 +78,8 @@ class ChoiceCatalogState:
     scroll_anchor: ScrollAnchor | None = None
     end_reached: bool = False
     last_scroll_direction: str = "down"
+    last_new_candidate_count: int = 0
+    downward_scan_scrolls: int = 0
 
 
 @dataclass
@@ -184,6 +186,10 @@ class FailureCheckpoint:
     fallback_return_stage: str = ""
     fallback_return_key: str = ""
     last_semantic_verify: str = ""
+    last_observation_summary: str = ""
+    last_observation_anchor: str = ""
+    last_planned_action: str = ""
+    last_executed_action: str = ""
 
 
 @dataclass
@@ -207,6 +213,10 @@ class ShortTermMemory:
     fallback_return_key: str = ""
     last_semantic_verify: str = ""
     last_stable_checkpoint: FailureCheckpoint | None = None
+    last_observation_summary: str = ""
+    last_observation_anchor: str = ""
+    last_planned_action: str = ""
+    last_executed_action: str = ""
 
     def start_task(
         self,
@@ -251,6 +261,10 @@ class ShortTermMemory:
         self.fallback_return_key = ""
         self.last_semantic_verify = ""
         self.last_stable_checkpoint = None
+        self.last_observation_summary = ""
+        self.last_observation_anchor = ""
+        self.last_planned_action = ""
+        self.last_executed_action = ""
 
     def begin_stage(self, stage: str) -> None:
         """Update the current stage label."""
@@ -278,6 +292,24 @@ class ShortTermMemory:
             )
         )
         logger.debug("STM step %s (%s): %s", self.step_count, stage or self.current_stage, action_summary)
+
+    def set_last_observation_debug(
+        self,
+        summary: str,
+        *,
+        scroll_anchor: dict | ScrollAnchor | None = None,
+    ) -> None:
+        """Persist the latest observation summary for prompts and Rich debug."""
+        self.last_observation_summary = summary.strip()
+        self.last_observation_anchor = self._format_scroll_anchor(scroll_anchor)
+
+    def set_last_planned_action_debug(self, summary: str) -> None:
+        """Persist the latest planned action summary for prompts and Rich debug."""
+        self.last_planned_action = summary.strip()
+
+    def set_last_executed_action_debug(self, summary: str) -> None:
+        """Persist the latest executed action summary for prompts and Rich debug."""
+        self.last_executed_action = summary.strip()
 
     def recent_actions_prompt(self) -> str:
         """Summarize recent task-local actions."""
@@ -321,6 +353,7 @@ class ShortTermMemory:
                 self.choice_catalog.scroll_anchor = scroll_anchor
 
         current_ids: set[str] = set()
+        new_candidate_count = 0
         for raw in visible_options:
             label = str(raw.get("label", "")).strip()
             if not label:
@@ -332,6 +365,7 @@ class ShortTermMemory:
             if candidate is None:
                 candidate = ChoiceCandidate(id=option_id, label=label)
                 self.choice_catalog.candidates[option_id] = candidate
+                new_candidate_count += 1
 
             candidate.label = label
             candidate.visible_now = True
@@ -347,6 +381,7 @@ class ShortTermMemory:
             metadata = {
                 "disabled": bool(raw.get("disabled", False)),
                 "selected": bool(raw.get("selected", False)),
+                "built": bool(raw.get("built", raw.get("selected", False))),
                 "note": str(raw.get("note", "")).strip(),
             }
             metadata = {k: v for k, v in metadata.items() if v not in ("", None)}
@@ -359,11 +394,15 @@ class ShortTermMemory:
                 candidate.visible_now = False
                 candidate.position_hint = "above" if scroll_direction == "down" else "below"
 
+        self.choice_catalog.last_new_candidate_count = new_candidate_count
+
         if end_of_list:
             self.choice_catalog.end_reached = True
             for option_id, candidate in self.choice_catalog.candidates.items():
                 if option_id not in current_ids and candidate.position_hint == "unknown":
                     candidate.position_hint = "above"
+        elif scroll_direction == "down" and self.choice_catalog.downward_scan_scrolls > 0 and new_candidate_count == 0:
+            self.choice_catalog.end_reached = True
 
         self.capture_checkpoint()
 
@@ -384,6 +423,10 @@ class ShortTermMemory:
         if option_id is None:
             return
 
+        candidate = self.choice_catalog.candidates.get(option_id)
+        if candidate is None or not self._candidate_is_selectable(candidate):
+            return
+
         self.choice_catalog.best_option_id = option_id
         self.choice_catalog.best_option_reason = reason
 
@@ -392,7 +435,63 @@ class ShortTermMemory:
         option_id = self.choice_catalog.best_option_id
         if not option_id:
             return None
-        return self.choice_catalog.candidates.get(option_id)
+        candidate = self.choice_catalog.candidates.get(option_id)
+        if candidate is None or not self._candidate_is_selectable(candidate):
+            return None
+        return candidate
+
+    @staticmethod
+    def _candidate_is_selectable(candidate: ChoiceCandidate) -> bool:
+        """Checked/disabled catalog entries are not valid final choices."""
+        return (
+            not bool(candidate.metadata.get("disabled"))
+            and not bool(candidate.metadata.get("selected"))
+            and not bool(candidate.metadata.get("built"))
+        )
+
+    def register_choice_scroll(self, *, direction: str) -> None:
+        """Persist successful scan scroll direction for later observation heuristics."""
+        self.choice_catalog.last_scroll_direction = direction
+        if direction == "down":
+            self.choice_catalog.downward_scan_scrolls += 1
+
+    def choice_catalog_decision_max_tokens(self) -> int:
+        """Return a token budget sized for whole-catalog decision prompts."""
+        candidate_count = len(self.choice_catalog.candidates)
+        return min(4096, max(1024, 512 + candidate_count * 96))
+
+    @staticmethod
+    def _format_choice_candidate_line(candidate: ChoiceCandidate, *, include_id: bool) -> str:
+        flags = []
+        if candidate.visible_now:
+            flags.append("보임")
+        elif candidate.position_hint != "unknown":
+            flags.append(candidate.position_hint)
+        if candidate.metadata.get("disabled"):
+            flags.append("비활성")
+        if candidate.metadata.get("selected"):
+            flags.append("체크됨")
+        if candidate.metadata.get("built"):
+            flags.append("이미 지음")
+        note = str(candidate.metadata.get("note", "")).strip()
+        suffix = f" / {note}" if note else ""
+        flag_text = f" ({', '.join(flags)})" if flags else ""
+        if include_id:
+            return f"- id={candidate.id} | label={candidate.label}{flag_text}{suffix}"
+        return f"- {candidate.label}{flag_text}{suffix}"
+
+    def choice_catalog_decision_prompt(self) -> str:
+        """Return the full choice catalog with stable ids for memory-only decision calls."""
+        if not self.choice_catalog.enabled:
+            return "choice catalog disabled"
+
+        lines = [
+            "[choice_catalog] 확인한 후보 "
+            f"{len(self.choice_catalog.candidates)}개 / 목록끝={self.choice_catalog.end_reached}"
+        ]
+        for candidate in self.choice_catalog.candidates.values():
+            lines.append(self._format_choice_candidate_line(candidate, include_id=True))
+        return "\n".join(lines)
 
     def get_scroll_anchor(self) -> ScrollAnchor | None:
         """Return the saved hover anchor for scrollable popups."""
@@ -413,6 +512,10 @@ class ShortTermMemory:
             fallback_return_stage=self.fallback_return_stage,
             fallback_return_key=self.fallback_return_key,
             last_semantic_verify=self.last_semantic_verify,
+            last_observation_summary=self.last_observation_summary,
+            last_observation_anchor=self.last_observation_anchor,
+            last_planned_action=self.last_planned_action,
+            last_executed_action=self.last_executed_action,
         )
 
     def restore_last_checkpoint(self) -> bool:
@@ -433,6 +536,10 @@ class ShortTermMemory:
         self.fallback_return_stage = checkpoint.fallback_return_stage
         self.fallback_return_key = checkpoint.fallback_return_key
         self.last_semantic_verify = checkpoint.last_semantic_verify
+        self.last_observation_summary = checkpoint.last_observation_summary
+        self.last_observation_anchor = checkpoint.last_observation_anchor
+        self.last_planned_action = checkpoint.last_planned_action
+        self.last_executed_action = checkpoint.last_executed_action
         self.failure_count = 0
         logger.debug("STM restored checkpoint for %s at stage=%s", self.primitive_name, self.current_stage)
         return True
@@ -1075,25 +1182,26 @@ class ShortTermMemory:
             candidate_count = len(self.choice_catalog.candidates)
             best = self.get_best_choice()
             lines.append(f"[choice_catalog] 확인한 후보 {candidate_count}개 / 목록끝={self.choice_catalog.end_reached}")
+            if self.choice_catalog.downward_scan_scrolls:
+                lines.append(
+                    f"scan_scrolls={self.choice_catalog.downward_scan_scrolls} / "
+                    f"last_new={self.choice_catalog.last_new_candidate_count}"
+                )
+            if self.last_observation_summary:
+                lines.append(f"obs_summary={self.last_observation_summary[:180]}")
+            if self.last_observation_anchor:
+                lines.append(f"scroll_anchor={self.last_observation_anchor}")
+            if self.last_planned_action:
+                lines.append(f"planned_action={self.last_planned_action[:180]}")
+            if self.last_executed_action:
+                lines.append(f"executed_action={self.last_executed_action[:180]}")
             if best is not None:
                 best_note = self.choice_catalog.best_option_reason or "전략상 최적"
                 lines.append(f"최종 선택 후보: {best.label} ({best.position_hint}) - {best_note}")
 
-            display_candidates = list(self.choice_catalog.candidates.values())[-8:]
+            display_candidates = list(self.choice_catalog.candidates.values())
             for candidate in display_candidates:
-                flags = []
-                if candidate.visible_now:
-                    flags.append("보임")
-                elif candidate.position_hint != "unknown":
-                    flags.append(candidate.position_hint)
-                if candidate.metadata.get("disabled"):
-                    flags.append("비활성")
-                if candidate.metadata.get("selected"):
-                    flags.append("선택됨")
-                note = str(candidate.metadata.get("note", "")).strip()
-                suffix = f" / {note}" if note else ""
-                flag_text = f" ({', '.join(flags)})" if flags else ""
-                lines.append(f"- {candidate.label}{flag_text}{suffix}")
+                lines.append(self._format_choice_candidate_line(candidate, include_id=False))
 
         if self.policy_state.enabled:
             current_tab = self.get_policy_current_tab_name() or "-"
@@ -1208,3 +1316,14 @@ class ShortTermMemory:
             right=right,
             bottom=bottom,
         )
+
+    def _format_scroll_anchor(self, scroll_anchor: dict | ScrollAnchor | None) -> str:
+        """Return a compact one-line debug summary for a scroll anchor."""
+        anchor: ScrollAnchor | None = None
+        if isinstance(scroll_anchor, dict):
+            anchor = self._build_scroll_anchor(scroll_anchor)
+        elif isinstance(scroll_anchor, ScrollAnchor):
+            anchor = scroll_anchor
+        if anchor is None:
+            return ""
+        return f"({anchor.x},{anchor.y}) [{anchor.left},{anchor.top}]→[{anchor.right},{anchor.bottom}]"

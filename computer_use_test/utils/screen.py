@@ -225,10 +225,10 @@ def execute_action(
     logger.debug(f"Action: {action_type} | Reasoning: {reasoning}")
 
     # Validate action type
-    if not action_type or action_type not in ["click", "double_click", "drag", "scroll", "press", "type"]:
+    if not action_type or action_type not in ["click", "double_click", "drag", "scroll", "move", "press", "type"]:
         logger.error(f"Invalid or empty action type: '{action_type}'")
         logger.error(f"Full action object: {action}")
-        logger.error("Valid action types are: click, double_click, drag, scroll, press, type")
+        logger.error("Valid action types are: click, double_click, drag, scroll, move, press, type")
         return
 
     coord_space = getattr(action, "coord_space", "normalized") or "normalized"
@@ -337,6 +337,23 @@ def execute_action(
         )
         pyautogui.moveTo(real_x, real_y, duration=0.2)
         pyautogui.scroll(action.scroll_amount)
+
+    elif action_type == "move":
+        if coord_space == "absolute":
+            real_x = action.x
+            real_y = action.y
+        else:
+            real_x = norm_to_real(action.x, screen_w, normalizing_range) + x_offset
+            real_y = norm_to_real(action.y, screen_h, normalizing_range) + y_offset
+        logger.debug(
+            "Move: %s(%s, %s) -> real(%s, %s)",
+            coord_space,
+            action.x,
+            action.y,
+            real_x,
+            real_y,
+        )
+        pyautogui.moveTo(real_x, real_y, duration=0.2)
 
     elif action_type == "press":
         key = action.key

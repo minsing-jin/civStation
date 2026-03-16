@@ -38,3 +38,29 @@ def test_execute_action_absolute_click_bypasses_normalized_conversion(monkeypatc
         ("moveTo", (1234, 567), {"duration": 0.5}),
         ("click", (), {"button": "left"}),
     ]
+
+
+def test_execute_action_move_only_moves_cursor(monkeypatch):
+    calls: list[tuple[str, tuple, dict]] = []
+
+    monkeypatch.setattr(
+        "computer_use_test.utils.screen.pyautogui.moveTo",
+        lambda *args, **kwargs: calls.append(("moveTo", args, kwargs)),
+    )
+
+    execute_action(
+        AgentAction(
+            action="move",
+            x=600,
+            y=300,
+        ),
+        screen_w=1600,
+        screen_h=900,
+        normalizing_range=1000,
+        x_offset=0,
+        y_offset=0,
+    )
+
+    assert calls == [
+        ("moveTo", (960, 270), {"duration": 0.2}),
+    ]

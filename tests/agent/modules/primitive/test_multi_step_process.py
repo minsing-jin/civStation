@@ -4,7 +4,7 @@ import json
 
 from PIL import Image
 
-from computer_use_test.agent.modules.memory.short_term_memory import ShortTermMemory
+from computer_use_test.agent.modules.memory.short_term_memory import ChoiceCandidate, ShortTermMemory
 from computer_use_test.agent.modules.primitive.multi_step_process import (
     _POLICY_RIGHT_CARD_LIST_RATIOS,
     _POLICY_RIGHT_TAB_BAR_RATIOS,
@@ -12,8 +12,9 @@ from computer_use_test.agent.modules.primitive.multi_step_process import (
     StageTransition,
     get_multi_step_process,
 )
-from computer_use_test.agent.modules.router.primitive_registry import get_primitive_prompt
+from computer_use_test.agent.modules.router.primitive_registry import PRIMITIVE_REGISTRY, get_primitive_prompt
 from computer_use_test.utils.llm_provider.base import BaseVLMProvider, VLMResponse
+from computer_use_test.utils.llm_provider.parser import AgentAction
 
 
 class FakeProvider(BaseVLMProvider):
@@ -22,8 +23,12 @@ class FakeProvider(BaseVLMProvider):
         self.responses = list(responses)
         self.last_text = ""
         self.last_pil_size = None
+        self.last_max_tokens = None
+        self.last_use_thinking = None
 
     def _send_to_api(self, content_parts, temperature=0.7, max_tokens=8192, use_thinking=True) -> VLMResponse:
+        self.last_max_tokens = max_tokens
+        self.last_use_thinking = use_thinking
         for part in content_parts:
             if isinstance(part, dict) and "text" in part:
                 self.last_text = str(part["text"])
@@ -116,7 +121,8 @@ class TestObservationAssistedProcess:
             memory,
         )
         assert action is not None
-        assert action.x == 600
+        assert action.x >= 820
+        assert action.x <= 850
         assert action.y == 500
 
     def test_observer_prompt_uses_passed_normalizing_range_for_anchor_contract(self):
@@ -146,8 +152,151 @@ class TestObservationAssistedProcess:
         assert observation is not None
         assert "0-777 normalized coordinates" in provider.last_text
 
+    def test_decide_from_memory_prompt_includes_earliest_candidates(self):
+        process = get_multi_step_process("religion_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("religion_primitive", enable_choice_catalog=True)
+        process.initialize(memory)
+        provider = FakeProvider([json.dumps({"best_option_id": "후보0", "reason": "처음 본 후보도 고려"})])
+
+        for idx in range(10):
+            memory.remember_choices(
+                [{"id": f"후보{idx}", "label": f"후보{idx}"}],
+                end_of_list=idx == 9,
+                scroll_direction="down",
+            )
+
+        decided = process.decide_from_memory(
+            provider,
+            memory,
+            high_level_strategy="문화 승리",
+        )
+
+        assert decided is True
+        assert "id=후보0" in provider.last_text
+        assert "후보0" in provider.last_text
+        assert "후보9" in provider.last_text
+
+    def test_decide_from_memory_uses_best_option_id_not_label_text(self):
+        process = get_multi_step_process("religion_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("religion_primitive", enable_choice_catalog=True)
+        process.initialize(memory)
+        memory.remember_choices(
+            [
+                {"id": "cand_old", "label": "알렉산드리아 도서관"},
+                {"id": "cand_new", "label": "개척자"},
+            ],
+            end_of_list=True,
+            scroll_direction="down",
+        )
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "best_option_id": "cand_old",
+                        "best_option_label": "알렉산드리아 도서관(불가사의)",
+                        "reason": "핵심 선택",
+                    }
+                )
+            ]
+        )
+
+        decided = process.decide_from_memory(
+            provider,
+            memory,
+            high_level_strategy="과학 승리",
+        )
+
+        assert decided is True
+        assert memory.get_best_choice() is not None
+        assert memory.get_best_choice().id == "cand_old"
+
+    def test_decide_from_memory_scales_max_tokens_with_candidate_count(self):
+        process = get_multi_step_process("religion_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("religion_primitive", enable_choice_catalog=True)
+        process.initialize(memory)
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "best_option_id": "후보0",
+                        "best_option_label": "후보0",
+                        "reason": "긴 목록",
+                    }
+                )
+            ]
+        )
+
+        for idx in range(26):
+            memory.remember_choices(
+                [{"id": f"후보{idx}", "label": f"후보{idx}"}],
+                end_of_list=idx == 25,
+                scroll_direction="down",
+            )
+
+        decided = process.decide_from_memory(
+            provider,
+            memory,
+            high_level_strategy="문화 승리",
+        )
+
+        assert decided is True
+        assert provider.last_max_tokens is not None
+        assert provider.last_max_tokens > 512
+
+    def test_decide_from_memory_calls_provider_without_thinking(self):
+        process = get_multi_step_process("religion_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("religion_primitive", enable_choice_catalog=True)
+        process.initialize(memory)
+        memory.remember_choices(
+            [{"id": "cand1", "label": "기념비"}],
+            end_of_list=True,
+            scroll_direction="down",
+        )
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "best_option_id": "cand1",
+                        "best_option_label": "기념비",
+                        "reason": "빠른 선택",
+                    }
+                )
+            ]
+        )
+
+        decided = process.decide_from_memory(
+            provider,
+            memory,
+            high_level_strategy="과학 승리",
+        )
+
+        assert decided is True
+        assert provider.last_use_thinking is False
+
 
 class TestPromptUpdates:
+    def test_unit_ops_prompt_forbids_moving_onto_occupied_tiles(self):
+        prompt = get_primitive_prompt("unit_ops_primitive")
+        assert "빈 타일로만" in prompt
+        assert "다른 유닛이 서 있는 타일" in prompt
+        assert "공격일 때만" in prompt
+
+    def test_governor_prompt_handles_lower_right_governor_entry(self):
+        prompt = get_primitive_prompt("governor_primitive")
+        assert "우하단" in prompt
+        assert "총독 타이틀" in prompt
+        assert 'press "enter"' in prompt
+
+    def test_governor_registry_criteria_includes_lower_right_governor_entry(self):
+        criteria = PRIMITIVE_REGISTRY["governor_primitive"]["criteria"]
+        assert "우하단" in criteria
+        assert "총독 타이틀" in criteria
+        assert "펜" in criteria
+
     def test_policy_prompt_contains_two_entry_branches(self):
         prompt = get_primitive_prompt("policy_primitive")
         assert "사회제도 완성" in prompt
@@ -160,6 +309,552 @@ class TestPromptUpdates:
     def test_popup_prompt_handles_policy_change_popup(self):
         prompt = get_primitive_prompt("popup_primitive")
         assert "정책변경" in prompt
+
+    def test_popup_prompt_does_not_own_lower_right_screen_entry_buttons(self):
+        prompt = get_primitive_prompt("popup_primitive")
+        assert "우하단 '연구 선택'" not in prompt
+        assert "우하단 '생산 품목'" not in prompt
+        assert "우하단 '사회 제도 선택'" not in prompt
+
+    def test_popup_registry_criteria_only_keeps_next_turn_lower_right_button(self):
+        criteria = PRIMITIVE_REGISTRY["popup_primitive"]["criteria"]
+        assert "다음 턴" in criteria
+        assert "연구 선택" not in criteria
+        assert "생산 품목" not in criteria
+        assert "사회 제도 선택" not in criteria
+
+
+class TestEntryGatedProcesses:
+    def test_research_process_uses_entry_action_before_tree_is_ready(self):
+        process = get_multi_step_process("research_select_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("research_select_primitive")
+        process.initialize(memory)
+        provider = FakeProvider([json.dumps({"research_screen_ready": False, "notification_visible": True})])
+
+        action = process.plan_action(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert action is not None
+        assert action.action == "press"
+        assert action.key == "enter"
+        assert memory.current_stage == "research_entry"
+
+    def test_culture_process_uses_entry_action_before_tree_is_ready(self):
+        process = get_multi_step_process("culture_decision_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("culture_decision_primitive")
+        process.initialize(memory)
+        provider = FakeProvider([json.dumps({"culture_screen_ready": False, "notification_visible": True})])
+
+        action = process.plan_action(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="문화 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert action is not None
+        assert action.action == "press"
+        assert action.key == "enter"
+        assert memory.current_stage == "culture_entry"
+
+    def test_city_production_process_requires_entry_before_observation(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        process.initialize(memory)
+
+        assert process.should_observe(memory) is False
+
+    def test_city_production_process_enters_list_branch_before_observation(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        process.initialize(memory)
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "production_mode": "list",
+                        "production_screen_ready": True,
+                        "notification_visible": False,
+                    }
+                )
+            ]
+        )
+
+        action = process.plan_action(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert isinstance(action, StageTransition)
+        assert action.stage == "observe_choices"
+        assert memory.current_stage == "observe_choices"
+        assert memory.branch == "choice_list"
+        assert process.should_observe(memory) is True
+
+    def test_city_production_process_enters_placement_branch_without_observation(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        process.initialize(memory)
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "production_mode": "placement",
+                        "production_screen_ready": True,
+                        "notification_visible": False,
+                    }
+                ),
+                json.dumps(
+                    {
+                        "action": "click",
+                        "x": 640,
+                        "y": 730,
+                        "button": "right",
+                        "reasoning": "초록색 타일에 특수지구 배치",
+                        "task_status": "in_progress",
+                    }
+                ),
+            ]
+        )
+
+        action = process.plan_action(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert isinstance(action, AgentAction)
+        assert action.action == "click"
+        assert memory.current_stage == "production_place"
+        assert memory.branch == "placement_map"
+        assert process.should_observe(memory) is False
+
+    def test_city_production_observe_repairs_missing_anchor_with_locator(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        process.initialize(memory)
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("choice_list")
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "visible_options": [{"label": "기념비"}, {"label": "개척자"}],
+                        "end_of_list": False,
+                        "scroll_anchor": None,
+                        "reasoning": "생산 목록 상단이 보인다",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "scroll_anchor": {
+                            "x": 760,
+                            "y": 510,
+                            "left": 620,
+                            "top": 100,
+                            "right": 900,
+                            "bottom": 920,
+                        },
+                        "reasoning": "세로 생산 목록 중앙",
+                    }
+                ),
+            ]
+        )
+
+        observation = process.observe(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+        )
+        action = process.consume_observation(memory, observation)
+
+        assert observation is not None
+        assert observation.scroll_anchor is not None
+        assert observation.scroll_anchor["x"] == 760
+        assert action is not None
+        assert action.action == "move"
+        assert action.x > observation.scroll_anchor["x"]
+        assert action.x >= 840
+        assert action.y == 510
+        assert memory.current_stage == "hover_scroll_anchor"
+        assert "obs_summary=" in memory.to_prompt_string()
+        assert "scroll_anchor=(760,510)" in memory.to_prompt_string()
+
+    def test_city_production_rejects_left_side_locator_anchor_and_falls_back_to_default(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        process.initialize(memory)
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("choice_list")
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "visible_options": [{"label": "기념비"}, {"label": "개척자"}],
+                        "end_of_list": False,
+                        "scroll_anchor": None,
+                        "reasoning": "생산 목록 상단이 보인다",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "scroll_anchor": {
+                            "x": 280,
+                            "y": 510,
+                            "left": 120,
+                            "top": 100,
+                            "right": 440,
+                            "bottom": 920,
+                        },
+                        "reasoning": "왼쪽 위 탭 쪽으로 잘못 잡힌 anchor",
+                    }
+                ),
+            ]
+        )
+
+        observation = process.observe(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+        )
+        action = process.consume_observation(memory, observation)
+        expected_anchor = process._default_list_scroll_anchor(1000)  # noqa: SLF001
+
+        assert observation is not None
+        assert observation.scroll_anchor == expected_anchor
+        assert action is not None
+        assert action.action == "move"
+        assert (action.x, action.y) == (expected_anchor["x"], expected_anchor["y"])
+        assert action.x > 500
+
+    def test_city_production_uses_safe_default_anchor_instead_of_screen_center(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        process.initialize(memory)
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("choice_list")
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "visible_options": [{"label": "기념비"}],
+                        "end_of_list": False,
+                        "scroll_anchor": None,
+                        "reasoning": "생산 목록이 보이지만 anchor 없음",
+                    }
+                ),
+                json.dumps({"scroll_anchor": None, "reasoning": "anchor를 확정하지 못함"}),
+            ]
+        )
+
+        observation = process.observe(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+        )
+        action = process.consume_observation(memory, observation)
+        expected_anchor = process._default_list_scroll_anchor(1000)  # noqa: SLF001
+
+        assert observation is not None
+        assert observation.scroll_anchor == expected_anchor
+        assert action is not None
+        assert action.action == "move"
+        assert (action.x, action.y) == (expected_anchor["x"], expected_anchor["y"])
+        assert (action.x, action.y) != (500, 500)
+
+    def test_city_production_default_anchor_targets_right_side_list_panel(self):
+        process = get_multi_step_process("city_production_primitive", "")
+
+        anchor = process._default_list_scroll_anchor(1000)  # noqa: SLF001
+
+        assert anchor["x"] > 500
+        assert anchor["left"] > 500
+        assert anchor["right"] > anchor["left"]
+
+    def test_city_production_hover_success_transitions_to_scroll_stage(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("choice_list")
+        memory.begin_stage("hover_scroll_anchor")
+        memory.remember_choices(
+            [{"label": "기념비"}],
+            end_of_list=False,
+            scroll_anchor={"x": 720, "y": 520, "left": 600, "top": 100, "right": 900, "bottom": 920},
+        )
+
+        process.on_action_success(
+            memory,
+            process.resolve_action(AgentAction(action="move", x=720, y=520), memory),
+        )
+        action = process.plan_action(
+            FakeProvider([]),
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert memory.current_stage == "scroll_down_for_hidden_choices"
+        assert action is not None
+        assert action.action == "scroll"
+        assert action.scroll_amount < 0
+        assert action.x >= 820
+        assert action.y == 520
+
+    def test_city_production_scan_completes_after_scrolled_observation_finds_no_new_choices(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("choice_list")
+
+        first_action = process.consume_observation(
+            memory,
+            ObservationBundle(
+                visible_options=[{"label": "기념비"}, {"label": "건설자"}],
+                end_of_list=False,
+                scroll_anchor={"x": 760, "y": 520, "left": 620, "top": 100, "right": 900, "bottom": 920},
+            ),
+        )
+        assert first_action is not None
+        process.on_action_success(memory, first_action)
+
+        scroll_action = process.plan_action(
+            FakeProvider([]),
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+        assert scroll_action is not None
+        process.on_action_success(memory, scroll_action)
+
+        second_action = process.consume_observation(
+            memory,
+            ObservationBundle(
+                visible_options=[{"label": "기념비"}, {"label": "건설자"}],
+                end_of_list=False,
+                scroll_anchor={"x": 760, "y": 520, "left": 620, "top": 100, "right": 900, "bottom": 920},
+            ),
+        )
+
+        assert second_action is None
+        assert memory.choice_catalog.end_reached is True
+        assert memory.current_stage == "choose_from_memory"
+
+    def test_city_production_repairs_stale_invalid_memory_anchor_before_hover_scroll(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("choice_list")
+        memory.begin_stage("hover_scroll_anchor")
+        memory.remember_choices(
+            [{"label": "기념비"}],
+            end_of_list=False,
+            scroll_anchor={"x": 280, "y": 510, "left": 120, "top": 100, "right": 440, "bottom": 920},
+        )
+
+        action = process.plan_action(
+            FakeProvider([]),
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+        expected_anchor = process._default_list_scroll_anchor(1000)  # noqa: SLF001
+
+        assert action is not None
+        assert action.action == "move"
+        assert (action.x, action.y) == (expected_anchor["x"], expected_anchor["y"])
+        assert memory.get_scroll_anchor() is not None
+        assert memory.get_scroll_anchor().x == expected_anchor["x"]
+
+    def test_city_production_restore_flow_moves_then_scrolls_up_for_hidden_best_choice(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("choice_list")
+        memory.begin_stage("choose_from_memory")
+        memory.remember_choices(
+            [{"label": "기념비"}],
+            end_of_list=True,
+            scroll_anchor={"x": 700, "y": 500, "left": 580, "top": 100, "right": 900, "bottom": 920},
+        )
+        memory.choice_catalog.candidates["개척자"] = ChoiceCandidate(
+            id="개척자",
+            label="개척자",
+            visible_now=False,
+            position_hint="above",
+        )
+        memory.set_best_choice(option_id="개척자", reason="확장 우선")
+
+        move_action = process.plan_action(
+            FakeProvider([]),
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+        assert move_action is not None
+        assert move_action.action == "move"
+        assert memory.current_stage == "restore_hover_scroll_anchor"
+
+        process.on_action_success(memory, move_action)
+
+        scroll_action = process.plan_action(
+            FakeProvider([]),
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert memory.current_stage == "restore_best_choice_visibility"
+        assert scroll_action is not None
+        assert scroll_action.action == "scroll"
+        assert scroll_action.scroll_amount > 0
+        assert scroll_action.x >= 880
+        assert scroll_action.y == 500
+
+    def test_city_production_initial_placement_screen_returns_tile_action_immediately(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        process.initialize(memory)
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "production_mode": "placement",
+                        "production_screen_ready": True,
+                        "notification_visible": False,
+                    }
+                ),
+                json.dumps(
+                    {
+                        "action": "click",
+                        "x": 640,
+                        "y": 730,
+                        "button": "right",
+                        "reasoning": "초록색 타일에 특수지구 배치",
+                        "task_status": "in_progress",
+                    }
+                ),
+            ]
+        )
+
+        action = process.plan_action(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert isinstance(action, AgentAction)
+        assert action.action == "click"
+        assert action.button == "right"
+        assert memory.current_stage == "production_place"
+        assert memory.branch == "placement_map"
+
+    def test_city_production_placement_tile_click_transitions_to_confirmation_stage(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("placement_map")
+        memory.begin_stage("production_place")
+
+        process.on_action_success(
+            memory,
+            AgentAction(
+                action="click",
+                x=640,
+                y=730,
+                button="right",
+                reasoning="건설할 타일 선택",
+                task_status="in_progress",
+            ),
+        )
+
+        assert memory.current_stage == "production_place_confirm"
+
+    def test_city_production_restore_observation_returns_to_selection_when_best_choice_visible(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("choice_list")
+        memory.begin_stage("observe_choices")
+        memory.choice_catalog.end_reached = True
+        memory.choice_catalog.last_scroll_direction = "up"
+        memory.choice_catalog.candidates["개척자"] = ChoiceCandidate(
+            id="개척자",
+            label="개척자",
+            visible_now=False,
+            position_hint="above",
+        )
+        memory.set_best_choice(option_id="개척자", reason="확장 우선")
+
+        action = process.consume_observation(
+            memory,
+            ObservationBundle(
+                visible_options=[{"id": "개척자", "label": "개척자"}],
+                end_of_list=False,
+                scroll_anchor={"x": 700, "y": 500, "left": 580, "top": 100, "right": 900, "bottom": 920},
+            ),
+        )
+
+        assert action is None
+        assert memory.current_stage == "select_from_memory"
+        assert memory.get_best_choice() is not None
+        assert memory.get_best_choice().visible_now is True
 
 
 class TestPolicyProcess:
