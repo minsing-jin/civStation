@@ -112,6 +112,14 @@ POLICY_TAB_CHECK_FAST = ImagePipelineConfig(
     jpeg_quality=65,
 )
 
+CITY_PRODUCTION_FOLLOWUP_FAST = ImagePipelineConfig(
+    max_long_edge=640,
+    ui_filter_mode="ui_contrast",
+    color_policy="preserve",
+    encode_mode="none",
+    jpeg_quality=60,
+)
+
 PRESETS: dict[str, ImagePipelineConfig] = {
     "router_default": ROUTER_DEFAULT,
     "planner_default": PLANNER_DEFAULT,
@@ -120,6 +128,7 @@ PRESETS: dict[str, ImagePipelineConfig] = {
     "planner_high_quality": PLANNER_HIGH_QUALITY,
     "observation_fast": OBSERVATION_FAST,
     "policy_tab_check_fast": POLICY_TAB_CHECK_FAST,
+    "city_production_followup_fast": CITY_PRODUCTION_FOLLOWUP_FAST,
 }
 
 # Map CLI site prefix → preset name

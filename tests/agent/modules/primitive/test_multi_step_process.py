@@ -856,6 +856,90 @@ class TestEntryGatedProcesses:
         assert memory.get_best_choice() is not None
         assert memory.get_best_choice().visible_now is True
 
+    def test_city_production_select_click_verification_routes_to_placement_followup(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("choice_list")
+        memory.begin_stage("select_from_memory")
+        memory.choice_catalog.candidates["캠퍼스"] = ChoiceCandidate(
+            id="캠퍼스",
+            label="캠퍼스",
+            visible_now=True,
+            position_hint="visible",
+        )
+        memory.set_best_choice(option_id="캠퍼스", reason="과학 우선")
+        provider = FakeProvider([json.dumps({"post_select_state": "placement", "reason": "지구 배치 필요"})])
+
+        verification = process.verify_completion(
+            provider,
+            Image.new("RGB", (2000, 1000)),
+            memory,
+        )
+
+        assert verification.complete is False
+        assert memory.branch == "placement_map"
+        assert memory.current_stage == "production_place"
+        assert provider.last_use_thinking is False
+        assert provider.last_max_tokens is not None
+        assert provider.last_max_tokens <= 128
+        assert provider.last_pil_size is not None
+        assert provider.last_pil_size[0] <= 640
+        assert "post_select_state" in provider.last_text
+
+    def test_city_production_select_click_verification_routes_to_confirm_followup(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("choice_list")
+        memory.begin_stage("select_from_memory")
+        memory.choice_catalog.candidates["곡물 창고"] = ChoiceCandidate(
+            id="곡물_창고",
+            label="곡물 창고",
+            visible_now=True,
+            position_hint="visible",
+        )
+        memory.set_best_choice(option_id="곡물_창고", reason="성장 우선")
+        provider = FakeProvider([json.dumps({"post_select_state": "confirm", "reason": "확인 팝업 표시"})])
+
+        verification = process.verify_completion(
+            provider,
+            Image.new("RGB", (1600, 900)),
+            memory,
+        )
+
+        assert verification.complete is False
+        assert memory.current_stage == "production_place_confirm"
+        assert provider.last_use_thinking is False
+
+    def test_city_production_select_click_verification_can_finish_without_followup(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("choice_list")
+        memory.begin_stage("select_from_memory")
+        memory.choice_catalog.candidates["기념비"] = ChoiceCandidate(
+            id="기념비",
+            label="기념비",
+            visible_now=True,
+            position_hint="visible",
+        )
+        memory.set_best_choice(option_id="기념비", reason="초반 문화")
+        provider = FakeProvider([json.dumps({"post_select_state": "done", "reason": "추가 단계 없음"})])
+
+        verification = process.verify_completion(
+            provider,
+            Image.new("RGB", (1600, 900)),
+            memory,
+        )
+
+        assert verification.complete is True
+        assert memory.branch == "choice_list"
+        assert memory.current_stage == "select_from_memory"
+
 
 class TestPolicyProcess:
     def test_policy_entry_does_not_bootstrap_before_card_screen(self):

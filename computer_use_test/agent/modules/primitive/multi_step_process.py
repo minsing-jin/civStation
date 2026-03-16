@@ -2337,6 +2337,7 @@ class CityProductionProcess(ObservationAssistedProcess):
     _SCROLL_DOWN_STAGE = "scroll_down_for_hidden_choices"
     _RESTORE_HOVER_STAGE = "restore_hover_scroll_anchor"
     _RESTORE_SCROLL_STAGE = "restore_best_choice_visibility"
+    _FOLLOWUP_STATES = {"done", "placement", "confirm", "unknown"}
 
     def __init__(self, primitive_name: str, completion_condition: str = ""):
         super().__init__(
@@ -2437,6 +2438,46 @@ class CityProductionProcess(ObservationAssistedProcess):
         except Exception as exc:  # noqa: BLE001
             logger.warning("Production entry check failed: %s", exc)
             return None
+
+    @staticmethod
+    def _followup_img_config(img_config=None):
+        return PRESETS.get(
+            "city_production_followup_fast",
+            img_config,
+        )
+
+    def _detect_post_select_followup(
+        self,
+        provider: BaseVLMProvider,
+        pil_image,
+        *,
+        img_config=None,
+    ) -> tuple[str, str]:
+        """Classify whether a clicked production choice needs another city-production step."""
+        prompt = (
+            "문명6 도시 생산 후속상태 분류기다. JSON만 출력해.\n"
+            '{"post_select_state":"done|placement|confirm|unknown","reason":"짧게"}\n'
+            "- 방금 생산품목 선택 직후 화면이다.\n"
+            "- 지도 위 초록/파랑 타일 배치 화면이면 placement.\n"
+            "- '이곳에 ... 을 건설하겠습니까?' 같은 확인 팝업이면 confirm.\n"
+            "- 추가 단계 없이 생산 선택이 끝났으면 done.\n"
+            "- 확실하지 않으면 unknown.\n"
+        )
+        try:
+            data = _analyze_structured_json(
+                provider,
+                pil_image,
+                prompt,
+                img_config=self._followup_img_config(img_config),
+                max_tokens=128,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Production post-select follow-up detection failed: %s", exc)
+            return "unknown", "post-select detection failed"
+        state = str(data.get("post_select_state", "")).strip().lower()
+        if state not in self._FOLLOWUP_STATES:
+            state = "unknown"
+        return state, str(data.get("reason", "")).strip()
 
     @staticmethod
     def _anchor_components(
@@ -2886,6 +2927,32 @@ class CityProductionProcess(ObservationAssistedProcess):
         if action.action == "move":
             return SemanticVerifyResult(handled=True, passed=True, reason="hover move is non-visual by design")
         return super().verify_action_success(provider, pil_image, memory, action, img_config=img_config)
+
+    def verify_completion(
+        self,
+        provider: BaseVLMProvider,
+        pil_image,
+        memory: ShortTermMemory,
+        *,
+        img_config=None,
+    ) -> VerificationResult:
+        """Check whether a selected list item still needs placement or confirmation follow-up."""
+        if memory.current_stage == "select_from_memory":
+            followup_state, reason = self._detect_post_select_followup(
+                provider,
+                pil_image,
+                img_config=img_config,
+            )
+            if followup_state == "placement":
+                memory.set_branch(self._PLACEMENT_BRANCH)
+                memory.begin_stage(self._PLACEMENT_STAGE)
+                return VerificationResult(False, reason or "post-select follow-up: placement")
+            if followup_state == "confirm":
+                memory.begin_stage(self._PLACEMENT_CONFIRM_STAGE)
+                return VerificationResult(False, reason or "post-select follow-up: confirm")
+            if followup_state == "done":
+                return VerificationResult(True, reason or "post-select follow-up: done")
+        return super().verify_completion(provider, pil_image, memory, img_config=img_config)
 
     def resolve_action(self, action: AgentAction, memory: ShortTermMemory) -> AgentAction:
         """Keep city-production scrolls bound to a plausible right-side list anchor."""
