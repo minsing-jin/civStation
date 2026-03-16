@@ -83,6 +83,18 @@ class ChoiceCatalogState:
 
 
 @dataclass
+class CityPlacementState:
+    """State for city-production placement follow-up."""
+
+    has_target: bool = False
+    target_x: int = 0
+    target_y: int = 0
+    target_button: str = "right"
+    target_reason: str = ""
+    reclick_attempts: int = 0
+
+
+@dataclass
 class PolicyTabPosition:
     """Cached policy tab location."""
 
@@ -178,6 +190,7 @@ class FailureCheckpoint:
     branch: str = ""
     step_count: int = 0
     choice_catalog: ChoiceCatalogState = field(default_factory=ChoiceCatalogState)
+    city_placement_state: CityPlacementState = field(default_factory=CityPlacementState)
     policy_state: PolicyState = field(default_factory=PolicyState)
     completed_substeps: list[str] = field(default_factory=list)
     action_log: list[ActionTrace] = field(default_factory=list)
@@ -206,6 +219,7 @@ class ShortTermMemory:
     completed_substeps: list[str] = field(default_factory=list)
     action_log: list[ActionTrace] = field(default_factory=list)
     choice_catalog: ChoiceCatalogState = field(default_factory=ChoiceCatalogState)
+    city_placement_state: CityPlacementState = field(default_factory=CityPlacementState)
     policy_state: PolicyState = field(default_factory=PolicyState)
     stage_failure_counts: dict[str, int] = field(default_factory=dict)
     stage_fallback_used: set[str] = field(default_factory=set)
@@ -254,6 +268,7 @@ class ShortTermMemory:
         self.completed_substeps = []
         self.action_log = []
         self.choice_catalog = ChoiceCatalogState()
+        self.city_placement_state = CityPlacementState()
         self.policy_state = PolicyState()
         self.stage_failure_counts = {}
         self.stage_fallback_used = set()
@@ -497,6 +512,42 @@ class ShortTermMemory:
         """Return the saved hover anchor for scrollable popups."""
         return self.choice_catalog.scroll_anchor
 
+    def remember_city_placement_target(self, *, x: int, y: int, button: str = "right", reason: str = "") -> None:
+        """Persist the most recent placement-tile click for blue-tile purchase follow-up."""
+        if not self._is_normalized_coord(x, y, normalizing_range=self.normalizing_range):
+            return
+        self.city_placement_state.target_x = x
+        self.city_placement_state.target_y = y
+        self.city_placement_state.target_button = button or "right"
+        self.city_placement_state.target_reason = reason.strip()
+        self.city_placement_state.reclick_attempts = 0
+        self.city_placement_state.has_target = True
+
+    def get_city_placement_target(self) -> tuple[int, int, str] | None:
+        """Return the saved placement target, if present."""
+        if not self.city_placement_state.has_target:
+            return None
+        if not self._is_normalized_coord(
+            self.city_placement_state.target_x,
+            self.city_placement_state.target_y,
+            normalizing_range=self.normalizing_range,
+        ):
+            return None
+        return (
+            self.city_placement_state.target_x,
+            self.city_placement_state.target_y,
+            self.city_placement_state.target_button or "right",
+        )
+
+    def bump_city_placement_reclick_attempt(self) -> int:
+        """Record one automatic re-click attempt for a purchased blue tile."""
+        self.city_placement_state.reclick_attempts += 1
+        return self.city_placement_state.reclick_attempts
+
+    def clear_city_placement_target(self) -> None:
+        """Reset placement follow-up state."""
+        self.city_placement_state = CityPlacementState()
+
     def capture_checkpoint(self) -> None:
         """Store the latest stable restore point."""
         self.last_stable_checkpoint = FailureCheckpoint(
@@ -504,6 +555,7 @@ class ShortTermMemory:
             branch=self.branch,
             step_count=self.step_count,
             choice_catalog=copy.deepcopy(self.choice_catalog),
+            city_placement_state=copy.deepcopy(self.city_placement_state),
             policy_state=copy.deepcopy(self.policy_state),
             completed_substeps=list(self.completed_substeps),
             action_log=copy.deepcopy(self.action_log),
@@ -528,6 +580,7 @@ class ShortTermMemory:
         self.branch = checkpoint.branch
         self.step_count = checkpoint.step_count
         self.choice_catalog = copy.deepcopy(checkpoint.choice_catalog)
+        self.city_placement_state = copy.deepcopy(checkpoint.city_placement_state)
         self.policy_state = copy.deepcopy(checkpoint.policy_state)
         self.completed_substeps = list(checkpoint.completed_substeps)
         self.action_log = copy.deepcopy(checkpoint.action_log)
@@ -1202,6 +1255,16 @@ class ShortTermMemory:
             display_candidates = list(self.choice_catalog.candidates.values())
             for candidate in display_candidates:
                 lines.append(self._format_choice_candidate_line(candidate, include_id=False))
+
+        placement_target = self.get_city_placement_target()
+        if placement_target is not None:
+            x, y, button = placement_target
+            lines.append(
+                f"[city_placement] target=({x},{y}) button={button} "
+                f"reclick_attempts={self.city_placement_state.reclick_attempts}"
+            )
+            if self.city_placement_state.target_reason:
+                lines.append(f"target_reason={self.city_placement_state.target_reason}")
 
         if self.policy_state.enabled:
             current_tab = self.get_policy_current_tab_name() or "-"

@@ -823,7 +823,141 @@ class TestEntryGatedProcesses:
             ),
         )
 
+        assert memory.current_stage == "resolve_placement_followup"
+
+    def test_city_production_blue_tile_purchase_followup_transitions_to_reclick_stage(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("placement_map")
+        memory.begin_stage("production_place")
+        provider = FakeProvider(
+            [json.dumps({"placement_followup_state": "placement", "reason": "파란 타일 구매 후 아직 배치 화면"})]
+        )
+
+        process.on_action_success(
+            memory,
+            AgentAction(
+                action="click",
+                x=640,
+                y=730,
+                button="right",
+                reasoning="파란 타일을 골드로 구매",
+                task_status="in_progress",
+            ),
+        )
+
+        transition = process.plan_action(
+            provider,
+            Image.new("RGB", (2000, 1000)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert isinstance(transition, StageTransition)
+        assert transition.stage == "production_place_reclick"
+        assert memory.current_stage == "production_place_reclick"
+        assert provider.last_use_thinking is False
+        assert provider.last_max_tokens is not None
+        assert provider.last_max_tokens <= 128
+        assert provider.last_pil_size is not None
+        assert provider.last_pil_size[0] <= 640
+        assert "placement_followup_state" in provider.last_text
+
+    def test_city_production_blue_tile_reclick_uses_same_coordinates_before_confirm(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("placement_map")
+        memory.begin_stage("production_place")
+        provider = FakeProvider(
+            [
+                json.dumps({"placement_followup_state": "placement", "reason": "타일 구매만 완료됨"}),
+                json.dumps({"placement_followup_state": "confirm", "reason": "건설 확인 팝업 표시"}),
+            ]
+        )
+
+        process.on_action_success(
+            memory,
+            AgentAction(
+                action="click",
+                x=640,
+                y=730,
+                button="right",
+                reasoning="파란 타일 구매",
+                task_status="in_progress",
+            ),
+        )
+
+        first_transition = process.plan_action(
+            provider,
+            Image.new("RGB", (1600, 900)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+        assert isinstance(first_transition, StageTransition)
+        assert memory.current_stage == "production_place_reclick"
+
+        reclick = process.plan_action(
+            provider,
+            Image.new("RGB", (1600, 900)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert reclick is not None
+        assert reclick.action == "click"
+        assert reclick.button == "right"
+        assert (reclick.x, reclick.y) == (640, 730)
+        assert "같은 타일" in (reclick.reasoning or "")
+
+        process.on_action_success(memory, reclick)
+        assert memory.current_stage == "resolve_placement_followup"
+
+        second_transition = process.plan_action(
+            provider,
+            Image.new("RGB", (1600, 900)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert isinstance(second_transition, StageTransition)
+        assert second_transition.stage == "production_place_confirm"
         assert memory.current_stage == "production_place_confirm"
+
+    def test_city_production_placement_stage_prompt_mentions_gold_adjacency_and_blue_tile_reclick(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("placement_map")
+        memory.begin_stage("production_place")
+
+        instruction = process.build_instruction(
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert "현재 보유 골드" in instruction
+        assert "인접 보너스" in instruction
+        assert "같은 타일을 다시 클릭" in instruction
 
     def test_city_production_restore_observation_returns_to_selection_when_best_choice_visible(self):
         process = get_multi_step_process("city_production_primitive", "")

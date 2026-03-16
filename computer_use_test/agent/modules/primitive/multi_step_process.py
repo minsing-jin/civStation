@@ -2332,12 +2332,15 @@ class CityProductionProcess(ObservationAssistedProcess):
     _LIST_BRANCH = "choice_list"
     _PLACEMENT_BRANCH = "placement_map"
     _PLACEMENT_STAGE = "production_place"
+    _PLACEMENT_RESOLVE_STAGE = "resolve_placement_followup"
+    _PLACEMENT_RECLICK_STAGE = "production_place_reclick"
     _PLACEMENT_CONFIRM_STAGE = "production_place_confirm"
     _HOVER_SCROLL_STAGE = "hover_scroll_anchor"
     _SCROLL_DOWN_STAGE = "scroll_down_for_hidden_choices"
     _RESTORE_HOVER_STAGE = "restore_hover_scroll_anchor"
     _RESTORE_SCROLL_STAGE = "restore_best_choice_visibility"
     _FOLLOWUP_STATES = {"done", "placement", "confirm", "unknown"}
+    _PLACEMENT_FOLLOWUP_STATES = {"placement", "confirm", "unknown"}
 
     def __init__(self, primitive_name: str, completion_condition: str = ""):
         super().__init__(
@@ -2383,12 +2386,27 @@ class CityProductionProcess(ObservationAssistedProcess):
                 "- '이곳에 ... 을 건설하겠습니까?' 또는 구매 후 건설 확인이면 '예'/확인 버튼만 클릭해.\n"
                 "- 이 단계에서만 task_status='complete'로 끝내라."
             )
+        if memory.current_stage == self._PLACEMENT_RECLICK_STAGE:
+            return (
+                "현재 stage: production_place_reclick\n"
+                "- 방금 골드로 구매한 같은 타일을 다시 클릭해 실제 건설 배치를 이어간다.\n"
+                "- 다른 타일을 새로 고르지 말고, 저장된 같은 타일을 다시 클릭한다."
+            )
+        if memory.current_stage == self._PLACEMENT_RESOLVE_STAGE:
+            return (
+                "현재 stage: resolve_placement_followup\n"
+                "- 직전 배치 타일 클릭 이후 화면이 아직 배치 화면인지, 확인 팝업인지 짧게 판별한다.\n"
+                "- 파란 타일 구매 후 배치 화면이 남아 있으면 같은 타일 재클릭 단계로 간다."
+            )
         if memory.branch == self._PLACEMENT_BRANCH:
             return (
                 "현재 stage: production_place\n"
                 "- 지금은 스크롤 목록이 아니라 특수지구/불가사의 배치 화면이다.\n"
-                "- 초록색 즉시 배치 가능 타일과 파란색 구매 후 배치 가능 타일을 비교하되, "
-                "파란 타일은 현재 골드 소모 대비 효용이 충분할 때만 고른다.\n"
+                "- 현재 보유 골드와 파란 타일에 표시된 구매 골드를 비교해, "
+                "실제로 지불 가능한 경우에만 파란 타일을 고른다.\n"
+                "- 초록색 즉시 배치 가능 타일과 파란색 구매 후 배치 가능 타일을 비교할 때 인접 보너스, "
+                "지형 시너지, 상위 전략 목표를 함께 고려한다.\n"
+                "- 파란 타일을 구매한 뒤에도 배치 화면이 유지되면 같은 타일을 다시 클릭해 실제 배치를 이어간다.\n"
                 "- 타일 선택 action을 바로 1회 수행하고, 아직 task_status를 complete로 끝내지 마.\n"
                 "- 생산 목록 관찰/스크롤은 하지 마."
             )
@@ -2478,6 +2496,55 @@ class CityProductionProcess(ObservationAssistedProcess):
         if state not in self._FOLLOWUP_STATES:
             state = "unknown"
         return state, str(data.get("reason", "")).strip()
+
+    def _detect_placement_followup(
+        self,
+        provider: BaseVLMProvider,
+        pil_image,
+        *,
+        img_config=None,
+    ) -> tuple[str, str]:
+        """Classify whether a placement click needs a same-tile re-click or confirmation."""
+        prompt = (
+            "문명6 도시 생산 배치 후속상태 분류기다. JSON만 출력해.\n"
+            '{"placement_followup_state":"placement|confirm|unknown","reason":"짧게"}\n'
+            "- 방금 배치 타일을 클릭한 직후 화면이다.\n"
+            "- 특수지구/불가사의 배치 지도 화면이 그대로 남아 있으면 placement.\n"
+            "- '이곳에 ... 을 건설하겠습니까?' 같은 건설/구매 확인 팝업이면 confirm.\n"
+            "- 확실하지 않으면 unknown.\n"
+        )
+        try:
+            data = _analyze_structured_json(
+                provider,
+                pil_image,
+                prompt,
+                img_config=self._followup_img_config(img_config),
+                max_tokens=128,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Production placement follow-up detection failed: %s", exc)
+            return "unknown", "placement follow-up detection failed"
+        state = str(data.get("placement_followup_state", "")).strip().lower()
+        if state not in self._PLACEMENT_FOLLOWUP_STATES:
+            state = "unknown"
+        return state, str(data.get("reason", "")).strip()
+
+    def _build_saved_placement_reclick_action(self, memory: ShortTermMemory) -> AgentAction | None:
+        """Re-click the same purchased blue tile once to turn purchase into actual placement."""
+        target = memory.get_city_placement_target()
+        if target is None:
+            return None
+        x, y, button = target
+        action = AgentAction(
+            action="click",
+            x=x,
+            y=y,
+            button=button,
+            reasoning="방금 골드로 구매한 같은 타일을 다시 클릭해 실제 건설 배치를 이어감",
+            task_status="in_progress",
+        )
+        memory.set_last_planned_action_debug(self._format_action_debug(action))
+        return action
 
     @staticmethod
     def _anchor_components(
@@ -2863,6 +2930,55 @@ class CityProductionProcess(ObservationAssistedProcess):
                 ),
             )
 
+        if memory.branch == self._PLACEMENT_BRANCH:
+            if memory.current_stage == self._PLACEMENT_RESOLVE_STAGE:
+                followup_state, reason = self._detect_placement_followup(
+                    provider,
+                    pil_image,
+                    img_config=img_config,
+                )
+                if followup_state == "confirm":
+                    memory.begin_stage(self._PLACEMENT_CONFIRM_STAGE)
+                    memory.set_last_planned_action_debug("placement follow-up -> production_place_confirm")
+                    return StageTransition(
+                        stage=self._PLACEMENT_CONFIRM_STAGE,
+                        reason=reason or "placement follow-up: confirm",
+                    )
+                if followup_state == "placement":
+                    if (
+                        memory.get_city_placement_target() is not None
+                        and memory.city_placement_state.reclick_attempts < 1
+                    ):
+                        memory.bump_city_placement_reclick_attempt()
+                        memory.begin_stage(self._PLACEMENT_RECLICK_STAGE)
+                        memory.set_last_planned_action_debug("placement follow-up -> production_place_reclick")
+                        return StageTransition(
+                            stage=self._PLACEMENT_RECLICK_STAGE,
+                            reason=reason or "placement follow-up: same tile re-click",
+                        )
+                    memory.begin_stage(self._PLACEMENT_STAGE)
+                    memory.set_last_planned_action_debug("placement follow-up -> production_place")
+                    return StageTransition(
+                        stage=self._PLACEMENT_STAGE,
+                        reason=reason or "placement follow-up: still placement map",
+                    )
+                memory.begin_stage(self._PLACEMENT_STAGE)
+                memory.set_last_planned_action_debug("placement follow-up unknown -> production_place")
+                return StageTransition(
+                    stage=self._PLACEMENT_STAGE,
+                    reason=reason or "placement follow-up: unknown -> re-evaluate placement",
+                )
+
+            if memory.current_stage == self._PLACEMENT_RECLICK_STAGE:
+                reclick_action = self._build_saved_placement_reclick_action(memory)
+                if reclick_action is not None:
+                    return reclick_action
+                memory.begin_stage(self._PLACEMENT_STAGE)
+                return StageTransition(
+                    stage=self._PLACEMENT_STAGE,
+                    reason="missing saved placement target -> return to placement planning",
+                )
+
         if memory.branch == self._LIST_BRANCH:
             if memory.current_stage == self._HOVER_SCROLL_STAGE:
                 return self._build_anchor_move_action(
@@ -2979,7 +3095,21 @@ class CityProductionProcess(ObservationAssistedProcess):
             and memory.current_stage == self._PLACEMENT_STAGE
             and action.action in {"click", "double_click"}
         ):
-            memory.begin_stage(self._PLACEMENT_CONFIRM_STAGE)
+            memory.remember_city_placement_target(
+                x=action.x,
+                y=action.y,
+                button=action.button or "right",
+                reason=action.reasoning or "",
+            )
+            memory.begin_stage(self._PLACEMENT_RESOLVE_STAGE)
+            return
+
+        if (
+            memory.branch == self._PLACEMENT_BRANCH
+            and memory.current_stage == self._PLACEMENT_RECLICK_STAGE
+            and action.action in {"click", "double_click"}
+        ):
+            memory.begin_stage(self._PLACEMENT_RESOLVE_STAGE)
             return
 
         if action.action == "scroll":
