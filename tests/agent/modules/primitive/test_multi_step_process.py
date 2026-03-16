@@ -426,12 +426,15 @@ class TestEntryGatedProcesses:
                 ),
                 json.dumps(
                     {
-                        "action": "click",
+                        "placement_action": "click_tile",
                         "x": 640,
                         "y": 730,
                         "button": "right",
-                        "reasoning": "초록색 타일에 특수지구 배치",
-                        "task_status": "in_progress",
+                        "tile_x": 640,
+                        "tile_y": 730,
+                        "tile_button": "right",
+                        "tile_color": "green",
+                        "reason": "초록색 타일에 특수지구 배치",
                     }
                 ),
             ]
@@ -635,7 +638,7 @@ class TestEntryGatedProcesses:
         assert action.x >= 820
         assert action.y == 520
 
-    def test_city_production_scan_completes_after_scrolled_observation_finds_no_new_choices(self):
+    def test_city_production_scan_does_not_complete_after_first_scrolled_observation_finds_no_new_choices(self):
         process = get_multi_step_process("city_production_primitive", "")
         memory = ShortTermMemory()
         memory.start_task("city_production_primitive", enable_choice_catalog=True)
@@ -674,7 +677,119 @@ class TestEntryGatedProcesses:
             ),
         )
 
-        assert second_action is None
+        assert second_action is not None
+        assert second_action.action == "move"
+        assert memory.choice_catalog.end_reached is False
+        assert memory.current_stage == "hover_scroll_anchor"
+
+    def test_city_production_does_not_trust_first_scrolled_end_of_list_signal(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("choice_list")
+
+        first_action = process.consume_observation(
+            memory,
+            ObservationBundle(
+                visible_options=[{"label": "기념비"}, {"label": "건설자"}],
+                end_of_list=False,
+                scroll_anchor={"x": 760, "y": 520, "left": 620, "top": 100, "right": 900, "bottom": 920},
+            ),
+        )
+        assert first_action is not None
+        process.on_action_success(memory, first_action)
+
+        scroll_action = process.plan_action(
+            FakeProvider([]),
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+        assert scroll_action is not None
+        process.on_action_success(memory, scroll_action)
+
+        second_action = process.consume_observation(
+            memory,
+            ObservationBundle(
+                visible_options=[{"label": "개척자"}, {"label": "기념비"}],
+                end_of_list=True,
+                scroll_anchor={"x": 760, "y": 520, "left": 620, "top": 100, "right": 900, "bottom": 920},
+            ),
+        )
+
+        assert second_action is not None
+        assert second_action.action == "move"
+        assert memory.choice_catalog.end_reached is False
+        assert memory.current_stage == "hover_scroll_anchor"
+
+    def test_city_production_scan_completes_after_second_scrolled_observation_finds_no_new_choices(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("choice_list")
+        memory.begin_stage("observe_choices")
+
+        first_action = process.consume_observation(
+            memory,
+            ObservationBundle(
+                visible_options=[{"label": "기념비"}, {"label": "건설자"}],
+                end_of_list=False,
+                scroll_anchor={"x": 760, "y": 520, "left": 620, "top": 100, "right": 900, "bottom": 920},
+            ),
+        )
+        assert first_action is not None
+        process.on_action_success(memory, first_action)
+
+        first_scroll = process.plan_action(
+            FakeProvider([]),
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+        assert first_scroll is not None
+        process.on_action_success(memory, first_scroll)
+
+        second_action = process.consume_observation(
+            memory,
+            ObservationBundle(
+                visible_options=[{"label": "기념비"}, {"label": "건설자"}],
+                end_of_list=False,
+                scroll_anchor={"x": 760, "y": 520, "left": 620, "top": 100, "right": 900, "bottom": 920},
+            ),
+        )
+        assert second_action is not None
+        process.on_action_success(memory, second_action)
+
+        second_scroll = process.plan_action(
+            FakeProvider([]),
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+        assert second_scroll is not None
+        process.on_action_success(memory, second_scroll)
+
+        third_action = process.consume_observation(
+            memory,
+            ObservationBundle(
+                visible_options=[{"label": "기념비"}, {"label": "건설자"}],
+                end_of_list=False,
+                scroll_anchor={"x": 760, "y": 520, "left": 620, "top": 100, "right": 900, "bottom": 920},
+            ),
+        )
+
+        assert third_action is None
         assert memory.choice_catalog.end_reached is True
         assert memory.current_stage == "choose_from_memory"
 
@@ -776,12 +891,15 @@ class TestEntryGatedProcesses:
                 ),
                 json.dumps(
                     {
-                        "action": "click",
+                        "placement_action": "click_tile",
                         "x": 640,
                         "y": 730,
                         "button": "right",
-                        "reasoning": "초록색 타일에 특수지구 배치",
-                        "task_status": "in_progress",
+                        "tile_x": 640,
+                        "tile_y": 730,
+                        "tile_button": "right",
+                        "tile_color": "green",
+                        "reason": "초록색 타일에 특수지구 배치",
                     }
                 ),
             ]
@@ -825,7 +943,7 @@ class TestEntryGatedProcesses:
 
         assert memory.current_stage == "resolve_placement_followup"
 
-    def test_city_production_blue_tile_purchase_followup_transitions_to_reclick_stage(self):
+    def test_city_production_purchasable_tile_clicks_gold_badge_and_transitions_to_reclick_stage(self):
         process = get_multi_step_process("city_production_primitive", "")
         memory = ShortTermMemory()
         memory.start_task("city_production_primitive", enable_choice_catalog=True)
@@ -833,20 +951,41 @@ class TestEntryGatedProcesses:
         memory.set_branch("placement_map")
         memory.begin_stage("production_place")
         provider = FakeProvider(
-            [json.dumps({"placement_followup_state": "placement", "reason": "파란 타일 구매 후 아직 배치 화면"})]
+            [
+                json.dumps(
+                    {
+                        "placement_action": "click_purchase_button",
+                        "x": 612,
+                        "y": 706,
+                        "button": "right",
+                        "tile_x": 640,
+                        "tile_y": 730,
+                        "tile_button": "right",
+                        "tile_color": "purple",
+                        "reason": "보라 타일은 골드 배지 먼저 눌러야 함",
+                    }
+                ),
+                json.dumps({"placement_followup_state": "placement", "reason": "보라 타일 구매 후 아직 배치 화면"}),
+            ]
         )
 
-        process.on_action_success(
+        action = process.plan_action(
+            provider,
+            Image.new("RGB", (2000, 1000)),
             memory,
-            AgentAction(
-                action="click",
-                x=640,
-                y=730,
-                button="right",
-                reasoning="파란 타일을 골드로 구매",
-                task_status="in_progress",
-            ),
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
         )
+
+        assert isinstance(action, AgentAction)
+        assert action.action == "click"
+        assert action.button == "right"
+        assert (action.x, action.y) == (612, 706)
+        assert "골드" in (action.reasoning or "")
+
+        process.on_action_success(memory, action)
 
         transition = process.plan_action(
             provider,
@@ -868,7 +1007,7 @@ class TestEntryGatedProcesses:
         assert provider.last_pil_size[0] <= 640
         assert "placement_followup_state" in provider.last_text
 
-    def test_city_production_blue_tile_reclick_uses_same_coordinates_before_confirm(self):
+    def test_city_production_purchasable_tile_reclick_uses_saved_tile_coordinates_before_confirm(self):
         process = get_multi_step_process("city_production_primitive", "")
         memory = ShortTermMemory()
         memory.start_task("city_production_primitive", enable_choice_catalog=True)
@@ -877,22 +1016,37 @@ class TestEntryGatedProcesses:
         memory.begin_stage("production_place")
         provider = FakeProvider(
             [
+                json.dumps(
+                    {
+                        "placement_action": "click_purchase_button",
+                        "x": 612,
+                        "y": 706,
+                        "button": "right",
+                        "tile_x": 640,
+                        "tile_y": 730,
+                        "tile_button": "right",
+                        "tile_color": "blue",
+                        "reason": "파란 타일 구매 버튼 클릭",
+                    }
+                ),
                 json.dumps({"placement_followup_state": "placement", "reason": "타일 구매만 완료됨"}),
                 json.dumps({"placement_followup_state": "confirm", "reason": "건설 확인 팝업 표시"}),
             ]
         )
 
-        process.on_action_success(
+        purchase_action = process.plan_action(
+            provider,
+            Image.new("RGB", (1600, 900)),
             memory,
-            AgentAction(
-                action="click",
-                x=640,
-                y=730,
-                button="right",
-                reasoning="파란 타일 구매",
-                task_status="in_progress",
-            ),
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
         )
+        assert isinstance(purchase_action, AgentAction)
+        assert (purchase_action.x, purchase_action.y) == (612, 706)
+
+        process.on_action_success(memory, purchase_action)
 
         first_transition = process.plan_action(
             provider,
@@ -920,6 +1074,7 @@ class TestEntryGatedProcesses:
         assert reclick.action == "click"
         assert reclick.button == "right"
         assert (reclick.x, reclick.y) == (640, 730)
+        assert (reclick.x, reclick.y) != (purchase_action.x, purchase_action.y)
         assert "같은 타일" in (reclick.reasoning or "")
 
         process.on_action_success(memory, reclick)
@@ -939,7 +1094,7 @@ class TestEntryGatedProcesses:
         assert second_transition.stage == "production_place_confirm"
         assert memory.current_stage == "production_place_confirm"
 
-    def test_city_production_placement_stage_prompt_mentions_gold_adjacency_and_blue_tile_reclick(self):
+    def test_city_production_placement_stage_prompt_mentions_gold_badge_blue_purple_and_adjacency(self):
         process = get_multi_step_process("city_production_primitive", "")
         memory = ShortTermMemory()
         memory.start_task("city_production_primitive", enable_choice_catalog=True)
@@ -957,7 +1112,101 @@ class TestEntryGatedProcesses:
 
         assert "현재 보유 골드" in instruction
         assert "인접 보너스" in instruction
-        assert "같은 타일을 다시 클릭" in instruction
+        assert "골드" in instruction
+        assert "보라" in instruction
+        assert "같은 타일 본체를 다시 클릭" in instruction
+
+    def test_city_production_placement_no_progress_retries_without_generic_fallback(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("placement_map")
+        memory.begin_stage("production_place")
+        memory.remember_choices(
+            [{"label": "기념비"}],
+            end_of_list=False,
+            scroll_anchor={"x": 760, "y": 520, "left": 620, "top": 100, "right": 900, "bottom": 920},
+        )
+
+        first = process.handle_no_progress(
+            FakeProvider([]),
+            Image.new("RGB", (100, 100)),
+            memory,
+            last_action=AgentAction(action="click", x=640, y=730, button="right", task_status="in_progress"),
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert first.handled is True
+        assert first.reroute is False
+        assert memory.current_stage == "production_place"
+        assert memory.fallback_return_stage == ""
+
+        second = process.handle_no_progress(
+            FakeProvider([]),
+            Image.new("RGB", (100, 100)),
+            memory,
+            last_action=AgentAction(action="click", x=640, y=730, button="right", task_status="in_progress"),
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert second.handled is False
+        assert second.reroute is True
+        assert memory.current_stage == "production_place"
+        assert memory.fallback_return_stage == ""
+
+    def test_city_production_does_not_reanchor_scroll_during_placement_branch(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("placement_map")
+        memory.begin_stage("production_place")
+        memory.remember_choices(
+            [{"label": "기념비"}],
+            end_of_list=False,
+            scroll_anchor={"x": 900, "y": 520, "left": 620, "top": 100, "right": 940, "bottom": 920},
+        )
+
+        action = process.resolve_action(
+            AgentAction(action="scroll", x=0, y=0, scroll_amount=-650, task_status="in_progress"),
+            memory,
+        )
+
+        assert action.x == 0
+        assert action.y == 0
+
+    def test_choice_catalog_debug_includes_scan_end_reason(self):
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+
+        memory.remember_choices(
+            [{"label": "기념비"}],
+            end_of_list=False,
+            scroll_direction="down",
+        )
+        memory.register_choice_scroll(direction="down")
+        memory.remember_choices(
+            [{"label": "기념비"}],
+            end_of_list=False,
+            scroll_direction="down",
+        )
+        memory.register_choice_scroll(direction="down")
+        memory.remember_choices(
+            [{"label": "기념비"}],
+            end_of_list=False,
+            scroll_direction="down",
+        )
+
+        prompt_memory = memory.to_prompt_string()
+
+        assert "scan_end_reason=down_scroll_no_new_candidates" in prompt_memory
 
     def test_city_production_restore_observation_returns_to_selection_when_best_choice_visible(self):
         process = get_multi_step_process("city_production_primitive", "")

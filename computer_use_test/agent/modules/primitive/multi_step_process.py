@@ -2341,6 +2341,14 @@ class CityProductionProcess(ObservationAssistedProcess):
     _RESTORE_SCROLL_STAGE = "restore_best_choice_visibility"
     _FOLLOWUP_STATES = {"done", "placement", "confirm", "unknown"}
     _PLACEMENT_FOLLOWUP_STATES = {"placement", "confirm", "unknown"}
+    _PLACEMENT_PLAN_ACTIONS = {"click_tile", "click_purchase_button", "unknown"}
+    _PLACEMENT_TILE_COLORS = {"green", "blue", "purple", "unknown"}
+    _PLACEMENT_RECOVERY_STAGES = {
+        _PLACEMENT_STAGE,
+        _PLACEMENT_RECLICK_STAGE,
+        _PLACEMENT_CONFIRM_STAGE,
+        _PLACEMENT_RESOLVE_STAGE,
+    }
 
     def __init__(self, primitive_name: str, completion_condition: str = ""):
         super().__init__(
@@ -2353,6 +2361,12 @@ class CityProductionProcess(ObservationAssistedProcess):
     def initialize(self, memory: ShortTermMemory) -> None:
         if not memory.current_stage:
             memory.begin_stage("production_entry")
+
+    def get_recovery_key(self, memory: ShortTermMemory, *, stage_name: str | None = None) -> str:
+        current_stage = stage_name or memory.current_stage or "step"
+        if memory.branch == self._PLACEMENT_BRANCH or current_stage in self._PLACEMENT_RECOVERY_STAGES:
+            return f"city_production_placement:{current_stage}"
+        return super().get_recovery_key(memory, stage_name=stage_name)
 
     def should_observe(self, memory: ShortTermMemory) -> bool:
         if self._ENTRY_SUBSTEP not in memory.completed_substeps:
@@ -2389,24 +2403,26 @@ class CityProductionProcess(ObservationAssistedProcess):
         if memory.current_stage == self._PLACEMENT_RECLICK_STAGE:
             return (
                 "현재 stage: production_place_reclick\n"
-                "- 방금 골드로 구매한 같은 타일을 다시 클릭해 실제 건설 배치를 이어간다.\n"
+                "- 방금 골드 배지로 구매한 같은 타일 본체를 다시 클릭해 실제 건설 배치를 이어간다.\n"
                 "- 다른 타일을 새로 고르지 말고, 저장된 같은 타일을 다시 클릭한다."
             )
         if memory.current_stage == self._PLACEMENT_RESOLVE_STAGE:
             return (
                 "현재 stage: resolve_placement_followup\n"
                 "- 직전 배치 타일 클릭 이후 화면이 아직 배치 화면인지, 확인 팝업인지 짧게 판별한다.\n"
-                "- 파란 타일 구매 후 배치 화면이 남아 있으면 같은 타일 재클릭 단계로 간다."
+                "- 파란색/보라색 구매형 타일 구매 후 배치 화면이 남아 있으면 같은 타일 재클릭 단계로 간다."
             )
         if memory.branch == self._PLACEMENT_BRANCH:
             return (
                 "현재 stage: production_place\n"
                 "- 지금은 스크롤 목록이 아니라 특수지구/불가사의 배치 화면이다.\n"
-                "- 현재 보유 골드와 파란 타일에 표시된 구매 골드를 비교해, "
-                "실제로 지불 가능한 경우에만 파란 타일을 고른다.\n"
-                "- 초록색 즉시 배치 가능 타일과 파란색 구매 후 배치 가능 타일을 비교할 때 인접 보너스, "
+                "- 현재 보유 골드와 파란색/보라색 타일에 표시된 구매 골드를 비교해, "
+                "실제로 지불 가능한 경우에만 구매형 타일을 고른다.\n"
+                "- 초록색 즉시 배치 가능 타일과 파란색/보라색 구매 후 배치 가능 타일을 비교할 때 인접 보너스, "
                 "지형 시너지, 상위 전략 목표를 함께 고려한다.\n"
-                "- 파란 타일을 구매한 뒤에도 배치 화면이 유지되면 같은 타일을 다시 클릭해 실제 배치를 이어간다.\n"
+                "- 구매형 타일은 타일 본체가 아니라 골드와 숫자가 있는 구매 버튼/배지를 먼저 클릭한다.\n"
+                "- 파란색/보라색 구매형 타일을 구매한 뒤에도 배치 화면이 유지되면 "
+                "같은 타일 본체를 다시 클릭해 실제 배치를 이어간다.\n"
                 "- 타일 선택 action을 바로 1회 수행하고, 아직 task_status를 complete로 끝내지 마.\n"
                 "- 생산 목록 관찰/스크롤은 하지 마."
             )
@@ -2461,6 +2477,13 @@ class CityProductionProcess(ObservationAssistedProcess):
     def _followup_img_config(img_config=None):
         return PRESETS.get(
             "city_production_followup_fast",
+            img_config,
+        )
+
+    @staticmethod
+    def _placement_img_config(img_config=None):
+        return PRESETS.get(
+            "city_production_placement_fast",
             img_config,
         )
 
@@ -2529,8 +2552,108 @@ class CityProductionProcess(ObservationAssistedProcess):
             state = "unknown"
         return state, str(data.get("reason", "")).strip()
 
+    def _plan_placement_click(
+        self,
+        provider: BaseVLMProvider,
+        pil_image,
+        memory: ShortTermMemory,
+        *,
+        normalizing_range: int,
+        high_level_strategy: str,
+        img_config=None,
+    ) -> AgentAction | None:
+        """Plan one city-production placement click with explicit purchase-button support."""
+        prompt = (
+            "너는 문명6 도시 생산 배치 클릭 계획기다. JSON만 출력해.\n"
+            "{"
+            '"placement_action":"click_tile|click_purchase_button|unknown",'
+            '"x":0,"y":0,"button":"right",'
+            '"tile_x":0,"tile_y":0,"tile_button":"right",'
+            '"tile_color":"green|blue|purple|unknown",'
+            '"reason":"짧게"}\n'
+            "- 지금 화면은 특수지구/불가사의/건물 배치 지도다.\n"
+            "- 초록색 타일은 즉시 배치 가능 타일이다.\n"
+            "- 파란색/보라색 타일은 골드와 숫자가 있는 구매 버튼/배지를 먼저 눌러야 하는 구매형 타일이다.\n"
+            "- 구매형 타일을 고르면 placement_action='click_purchase_button' 으로 하고, "
+            "x/y 는 골드+숫자 구매 버튼 중심을 반환해.\n"
+            "- 구매형 타일을 고를 때 tile_x/tile_y 는 같은 타일 본체 중심을 반환해. "
+            "구매 후 배치 화면이 남으면 그 좌표를 다시 클릭한다.\n"
+            "- 초록 타일을 고를 때는 placement_action='click_tile' 로 하고, x/y 는 타일 본체 중심을 반환해.\n"
+            "- 현재 보유 골드, 타일 구매 비용, 인접 보너스, 지형 시너지, 상위 전략을 함께 고려해.\n"
+            "- 구매형 타일은 현재 골드로 실제 구매 가능하고, 초록 타일보다 확실히 유리할 때만 선택해.\n"
+            "- 확실하지 않으면 placement_action='unknown'.\n"
+            f"{_normalized_coord_note(normalizing_range, fields='x/y 와 tile_x/tile_y')}\n"
+            f"- 상위 전략 참고:\n{high_level_strategy}\n"
+        )
+        try:
+            data = _analyze_structured_json(
+                provider,
+                pil_image,
+                prompt,
+                img_config=self._placement_img_config(img_config),
+                max_tokens=256,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Production placement planning failed: %s", exc)
+            return None
+
+        action_kind = str(data.get("placement_action", "")).strip().lower()
+        if action_kind not in self._PLACEMENT_PLAN_ACTIONS or action_kind == "unknown":
+            return None
+
+        try:
+            x = int(data.get("x", 0))
+            y = int(data.get("y", 0))
+        except (TypeError, ValueError):
+            return None
+        if not (0 <= x <= normalizing_range and 0 <= y <= normalizing_range):
+            return None
+
+        button = str(data.get("button", "right")).strip().lower() or "right"
+        if button not in {"left", "right"}:
+            button = "right"
+        tile_color = str(data.get("tile_color", "")).strip().lower()
+        if tile_color not in self._PLACEMENT_TILE_COLORS:
+            tile_color = "unknown"
+        reason = str(data.get("reason", "")).strip()
+
+        if action_kind == "click_purchase_button":
+            try:
+                tile_x = int(data.get("tile_x", 0))
+                tile_y = int(data.get("tile_y", 0))
+            except (TypeError, ValueError):
+                return None
+            if not (0 <= tile_x <= normalizing_range and 0 <= tile_y <= normalizing_range):
+                return None
+            tile_button = str(data.get("tile_button", "right")).strip().lower() or "right"
+            if tile_button not in {"left", "right"}:
+                tile_button = "right"
+            memory.remember_city_placement_target(
+                x=tile_x,
+                y=tile_y,
+                button=tile_button,
+                reason=reason or "구매형 타일 후속 배치",
+                origin="purchase_button",
+                tile_color=tile_color,
+            )
+            action_reason = reason or "구매형 타일의 골드 버튼을 먼저 눌러 배치를 준비"
+        else:
+            memory.clear_city_placement_target()
+            action_reason = reason or "즉시 배치 가능한 타일 본체를 클릭"
+
+        action = AgentAction(
+            action="click",
+            x=x,
+            y=y,
+            button=button,
+            reasoning=action_reason,
+            task_status="in_progress",
+        )
+        memory.set_last_planned_action_debug(self._format_action_debug(action))
+        return action
+
     def _build_saved_placement_reclick_action(self, memory: ShortTermMemory) -> AgentAction | None:
-        """Re-click the same purchased blue tile once to turn purchase into actual placement."""
+        """Re-click the saved tile body after a purchasable-tile purchase."""
         target = memory.get_city_placement_target()
         if target is None:
             return None
@@ -2540,7 +2663,7 @@ class CityProductionProcess(ObservationAssistedProcess):
             x=x,
             y=y,
             button=button,
-            reasoning="방금 골드로 구매한 같은 타일을 다시 클릭해 실제 건설 배치를 이어감",
+            reasoning="방금 골드 버튼으로 구매한 같은 타일 본체를 다시 클릭해 실제 건설 배치를 이어감",
             task_status="in_progress",
         )
         memory.set_last_planned_action_debug(self._format_action_debug(action))
@@ -2833,7 +2956,16 @@ class CityProductionProcess(ObservationAssistedProcess):
         return observation
 
     def consume_observation(self, memory: ShortTermMemory, observation: ObservationBundle) -> AgentAction | None:
-        summary = self._summarize_visible_options(observation)
+        effective_observation = observation
+        if observation.end_of_list and memory.choice_catalog.downward_scan_scrolls < 2:
+            logger.info(
+                "Ignoring early city-production end_of_list after %s downward scroll(s)",
+                memory.choice_catalog.downward_scan_scrolls,
+            )
+            effective_observation = copy.copy(observation)
+            effective_observation.end_of_list = False
+
+        summary = self._summarize_visible_options(effective_observation)
         debug_anchor = observation.scroll_anchor or memory.get_scroll_anchor()
         if debug_anchor is None:
             debug_anchor = self._default_list_scroll_anchor(memory.normalizing_range)
@@ -2843,7 +2975,7 @@ class CityProductionProcess(ObservationAssistedProcess):
         scroll_direction = memory.choice_catalog.last_scroll_direction or "down"
         memory.remember_choices(
             observation.visible_options,
-            end_of_list=observation.end_of_list,
+            end_of_list=effective_observation.end_of_list,
             scroll_anchor=observation.scroll_anchor or debug_anchor,
             scroll_direction=scroll_direction,
         )
@@ -2860,10 +2992,11 @@ class CityProductionProcess(ObservationAssistedProcess):
                 reason=f"선택한 생산 품목 '{best_choice.label}' 을 다시 찾기 전에 생산 목록 패널 중앙 hover를 고정",
             )
 
-        if observation.end_of_list or memory.choice_catalog.end_reached:
+        if effective_observation.end_of_list or memory.choice_catalog.end_reached:
             memory.mark_substep("full_scan_complete")
             memory.begin_stage("choose_from_memory")
-            memory.set_last_planned_action_debug("scan complete -> choose_from_memory")
+            scan_reason = memory.choice_catalog.scan_end_reason or "unknown"
+            memory.set_last_planned_action_debug(f"scan complete ({scan_reason}) -> choose_from_memory")
             return None
 
         return self._build_anchor_move_action(
@@ -2892,15 +3025,22 @@ class CityProductionProcess(ObservationAssistedProcess):
                 if production_mode == "placement":
                     memory.set_branch(self._PLACEMENT_BRANCH)
                     memory.begin_stage(self._PLACEMENT_STAGE)
-                    return super().plan_action(
+                    planned_placement = self._plan_placement_click(
                         provider,
                         pil_image,
                         memory,
                         normalizing_range=normalizing_range,
                         high_level_strategy=high_level_strategy,
-                        recent_actions=recent_actions,
-                        hitl_directive=hitl_directive,
                         img_config=img_config,
+                    )
+                    if planned_placement is not None:
+                        return planned_placement
+                    memory.set_last_planned_action_debug(
+                        "placement planner returned no safe click -> retry production_place"
+                    )
+                    return StageTransition(
+                        stage=self._PLACEMENT_STAGE,
+                        reason="placement planner returned no safe click",
                     )
                 memory.set_branch(self._LIST_BRANCH)
                 memory.begin_stage("observe_choices")
@@ -2931,6 +3071,24 @@ class CityProductionProcess(ObservationAssistedProcess):
             )
 
         if memory.branch == self._PLACEMENT_BRANCH:
+            if memory.current_stage == self._PLACEMENT_STAGE:
+                planned_placement = self._plan_placement_click(
+                    provider,
+                    pil_image,
+                    memory,
+                    normalizing_range=normalizing_range,
+                    high_level_strategy=high_level_strategy,
+                    img_config=img_config,
+                )
+                if planned_placement is not None:
+                    return planned_placement
+                memory.set_last_planned_action_debug(
+                    "placement planner returned no safe click -> retry production_place"
+                )
+                return StageTransition(
+                    stage=self._PLACEMENT_STAGE,
+                    reason="placement planner returned no safe click",
+                )
             if memory.current_stage == self._PLACEMENT_RESOLVE_STAGE:
                 followup_state, reason = self._detect_placement_followup(
                     provider,
@@ -3070,9 +3228,52 @@ class CityProductionProcess(ObservationAssistedProcess):
                 return VerificationResult(True, reason or "post-select follow-up: done")
         return super().verify_completion(provider, pil_image, memory, img_config=img_config)
 
+    def handle_no_progress(
+        self,
+        provider: BaseVLMProvider,
+        pil_image,
+        memory: ShortTermMemory,
+        *,
+        last_action: AgentAction,
+        normalizing_range: int,
+        high_level_strategy: str,
+        recent_actions: str,
+        hitl_directive: str | None,
+        img_config=None,
+    ) -> NoProgressResolution:
+        if memory.branch == self._PLACEMENT_BRANCH:
+            retry_stage = memory.current_stage or self._PLACEMENT_STAGE
+            if retry_stage not in self._PLACEMENT_RECOVERY_STAGES:
+                retry_stage = self._PLACEMENT_STAGE
+            stage_key = self.get_recovery_key(memory, stage_name=retry_stage)
+            failures = memory.increment_stage_failure(stage_key)
+            if failures <= 1:
+                memory.begin_stage(retry_stage)
+                memory.set_last_planned_action_debug(f"placement no-progress -> retry {retry_stage}")
+                logger.info("City production placement no-progress -> retry stage %s", retry_stage)
+                return NoProgressResolution(handled=True)
+            return NoProgressResolution(
+                handled=False,
+                reroute=True,
+                error_message=f"City production placement stalled at stage '{retry_stage}'",
+            )
+        return super().handle_no_progress(
+            provider,
+            pil_image,
+            memory,
+            last_action=last_action,
+            normalizing_range=normalizing_range,
+            high_level_strategy=high_level_strategy,
+            recent_actions=recent_actions,
+            hitl_directive=hitl_directive,
+            img_config=img_config,
+        )
+
     def resolve_action(self, action: AgentAction, memory: ShortTermMemory) -> AgentAction:
         """Keep city-production scrolls bound to a plausible right-side list anchor."""
         if action.action == "scroll":
+            if memory.branch != self._LIST_BRANCH:
+                return action
             anchor = self._get_runtime_scroll_anchor(memory)
             if not anchor.contains(action.x, action.y) or (action.x == 0 and action.y == 0):
                 action.x = anchor.x
@@ -3095,12 +3296,17 @@ class CityProductionProcess(ObservationAssistedProcess):
             and memory.current_stage == self._PLACEMENT_STAGE
             and action.action in {"click", "double_click"}
         ):
-            memory.remember_city_placement_target(
-                x=action.x,
-                y=action.y,
-                button=action.button or "right",
-                reason=action.reasoning or "",
-            )
+            if not (
+                memory.city_placement_state.has_target
+                and memory.city_placement_state.target_origin == "purchase_button"
+            ):
+                memory.remember_city_placement_target(
+                    x=action.x,
+                    y=action.y,
+                    button=action.button or "right",
+                    reason=action.reasoning or "",
+                    origin="direct_tile",
+                )
             memory.begin_stage(self._PLACEMENT_RESOLVE_STAGE)
             return
 

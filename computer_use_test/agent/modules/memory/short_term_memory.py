@@ -77,9 +77,11 @@ class ChoiceCatalogState:
     best_option_reason: str = ""
     scroll_anchor: ScrollAnchor | None = None
     end_reached: bool = False
+    scan_end_reason: str = ""
     last_scroll_direction: str = "down"
     last_new_candidate_count: int = 0
     downward_scan_scrolls: int = 0
+    downward_no_new_streak: int = 0
 
 
 @dataclass
@@ -91,6 +93,8 @@ class CityPlacementState:
     target_y: int = 0
     target_button: str = "right"
     target_reason: str = ""
+    target_origin: str = ""  # direct_tile | purchase_button
+    target_tile_color: str = ""
     reclick_attempts: int = 0
 
 
@@ -410,14 +414,31 @@ class ShortTermMemory:
                 candidate.position_hint = "above" if scroll_direction == "down" else "below"
 
         self.choice_catalog.last_new_candidate_count = new_candidate_count
+        if not self.choice_catalog.end_reached:
+            self.choice_catalog.scan_end_reason = ""
+
+        if scroll_direction == "down" and self.choice_catalog.downward_scan_scrolls > 0:
+            if new_candidate_count == 0:
+                self.choice_catalog.downward_no_new_streak += 1
+            else:
+                self.choice_catalog.downward_no_new_streak = 0
+        else:
+            self.choice_catalog.downward_no_new_streak = 0
 
         if end_of_list:
             self.choice_catalog.end_reached = True
+            self.choice_catalog.scan_end_reason = "observer_end_of_list"
+            self.choice_catalog.downward_no_new_streak = 0
             for option_id, candidate in self.choice_catalog.candidates.items():
                 if option_id not in current_ids and candidate.position_hint == "unknown":
                     candidate.position_hint = "above"
-        elif scroll_direction == "down" and self.choice_catalog.downward_scan_scrolls > 0 and new_candidate_count == 0:
+        elif (
+            scroll_direction == "down"
+            and self.choice_catalog.downward_scan_scrolls > 0
+            and self.choice_catalog.downward_no_new_streak >= 2
+        ):
             self.choice_catalog.end_reached = True
+            self.choice_catalog.scan_end_reason = "down_scroll_no_new_candidates"
 
         self.capture_checkpoint()
 
@@ -512,14 +533,25 @@ class ShortTermMemory:
         """Return the saved hover anchor for scrollable popups."""
         return self.choice_catalog.scroll_anchor
 
-    def remember_city_placement_target(self, *, x: int, y: int, button: str = "right", reason: str = "") -> None:
-        """Persist the most recent placement-tile click for blue-tile purchase follow-up."""
+    def remember_city_placement_target(
+        self,
+        *,
+        x: int,
+        y: int,
+        button: str = "right",
+        reason: str = "",
+        origin: str = "",
+        tile_color: str = "",
+    ) -> None:
+        """Persist the most recent placement follow-up target."""
         if not self._is_normalized_coord(x, y, normalizing_range=self.normalizing_range):
             return
         self.city_placement_state.target_x = x
         self.city_placement_state.target_y = y
         self.city_placement_state.target_button = button or "right"
         self.city_placement_state.target_reason = reason.strip()
+        self.city_placement_state.target_origin = origin.strip()
+        self.city_placement_state.target_tile_color = tile_color.strip()
         self.city_placement_state.reclick_attempts = 0
         self.city_placement_state.has_target = True
 
@@ -1240,6 +1272,8 @@ class ShortTermMemory:
                     f"scan_scrolls={self.choice_catalog.downward_scan_scrolls} / "
                     f"last_new={self.choice_catalog.last_new_candidate_count}"
                 )
+            if self.choice_catalog.scan_end_reason:
+                lines.append(f"scan_end_reason={self.choice_catalog.scan_end_reason}")
             if self.last_observation_summary:
                 lines.append(f"obs_summary={self.last_observation_summary[:180]}")
             if self.last_observation_anchor:
@@ -1263,6 +1297,10 @@ class ShortTermMemory:
                 f"[city_placement] target=({x},{y}) button={button} "
                 f"reclick_attempts={self.city_placement_state.reclick_attempts}"
             )
+            if self.city_placement_state.target_origin:
+                lines.append(f"target_origin={self.city_placement_state.target_origin}")
+            if self.city_placement_state.target_tile_color:
+                lines.append(f"target_tile_color={self.city_placement_state.target_tile_color}")
             if self.city_placement_state.target_reason:
                 lines.append(f"target_reason={self.city_placement_state.target_reason}")
 
