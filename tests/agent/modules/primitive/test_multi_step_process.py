@@ -804,7 +804,7 @@ class TestEntryGatedProcesses:
         assert memory.current_stage == "scroll_down_for_hidden_choices"
         assert action is not None
         assert action.action == "scroll"
-        assert action.scroll_amount == -420
+        assert action.scroll_amount == -120
         assert action.x >= 820
         assert action.y == 520
 
@@ -896,7 +896,7 @@ class TestEntryGatedProcesses:
         assert memory.choice_catalog.end_reached is False
         assert memory.current_stage == "hover_scroll_anchor"
 
-    def test_city_production_scan_completes_after_second_scrolled_observation_finds_no_new_choices(self):
+    def test_city_production_scan_completes_after_third_scrolled_observation_finds_no_new_choices(self):
         process = get_multi_step_process("city_production_primitive", "")
         memory = ShortTermMemory()
         memory.start_task("city_production_primitive", enable_choice_catalog=True)
@@ -959,7 +959,33 @@ class TestEntryGatedProcesses:
             ),
         )
 
-        assert third_action is None
+        assert third_action is not None
+        assert third_action.action == "move"
+        assert memory.choice_catalog.end_reached is False
+        process.on_action_success(memory, third_action)
+
+        third_scroll = process.plan_action(
+            FakeProvider([]),
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+        assert third_scroll is not None
+        process.on_action_success(memory, third_scroll)
+
+        fourth_action = process.consume_observation(
+            memory,
+            ObservationBundle(
+                visible_options=[{"label": "기념비"}, {"label": "건설자"}],
+                end_of_list=False,
+                scroll_anchor={"x": 760, "y": 520, "left": 620, "top": 100, "right": 900, "bottom": 920},
+            ),
+        )
+
+        assert fourth_action is None
         assert memory.choice_catalog.end_reached is True
         assert memory.current_stage == "choose_from_memory"
 
@@ -1758,7 +1784,24 @@ class TestEntryGatedProcesses:
 
         assert scroll_action is not None
         assert scroll_action.action == "scroll"
-        assert scroll_action.scroll_amount == 420
+        assert scroll_action.scroll_amount == 120
+
+    def test_city_production_restore_scroll_success_records_upward_direction(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("choice_list")
+        memory.begin_stage("restore_best_choice_visibility")
+        memory.choice_catalog.last_scroll_direction = "down"
+
+        process.on_action_success(
+            memory,
+            AgentAction(action="scroll", x=880, y=520, scroll_amount=120, task_status="in_progress"),
+        )
+
+        assert memory.current_stage == "observe_choices"
+        assert memory.choice_catalog.last_scroll_direction == "up"
 
     def test_city_production_select_click_verification_can_finish_without_followup(self):
         process = get_multi_step_process("city_production_primitive", "")

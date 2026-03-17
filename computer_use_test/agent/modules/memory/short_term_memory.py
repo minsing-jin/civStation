@@ -451,8 +451,8 @@ class ShortTermMemory:
                     candidate.position_hint = "above"
         elif (
             scroll_direction == "down"
-            and self.choice_catalog.downward_scan_scrolls > 0
-            and self.choice_catalog.downward_no_new_streak >= 2
+            and self.choice_catalog.downward_scan_scrolls >= 3
+            and self.choice_catalog.downward_no_new_streak >= 3
         ):
             self.choice_catalog.end_reached = True
             self.choice_catalog.scan_end_reason = "down_scroll_no_new_candidates"

@@ -2343,7 +2343,9 @@ class PolicyProcess(ScriptedMultiStepProcess):
 class CityProductionProcess(ObservationAssistedProcess):
     """Observation-assisted production flow with an explicit entry gate."""
 
-    _ANCHOR_SCROLL_DELTA = 420
+    # macOS PyAutoGUI emits wheel scrolls as many 10-line events; keep each
+    # deterministic burst small so the Civ list does not overshoot or queue.
+    _ANCHOR_SCROLL_DELTA = 120
     _ENTRY_SUBSTEP = "production_entry_done"
     _LIST_BRANCH = "choice_list"
     _PLACEMENT_BRANCH = "placement_map"
@@ -3499,6 +3501,7 @@ class CityProductionProcess(ObservationAssistedProcess):
                 memory.begin_stage("observe_choices")
                 return
             if memory.current_stage == self._RESTORE_SCROLL_STAGE:
+                memory.register_choice_scroll(direction="up")
                 memory.begin_stage("observe_choices")
                 return
 
