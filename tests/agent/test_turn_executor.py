@@ -234,6 +234,70 @@ class MemoryDecisionFailureProcess(BaseMultiStepProcess):
         raise AssertionError("plan_action should not run when decide_from_memory fails first")
 
 
+class CityProductionVisibleProgressProcess(BaseMultiStepProcess):
+    def __init__(self):
+        super().__init__("city_production_primitive", "")
+
+    def initialize(self, memory: ShortTermMemory) -> None:
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("choice_list")
+        memory.begin_stage("hover_scroll_anchor")
+
+    def get_visible_progress(
+        self, memory: ShortTermMemory, *, executed_steps: int, hard_max_steps: int
+    ) -> tuple[int, int]:
+        return (2, 4)
+
+    def plan_action(self, provider, pil_image, memory, **kwargs):
+        return AgentAction(
+            action="click",
+            x=500,
+            y=500,
+            reasoning="city production visible progress should come from stage mapping",
+            task_status="complete",
+        )
+
+    def verify_completion(self, provider, pil_image, memory, **kwargs) -> VerificationResult:
+        return VerificationResult(True, "ok")
+
+
+class CityProductionScrollSettleProcess(BaseMultiStepProcess):
+    def __init__(self):
+        super().__init__("city_production_primitive", "")
+        self.calls = 0
+
+    def initialize(self, memory: ShortTermMemory) -> None:
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("choice_list")
+        memory.begin_stage("scroll_down_for_hidden_choices")
+
+    def plan_action(self, provider, pil_image, memory, **kwargs):
+        self.calls += 1
+        if self.calls == 1:
+            return AgentAction(
+                action="scroll",
+                x=880,
+                y=520,
+                scroll_amount=-420,
+                reasoning="scroll the production list downward before selecting",
+                task_status="in_progress",
+            )
+        return AgentAction(
+            action="click",
+            x=500,
+            y=500,
+            reasoning="finish after stabilized city production scroll",
+            task_status="complete",
+        )
+
+    def on_action_success(self, memory: ShortTermMemory, action: AgentAction) -> None:
+        if action.action == "scroll":
+            memory.begin_stage("choose_from_memory")
+
+    def verify_completion(self, provider, pil_image, memory, **kwargs) -> VerificationResult:
+        return VerificationResult(True, "ok")
+
+
 class TestRunPrimitiveLoop:
     def setup_method(self):
         ContextManager.reset_instance()
@@ -550,3 +614,144 @@ class TestRunPrimitiveLoop:
         assert result.error_message == "Failed to decide best choice from short-term memory"
         assert status.current_action == "error"
         assert status.current_reasoning == "Failed to decide best choice from short-term memory"
+
+    def test_multistep_trace_events_are_published_to_state_bridge(self, monkeypatch):
+        process = TransitionProcess()
+        provider = DummyProvider()
+        image = Image.new("RGB", (100, 100))
+        memory = ShortTermMemory()
+        memory.start_task("research_select_primitive")
+        bridge = AgentStateBridge(self.ctx, CommandQueue())
+
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            lambda: (image, 1440, 900, 0, 0),
+        )
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
+
+        result = run_primitive_loop(
+            planner_provider=provider,
+            primitive_name="research_select_primitive",
+            screen_w=1440,
+            screen_h=900,
+            normalizing_range=1000,
+            x_offset=0,
+            y_offset=0,
+            strategy_string="",
+            recent_actions_str="없음",
+            hitl_directive=None,
+            memory=memory,
+            ctx=self.ctx,
+            max_steps=4,
+            completion_condition="",
+            planner_img_config=None,
+            state_bridge=bridge,
+            delay_before_action=0,
+        )
+
+        status = bridge.get_status()
+
+        assert result.success is True
+        assert len(status.recent_trace_events) >= 3
+        assert any(event["phase"] == "stage" for event in status.recent_trace_events)
+        assert any(event["phase"] == "plan" for event in status.recent_trace_events)
+        assert any(event["phase"] == "exec" for event in status.recent_trace_events)
+
+    def test_city_production_uses_process_visible_progress_in_state_updates(self, monkeypatch):
+        process = CityProductionVisibleProgressProcess()
+        provider = DummyProvider()
+        image = Image.new("RGB", (100, 100))
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        bridge = AgentStateBridge(self.ctx, CommandQueue())
+        progress_updates: list[tuple[bool, int, int, str]] = []
+
+        original_update_multi_step = bridge.update_multi_step
+
+        def record_update_multi_step(**kwargs):
+            progress_updates.append(
+                (
+                    bool(kwargs.get("active", False)),
+                    int(kwargs.get("step", 0)),
+                    int(kwargs.get("max_steps", 0)),
+                    str(kwargs.get("stage", "")),
+                )
+            )
+            return original_update_multi_step(**kwargs)
+
+        bridge.update_multi_step = record_update_multi_step
+
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            lambda: (image, 1440, 900, 0, 0),
+        )
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
+
+        result = run_primitive_loop(
+            planner_provider=provider,
+            primitive_name="city_production_primitive",
+            screen_w=1440,
+            screen_h=900,
+            normalizing_range=1000,
+            x_offset=0,
+            y_offset=0,
+            strategy_string="",
+            recent_actions_str="없음",
+            hitl_directive=None,
+            memory=memory,
+            ctx=self.ctx,
+            max_steps=18,
+            completion_condition="",
+            planner_img_config=None,
+            state_bridge=bridge,
+            delay_before_action=0,
+        )
+
+        assert result.success is True
+        assert any(active and step == 2 and max_steps == 4 for active, step, max_steps, _ in progress_updates)
+
+    def test_city_production_scroll_waits_before_post_action_capture(self, monkeypatch):
+        process = CityProductionScrollSettleProcess()
+        provider = DummyProvider()
+        image = Image.new("RGB", (100, 100))
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        sleeps: list[float] = []
+
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            lambda: (image, 1440, 900, 0, 0),
+        )
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.time.sleep", lambda seconds: sleeps.append(seconds))
+
+        result = run_primitive_loop(
+            planner_provider=provider,
+            primitive_name="city_production_primitive",
+            screen_w=1440,
+            screen_h=900,
+            normalizing_range=1000,
+            x_offset=0,
+            y_offset=0,
+            strategy_string="",
+            recent_actions_str="없음",
+            hitl_directive=None,
+            memory=memory,
+            ctx=self.ctx,
+            max_steps=18,
+            completion_condition="",
+            planner_img_config=None,
+            delay_before_action=0,
+        )
+
+        assert result.success is True
+        assert sleeps == [0.55]

@@ -64,3 +64,40 @@ def test_execute_action_move_only_moves_cursor(monkeypatch):
     assert calls == [
         ("moveTo", (960, 270), {"duration": 0.2}),
     ]
+
+
+def test_execute_action_scroll_waits_briefly_after_hover_before_wheel(monkeypatch):
+    calls: list[tuple[str, tuple, dict]] = []
+
+    monkeypatch.setattr(
+        "computer_use_test.utils.screen.pyautogui.moveTo",
+        lambda *args, **kwargs: calls.append(("moveTo", args, kwargs)),
+    )
+    monkeypatch.setattr(
+        "computer_use_test.utils.screen.pyautogui.scroll",
+        lambda *args, **kwargs: calls.append(("scroll", args, kwargs)),
+    )
+    monkeypatch.setattr(
+        "computer_use_test.utils.screen.time.sleep",
+        lambda seconds: calls.append(("sleep", (seconds,), {})),
+    )
+
+    execute_action(
+        AgentAction(
+            action="scroll",
+            x=600,
+            y=300,
+            scroll_amount=-650,
+        ),
+        screen_w=1600,
+        screen_h=900,
+        normalizing_range=1000,
+        x_offset=0,
+        y_offset=0,
+    )
+
+    assert calls == [
+        ("moveTo", (960, 270), {"duration": 0.2}),
+        ("sleep", (0.18,), {}),
+        ("scroll", (-650,), {}),
+    ]

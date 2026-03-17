@@ -80,6 +80,7 @@ class ChoiceCatalogState:
     scan_end_reason: str = ""
     last_scroll_direction: str = "down"
     last_new_candidate_count: int = 0
+    last_visible_option_ids: tuple[str, ...] = ()
     downward_scan_scrolls: int = 0
     downward_no_new_streak: int = 0
 
@@ -372,23 +373,23 @@ class ShortTermMemory:
                 self.choice_catalog.scroll_anchor = scroll_anchor
 
         current_ids: set[str] = set()
+        raw_visible_ids: set[str] = set()
         new_candidate_count = 0
+        visible_option_ids: list[str] = []
         for raw in visible_options:
             label = str(raw.get("label", "")).strip()
             if not label:
                 continue
 
             option_id = str(raw.get("id", "")).strip() or _slugify(label)
-            current_ids.add(option_id)
+            raw_visible_ids.add(option_id)
             candidate = self.choice_catalog.candidates.get(option_id)
+            was_selectable = self._candidate_is_selectable(candidate) if candidate is not None else False
             if candidate is None:
                 candidate = ChoiceCandidate(id=option_id, label=label)
                 self.choice_catalog.candidates[option_id] = candidate
-                new_candidate_count += 1
 
             candidate.label = label
-            candidate.visible_now = True
-            candidate.position_hint = "visible"
 
             raw_score = raw.get("score")
             try:
@@ -406,14 +407,30 @@ class ShortTermMemory:
             metadata = {k: v for k, v in metadata.items() if v not in ("", None)}
             candidate.metadata.update(metadata)
 
+            if self._raw_choice_is_selectable(raw):
+                visible_option_ids.append(option_id)
+                current_ids.add(option_id)
+                candidate.visible_now = True
+                candidate.position_hint = "visible"
+                if not was_selectable:
+                    new_candidate_count += 1
+            else:
+                candidate.visible_now = False
+                candidate.position_hint = "unknown"
+
         for option_id, candidate in self.choice_catalog.candidates.items():
             if option_id in current_ids:
+                continue
+            if option_id in raw_visible_ids and not self._candidate_is_selectable(candidate):
+                candidate.visible_now = False
+                candidate.position_hint = "unknown"
                 continue
             if candidate.visible_now:
                 candidate.visible_now = False
                 candidate.position_hint = "above" if scroll_direction == "down" else "below"
 
         self.choice_catalog.last_new_candidate_count = new_candidate_count
+        self.choice_catalog.last_visible_option_ids = tuple(visible_option_ids)
         if not self.choice_catalog.end_reached:
             self.choice_catalog.scan_end_reason = ""
 
@@ -477,6 +494,12 @@ class ShortTermMemory:
         return candidate
 
     @staticmethod
+    def _raw_choice_is_selectable(raw: dict) -> bool:
+        """Whether a visible raw choice can be acted on right now."""
+        selected = bool(raw.get("selected", False))
+        return not bool(raw.get("disabled", False)) and not selected and not bool(raw.get("built", selected))
+
+    @staticmethod
     def _candidate_is_selectable(candidate: ChoiceCandidate) -> bool:
         """Checked/disabled catalog entries are not valid final choices."""
         return (
@@ -493,7 +516,7 @@ class ShortTermMemory:
 
     def choice_catalog_decision_max_tokens(self) -> int:
         """Return a token budget sized for whole-catalog decision prompts."""
-        candidate_count = len(self.choice_catalog.candidates)
+        candidate_count = len(self._selectable_choice_candidates())
         return min(4096, max(1024, 512 + candidate_count * 96))
 
     @staticmethod
@@ -521,11 +544,11 @@ class ShortTermMemory:
         if not self.choice_catalog.enabled:
             return "choice catalog disabled"
 
+        selectable_candidates = self._selectable_choice_candidates()
         lines = [
-            "[choice_catalog] 확인한 후보 "
-            f"{len(self.choice_catalog.candidates)}개 / 목록끝={self.choice_catalog.end_reached}"
+            f"[choice_catalog] 확인한 후보 {len(selectable_candidates)}개 / 목록끝={self.choice_catalog.end_reached}"
         ]
-        for candidate in self.choice_catalog.candidates.values():
+        for candidate in selectable_candidates:
             lines.append(self._format_choice_candidate_line(candidate, include_id=True))
         return "\n".join(lines)
 
@@ -1264,7 +1287,8 @@ class ShortTermMemory:
             lines.append(f"현재 branch: {self.branch}")
 
         if self.choice_catalog.enabled:
-            candidate_count = len(self.choice_catalog.candidates)
+            selectable_candidates = self._selectable_choice_candidates()
+            candidate_count = len(selectable_candidates)
             best = self.get_best_choice()
             lines.append(f"[choice_catalog] 확인한 후보 {candidate_count}개 / 목록끝={self.choice_catalog.end_reached}")
             if self.choice_catalog.downward_scan_scrolls:
@@ -1286,7 +1310,7 @@ class ShortTermMemory:
                 best_note = self.choice_catalog.best_option_reason or "전략상 최적"
                 lines.append(f"최종 선택 후보: {best.label} ({best.position_hint}) - {best_note}")
 
-            display_candidates = list(self.choice_catalog.candidates.values())
+            display_candidates = selectable_candidates
             for candidate in display_candidates:
                 lines.append(self._format_choice_candidate_line(candidate, include_id=False))
 
@@ -1428,3 +1452,11 @@ class ShortTermMemory:
         if anchor is None:
             return ""
         return f"({anchor.x},{anchor.y}) [{anchor.left},{anchor.top}]→[{anchor.right},{anchor.bottom}]"
+
+    def _selectable_choice_candidates(self) -> list[ChoiceCandidate]:
+        """Return only candidates that can still be selected."""
+        return [
+            candidate
+            for candidate in self.choice_catalog.candidates.values()
+            if self._candidate_is_selectable(candidate)
+        ]

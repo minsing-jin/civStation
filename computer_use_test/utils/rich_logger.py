@@ -108,8 +108,8 @@ class RichLogger:
             },
         }
 
-        # Recent log lines (max 10)
-        self._log_lines: deque[str] = deque(maxlen=10)
+        # Recent trace/log lines
+        self._log_lines: deque[str] = deque(maxlen=20)
 
     # ------------------------------------------------------------------
     # Live dashboard management

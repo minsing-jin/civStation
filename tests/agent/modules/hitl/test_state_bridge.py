@@ -56,6 +56,21 @@ class TestAgentStateBridge:
         assert status.multi_step_stall_count == 1
         assert status.multi_step_best_choice == "기념비 (above)"
 
+    def test_update_trace_events(self):
+        self.bridge.append_trace_event(
+            primitive="governor_primitive",
+            stage="governor_promote_select",
+            phase="plan",
+            summary="choose governor skill",
+            detail="promotion popup opened and confirm is disabled",
+        )
+        status = self.bridge.get_status()
+
+        assert len(status.recent_trace_events) == 1
+        assert status.recent_trace_events[0]["primitive"] == "governor_primitive"
+        assert status.recent_trace_events[0]["stage"] == "governor_promote_select"
+        assert status.recent_trace_events[0]["phase"] == "plan"
+
     def test_queued_directives_reflected(self):
         self.queue.push(Directive(directive_type=DirectiveType.CHANGE_STRATEGY, payload="문화 승리", source="test"))
         status = self.bridge.get_status()
@@ -97,5 +112,6 @@ class TestAgentStateBridge:
             "multi_step_stall_count",
             "multi_step_best_choice",
             "stm_summary",
+            "recent_trace_events",
         }
         assert set(d.keys()) == expected_keys

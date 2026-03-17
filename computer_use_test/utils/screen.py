@@ -17,6 +17,7 @@ just the game area, eliminating desktop noise (Dock, menu bar, etc.).
 from __future__ import annotations
 
 import logging
+import time
 from types import SimpleNamespace
 
 from PIL import Image
@@ -32,6 +33,7 @@ VLM_JPEG_QUALITY: int = 80
 
 # Keywords to match the Civilization VI window (case-insensitive)
 _GAME_WINDOW_KEYWORDS = ("civilization", "civ6", "civ vi")
+_SCROLL_HOVER_SETTLE_SECONDS = 0.18
 
 
 def _unavailable_pyautogui_method(*args, **kwargs):
@@ -336,6 +338,7 @@ def execute_action(
             action.scroll_amount,
         )
         pyautogui.moveTo(real_x, real_y, duration=0.2)
+        time.sleep(_SCROLL_HOVER_SETTLE_SECONDS)
         pyautogui.scroll(action.scroll_amount)
 
     elif action_type == "move":

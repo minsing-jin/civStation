@@ -297,6 +297,13 @@ class TestPromptUpdates:
         assert "총독 타이틀" in criteria
         assert "펜" in criteria
 
+    def test_governor_prompt_requires_skill_selection_before_confirm_and_city_before_assign(self):
+        prompt = get_primitive_prompt("governor_primitive")
+        assert "왼쪽 팝업" in prompt
+        assert "확정" in prompt
+        assert "비활성" in prompt
+        assert "배정" in prompt
+
     def test_policy_prompt_contains_two_entry_branches(self):
         prompt = get_primitive_prompt("policy_primitive")
         assert "사회제도 완성" in prompt
@@ -305,6 +312,9 @@ class TestPromptUpdates:
         assert "실패한 탭 하나만 다시 찾아 cached 좌표를 수정한다" in prompt
         assert "'전체' 탭은 초기 overview 상태" in prompt
         assert "혼합 overview 목록이면 '전체' 상태" in prompt
+
+    def test_city_production_registry_allows_retry_heavy_flow(self):
+        assert PRIMITIVE_REGISTRY["city_production_primitive"]["max_steps"] >= 18
 
     def test_popup_prompt_handles_policy_change_popup(self):
         prompt = get_primitive_prompt("popup_primitive")
@@ -325,6 +335,166 @@ class TestPromptUpdates:
 
 
 class TestEntryGatedProcesses:
+    def test_governor_process_factory_returns_governor_process(self):
+        process = get_multi_step_process("governor_primitive", "")
+
+        assert type(process).__name__ == "GovernorProcess"
+
+    def test_governor_process_uses_entry_action_before_screen_is_ready(self):
+        process = get_multi_step_process("governor_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("governor_primitive")
+        process.initialize(memory)
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "governor_mode": "notification",
+                        "governor_screen_ready": False,
+                        "notification_visible": True,
+                        "confirm_enabled": False,
+                        "assign_enabled": False,
+                        "left_city_popup_visible": False,
+                        "reasoning": "우하단 총독 타이틀 버튼만 보임",
+                    }
+                )
+            ]
+        )
+
+        action = process.plan_action(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert action is not None
+        assert action.action == "press"
+        assert action.key == "enter"
+        assert memory.current_stage == "governor_entry"
+
+    def test_governor_process_disabled_confirm_returns_to_skill_selection(self):
+        process = get_multi_step_process("governor_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("governor_primitive")
+        memory.mark_substep("governor_entry_done")
+        memory.begin_stage("governor_promote_confirm")
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "governor_mode": "promote_select",
+                        "governor_screen_ready": True,
+                        "notification_visible": False,
+                        "confirm_enabled": False,
+                        "assign_enabled": False,
+                        "left_city_popup_visible": False,
+                        "reasoning": "스킬 미선택이라 확정 비활성",
+                    }
+                )
+            ]
+        )
+
+        action = process.plan_action(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert isinstance(action, StageTransition)
+        assert action.stage == "governor_promote_select"
+        assert memory.current_stage == "governor_promote_select"
+
+    def test_governor_process_disabled_assign_returns_to_city_selection(self):
+        process = get_multi_step_process("governor_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("governor_primitive")
+        memory.mark_substep("governor_entry_done")
+        memory.begin_stage("governor_assign_confirm")
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "governor_mode": "assign_city",
+                        "governor_screen_ready": True,
+                        "notification_visible": False,
+                        "confirm_enabled": False,
+                        "assign_enabled": False,
+                        "left_city_popup_visible": True,
+                        "reasoning": "왼쪽 도시 팝업은 보이지만 배정 비활성",
+                    }
+                )
+            ]
+        )
+
+        action = process.plan_action(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert isinstance(action, StageTransition)
+        assert action.stage == "governor_assign_city"
+        assert memory.current_stage == "governor_assign_city"
+
+    def test_governor_process_enabled_assign_clicks_confirm(self):
+        process = get_multi_step_process("governor_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("governor_primitive")
+        memory.mark_substep("governor_entry_done")
+        memory.begin_stage("governor_assign_confirm")
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "governor_mode": "assign_confirm",
+                        "governor_screen_ready": True,
+                        "notification_visible": False,
+                        "confirm_enabled": False,
+                        "assign_enabled": True,
+                        "left_city_popup_visible": True,
+                        "reasoning": "도시 선택이 끝나 배정 가능",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "action": "click",
+                        "x": 840,
+                        "y": 910,
+                        "button": "left",
+                        "reasoning": "초록색 배정 버튼 클릭",
+                        "task_status": "complete",
+                    }
+                ),
+            ]
+        )
+
+        action = process.plan_action(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert action is not None
+        assert action.action == "click"
+        assert action.task_status == "complete"
+        assert "배정" in (action.reasoning or "")
+
     def test_research_process_uses_entry_action_before_tree_is_ready(self):
         process = get_multi_step_process("research_select_primitive", "")
         memory = ShortTermMemory()
@@ -634,7 +804,7 @@ class TestEntryGatedProcesses:
         assert memory.current_stage == "scroll_down_for_hidden_choices"
         assert action is not None
         assert action.action == "scroll"
-        assert action.scroll_amount < 0
+        assert action.scroll_amount == -420
         assert action.x >= 820
         assert action.y == 520
 
@@ -1115,6 +1285,7 @@ class TestEntryGatedProcesses:
         assert "골드" in instruction
         assert "보라" in instruction
         assert "같은 타일 본체를 다시 클릭" in instruction
+        assert "캠퍼스를 기본값처럼 고르지 마" in instruction
 
     def test_city_production_placement_no_progress_retries_without_generic_fallback(self):
         process = get_multi_step_process("city_production_primitive", "")
@@ -1296,6 +1467,298 @@ class TestEntryGatedProcesses:
         assert verification.complete is False
         assert memory.current_stage == "production_place_confirm"
         assert provider.last_use_thinking is False
+
+    def test_city_production_confirm_popup_click_is_terminal_complete(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("placement_map")
+        memory.begin_stage("production_place_confirm")
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "action": "click",
+                        "x": 610,
+                        "y": 560,
+                        "reasoning": "확인 팝업의 예 버튼 클릭",
+                        "task_status": "in_progress",
+                    }
+                )
+            ]
+        )
+
+        action = process.plan_action(
+            provider,
+            Image.new("RGB", (1600, 900)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert action is not None
+        assert action.task_status == "complete"
+        assert "'예' 또는 확인 버튼" in provider.last_text
+
+    def test_city_production_scroll_verification_rejects_unchanged_visible_options(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("choice_list")
+        memory.begin_stage("scroll_down_for_hidden_choices")
+        memory.remember_choices(
+            [
+                {"id": "monument", "label": "기념비"},
+                {"id": "builder", "label": "건설자"},
+                {"id": "campus", "label": "캠퍼스", "disabled": True},
+            ],
+            end_of_list=False,
+            scroll_anchor={"x": 760, "y": 520, "left": 620, "top": 100, "right": 900, "bottom": 920},
+        )
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "visible_options": [
+                            {"id": "monument", "label": "기념비"},
+                            {"id": "builder", "label": "건설자"},
+                            {"id": "campus", "label": "캠퍼스", "disabled": True},
+                        ],
+                        "end_of_list": False,
+                        "scroll_anchor": {
+                            "x": 760,
+                            "y": 520,
+                            "left": 620,
+                            "top": 100,
+                            "right": 900,
+                            "bottom": 920,
+                        },
+                        "reasoning": "같은 목록이 그대로 보임",
+                    }
+                )
+            ]
+        )
+
+        verification = process.verify_action_success(
+            provider,
+            Image.new("RGB", (1600, 900)),
+            memory,
+            AgentAction(action="scroll", x=880, y=520, scroll_amount=-650, task_status="in_progress"),
+        )
+
+        assert verification.handled is True
+        assert verification.passed is False
+        assert "같은 선택지" in verification.reason
+
+    def test_city_production_observation_summary_hides_disabled_and_checked_entries(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        summary = process._summarize_visible_options(  # noqa: SLF001
+            ObservationBundle(
+                visible_options=[
+                    {"id": "campus", "label": "캠퍼스", "disabled": True},
+                    {"id": "granary", "label": "곡창", "selected": True},
+                    {"id": "monument", "label": "기념비"},
+                ],
+                end_of_list=False,
+            )
+        )
+
+        assert "기념비" in summary
+        assert "캠퍼스" not in summary
+        assert "곡창" not in summary
+
+    def test_city_production_scroll_verification_ignores_disabled_only_viewport_changes(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("choice_list")
+        memory.begin_stage("scroll_down_for_hidden_choices")
+        memory.remember_choices(
+            [
+                {"id": "monument", "label": "기념비"},
+                {"id": "builder", "label": "건설자"},
+            ],
+            end_of_list=False,
+            scroll_anchor={"x": 760, "y": 520, "left": 620, "top": 100, "right": 900, "bottom": 920},
+        )
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "visible_options": [
+                            {"id": "monument", "label": "기념비"},
+                            {"id": "builder", "label": "건설자"},
+                            {"id": "campus", "label": "캠퍼스", "disabled": True},
+                        ],
+                        "end_of_list": False,
+                        "scroll_anchor": {
+                            "x": 760,
+                            "y": 520,
+                            "left": 620,
+                            "top": 100,
+                            "right": 900,
+                            "bottom": 920,
+                        },
+                        "reasoning": "새로 보인 것은 어두운 캠퍼스뿐",
+                    }
+                )
+            ]
+        )
+
+        verification = process.verify_action_success(
+            provider,
+            Image.new("RGB", (1600, 900)),
+            memory,
+            AgentAction(action="scroll", x=880, y=520, scroll_amount=-650, task_status="in_progress"),
+        )
+
+        assert verification.handled is True
+        assert verification.passed is False
+        assert "같은 선택지" in verification.reason
+
+    def test_choice_catalog_treats_new_disabled_rows_as_non_selectable_scan_progress(self):
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+
+        memory.remember_choices(
+            [{"id": "monument", "label": "기념비"}],
+            end_of_list=False,
+            scroll_direction="down",
+        )
+        memory.register_choice_scroll(direction="down")
+        memory.remember_choices(
+            [
+                {"id": "monument", "label": "기념비"},
+                {"id": "campus", "label": "캠퍼스", "disabled": True},
+            ],
+            end_of_list=False,
+            scroll_direction="down",
+        )
+
+        assert memory.choice_catalog.last_new_candidate_count == 0
+        assert memory.choice_catalog.last_visible_option_ids == ("monument",)
+        assert memory.choice_catalog.end_reached is False
+
+    def test_choice_catalog_removes_candidate_from_visible_prompt_when_it_turns_disabled(self):
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.remember_choices(
+            [{"id": "campus", "label": "캠퍼스"}],
+            end_of_list=False,
+            scroll_direction="down",
+        )
+        memory.set_best_choice(option_id="campus", reason="과학 우선")
+
+        memory.remember_choices(
+            [{"id": "campus", "label": "캠퍼스", "disabled": True}],
+            end_of_list=False,
+            scroll_direction="down",
+        )
+
+        prompt_memory = memory.to_prompt_string()
+
+        assert memory.get_best_choice() is None
+        assert "- 캠퍼스" not in prompt_memory
+        assert "캠퍼스 (visible)" not in prompt_memory
+
+    def test_city_production_visible_progress_uses_branch_stage_not_action_count(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+
+        entry_progress = process.get_visible_progress(memory, executed_steps=0, hard_max_steps=18)
+
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("choice_list")
+        memory.begin_stage("hover_scroll_anchor")
+        scan_progress = process.get_visible_progress(memory, executed_steps=5, hard_max_steps=18)
+
+        memory.begin_stage("choose_from_memory")
+        choose_progress = process.get_visible_progress(memory, executed_steps=6, hard_max_steps=18)
+
+        memory.begin_stage("select_from_memory")
+        select_progress = process.get_visible_progress(memory, executed_steps=7, hard_max_steps=18)
+
+        assert entry_progress == (1, 2)
+        assert scan_progress == (2, 4)
+        assert choose_progress == (3, 4)
+        assert select_progress == (4, 4)
+
+    def test_city_production_visible_progress_keeps_fallback_in_same_stage_bucket(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("placement_map")
+        memory.begin_stage("generic_fallback")
+        memory.set_fallback_return_stage("production_place", "city_production_placement:production_place")
+
+        progress = process.get_visible_progress(memory, executed_steps=9, hard_max_steps=18)
+
+        assert progress == (2, 3)
+
+    def test_city_production_visible_progress_expands_for_purchase_reclick_branch(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("placement_map")
+        memory.remember_city_placement_target(
+            x=620,
+            y=700,
+            button="right",
+            origin="purchase_button",
+            reason="구매형 타일",
+            tile_color="purple",
+        )
+        memory.begin_stage("production_place_reclick")
+
+        reclick_progress = process.get_visible_progress(memory, executed_steps=3, hard_max_steps=18)
+
+        memory.begin_stage("production_place_confirm")
+        confirm_progress = process.get_visible_progress(memory, executed_steps=4, hard_max_steps=18)
+
+        assert reclick_progress == (3, 4)
+        assert confirm_progress == (4, 4)
+
+    def test_city_production_restore_scroll_uses_same_reduced_magnitude_upward(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("choice_list")
+        memory.begin_stage("restore_best_choice_visibility")
+        memory.remember_choices(
+            [{"label": "기념비"}],
+            end_of_list=True,
+            scroll_anchor={"x": 700, "y": 500, "left": 580, "top": 100, "right": 900, "bottom": 920},
+        )
+        memory.choice_catalog.candidates["개척자"] = ChoiceCandidate(
+            id="개척자",
+            label="개척자",
+            visible_now=False,
+            position_hint="above",
+        )
+        memory.set_best_choice(option_id="개척자", reason="확장 우선")
+
+        scroll_action = process.plan_action(
+            FakeProvider([]),
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert scroll_action is not None
+        assert scroll_action.action == "scroll"
+        assert scroll_action.scroll_amount == 420
 
     def test_city_production_select_click_verification_can_finish_without_followup(self):
         process = get_multi_step_process("city_production_primitive", "")

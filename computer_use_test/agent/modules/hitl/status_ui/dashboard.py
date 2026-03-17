@@ -80,6 +80,19 @@ DASHBOARD_HTML = """\
   .panel ul { list-style: none; }
   .panel ul li { padding: 3px 0; border-bottom: 1px solid #0f346033; }
   .panel ul li:last-child { border-bottom: none; }
+  .trace-list {
+    white-space: pre-wrap;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.82rem;
+    line-height: 1.45;
+    color: #cfd8dc;
+    background: #1a1a2e;
+    border: 1px solid #0f346055;
+    border-radius: 6px;
+    padding: 10px;
+    max-height: 260px;
+    overflow: auto;
+  }
   .badge {
     display: inline-block;
     padding: 2px 8px;
@@ -377,6 +390,10 @@ DASHBOARD_HTML = """\
     <h2>Recent Actions</h2>
     <ul id="recent-list"><li>No actions yet</li></ul>
   </div>
+  <div class="panel full-width">
+    <h2>Trace Feed</h2>
+    <div class="trace-list" id="trace-feed">No trace events yet</div>
+  </div>
   <!-- Input Panel -->
   <div class="panel full-width">
     <h2>Send Directive</h2>
@@ -489,6 +506,15 @@ function updateDashboard(d) {
     ).join('');
   } else {
     rl.innerHTML = '<li>No actions yet</li>';
+  }
+
+  const traceEl = document.getElementById('trace-feed');
+  if (d.recent_trace_events && d.recent_trace_events.length) {
+    traceEl.textContent = d.recent_trace_events.map(t =>
+      `[${t.phase}] [${t.primitive}] ${t.stage || '-'} :: ${t.summary}${t.detail ? ' -- ' + t.detail : ''}`
+    ).join('\\n');
+  } else {
+    traceEl.textContent = 'No trace events yet';
   }
 }
 

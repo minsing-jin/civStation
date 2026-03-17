@@ -73,8 +73,10 @@ PRIMITIVE_REGISTRY: dict[str, dict] = {
         "priority": 2,
         "multi_step": True,
         "process_kind": "scripted",
-        "max_steps": 8,
-        "completion_condition": "[배정] 버튼 클릭 완료 시 task_status='complete'.",
+        "max_steps": 10,
+        "completion_condition": (
+            "총독 능력 [확정] 클릭 완료 또는 도시 선택 후 [배정] 버튼 클릭 완료 시 task_status='complete'."
+        ),
     },
     "voting_primitive": {
         "criteria": "세계의회 투표 화면. 정책 A/B 선택, 찬성/반대 기호, 합의안 투표.",
@@ -122,7 +124,7 @@ PRIMITIVE_REGISTRY: dict[str, dict] = {
         "priority": 6,
         "multi_step": True,
         "process_kind": "observation_assisted",
-        "max_steps": 12,
+        "max_steps": 18,
         "completion_condition": "생산 품목 클릭 완료 또는 배치 확인 시 task_status='complete'.",
         "img_config_preset": "planner_high_quality",
     },

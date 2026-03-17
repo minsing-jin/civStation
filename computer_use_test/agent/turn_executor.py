@@ -68,6 +68,7 @@ logger = logging.getLogger(__name__)
 
 # finish_reason values that indicate truncation across providers
 _TRUNCATION_REASONS = {"max_tokens", "length", "MAX_TOKENS"}
+_CITY_PRODUCTION_SCROLL_POST_ACTION_WAIT_SECONDS = 0.55
 
 # Module-level TurnValidator singleton (created on first use)
 _turn_validator: TurnValidator | None = None
@@ -79,6 +80,62 @@ def _get_turn_validator() -> TurnValidator:
     if _turn_validator is None:
         _turn_validator = TurnValidator()
     return _turn_validator
+
+
+def _primitive_trace_tag(primitive_name: str) -> str:
+    """Return a compact display tag for one primitive trace line."""
+    overrides = {
+        "city_production_primitive": "CITY_PROD",
+        "governor_primitive": "GOVERNOR",
+        "research_select_primitive": "RESEARCH",
+        "culture_decision_primitive": "CULTURE",
+        "policy_primitive": "POLICY",
+        "religion_primitive": "RELIGION",
+        "voting_primitive": "VOTING",
+    }
+    if primitive_name in overrides:
+        return overrides[primitive_name]
+    return primitive_name.replace("_primitive", "").upper()
+
+
+def _emit_runtime_trace(
+    *,
+    rl: RichLogger,
+    state_bridge: AgentStateBridge | None,
+    primitive_name: str,
+    stage: str,
+    phase: str,
+    summary: str,
+    detail: str = "",
+) -> None:
+    """Emit one structured runtime trace event to Rich and HITL status."""
+    rl.primitive_event(
+        _primitive_trace_tag(primitive_name),
+        f"{phase} | stage={stage or '-'} | {summary}{f' | {detail}' if detail else ''}",
+    )
+    if state_bridge:
+        state_bridge.append_trace_event(
+            primitive=primitive_name,
+            stage=stage or "",
+            phase=phase,
+            summary=summary,
+            detail=detail,
+        )
+
+
+def _post_action_wait_seconds(
+    primitive_name: str,
+    actions: list[AgentAction],
+    *,
+    delay_before_action: float,
+) -> float:
+    """Return a capture-settle delay tuned to the executed action bundle."""
+    if primitive_name == "policy_primitive":
+        return 0.5
+    default_wait = min(delay_before_action, 0.3)
+    if primitive_name == "city_production_primitive" and any(action.action == "scroll" for action in actions):
+        return max(default_wait, _CITY_PRODUCTION_SCROLL_POST_ACTION_WAIT_SECONDS)
+    return default_wait
 
 
 @dataclass
@@ -515,14 +572,34 @@ def run_primitive_loop(
     def _emit_city_production_event(label: str, detail: str) -> None:
         if primitive_name != "city_production_primitive":
             return
-        rl.primitive_event("CITY_PROD", f"{label} | {detail}")
+        _emit_runtime_trace(
+            rl=rl,
+            state_bridge=state_bridge,
+            primitive_name=primitive_name,
+            stage=memory.current_stage or "-",
+            phase=label,
+            summary=detail,
+        )
+
+    def _visible_progress(displayed_step: int) -> tuple[int, int]:
+        step_value, max_value = process.get_visible_progress(
+            memory,
+            executed_steps=displayed_step,
+            hard_max_steps=max_steps,
+        )
+        step_value = max(0, step_value)
+        max_value = max(0, max_value)
+        if max_value and step_value > max_value:
+            step_value = max_value
+        return step_value, max_value
 
     def _refresh_multi_step_debug() -> None:
         stm_str = _multi_step_stm_summary()
+        visible_step, visible_max_steps = _visible_progress(result.steps_taken)
         rl.update_multi_step(
             active=True,
-            step=result.steps_taken,
-            max_steps=max_steps,
+            step=visible_step,
+            max_steps=visible_max_steps,
             plan_ms=(plan_end - step_start) * 1000,
             exec_ms=(exec_end - plan_end) * 1000,
             stage=memory.current_stage,
@@ -533,8 +610,8 @@ def run_primitive_loop(
         if state_bridge:
             state_bridge.update_multi_step(
                 active=True,
-                step=result.steps_taken,
-                max_steps=max_steps,
+                step=visible_step,
+                max_steps=visible_max_steps,
                 plan_ms=(plan_end - step_start) * 1000,
                 exec_ms=(exec_end - plan_end) * 1000,
                 stage=memory.current_stage,
@@ -593,11 +670,22 @@ def run_primitive_loop(
                 f"stage={memory.current_stage or '-'} | {memory.last_observation_summary or '-'} | "
                 f"anchor={memory.last_observation_anchor or '-'}",
             )
+            if primitive_name != "city_production_primitive":
+                _emit_runtime_trace(
+                    rl=rl,
+                    state_bridge=state_bridge,
+                    primitive_name=primitive_name,
+                    stage=memory.current_stage or "-",
+                    phase="observe",
+                    summary=memory.last_observation_summary or "observation completed",
+                    detail=memory.last_observation_anchor or "",
+                )
             stm_str = _multi_step_stm_summary()
+            visible_step, visible_max_steps = _visible_progress(step + 1)
             rl.update_multi_step(
                 active=True,
-                step=step + 1,
-                max_steps=max_steps,
+                step=visible_step,
+                max_steps=visible_max_steps,
                 plan_ms=(plan_end - step_start) * 1000,
                 exec_ms=0,
                 stage=memory.current_stage,
@@ -608,8 +696,8 @@ def run_primitive_loop(
             if state_bridge:
                 state_bridge.update_multi_step(
                     active=True,
-                    step=step + 1,
-                    max_steps=max_steps,
+                    step=visible_step,
+                    max_steps=visible_max_steps,
                     plan_ms=(plan_end - step_start) * 1000,
                     exec_ms=0,
                     stage=memory.current_stage,
@@ -668,14 +756,20 @@ def run_primitive_loop(
                 action.stage,
                 action.reason or "-",
             )
-            _emit_city_production_event(
-                "stage",
-                f"{memory.current_stage or '-'} | reason={action.reason or '-'}",
+            _emit_runtime_trace(
+                rl=rl,
+                state_bridge=state_bridge,
+                primitive_name=primitive_name,
+                stage=memory.current_stage or "-",
+                phase="stage",
+                summary=action.reason or "internal stage transition",
+                detail=f"next={action.stage}",
             )
+            visible_step, visible_max_steps = _visible_progress(result.steps_taken)
             rl.update_multi_step(
                 active=True,
-                step=result.steps_taken,
-                max_steps=max_steps,
+                step=visible_step,
+                max_steps=visible_max_steps,
                 plan_ms=(plan_end - step_start) * 1000,
                 exec_ms=0,
                 stage=memory.current_stage,
@@ -686,8 +780,8 @@ def run_primitive_loop(
             if state_bridge:
                 state_bridge.update_multi_step(
                     active=True,
-                    step=result.steps_taken,
-                    max_steps=max_steps,
+                    step=visible_step,
+                    max_steps=visible_max_steps,
                     plan_ms=(plan_end - step_start) * 1000,
                     exec_ms=0,
                     stage=memory.current_stage,
@@ -713,13 +807,26 @@ def run_primitive_loop(
         result.last_action = actions_list[-1]
         result.steps_taken += 1
 
-        action_extra = {"Step": f"{step + 1}/{max_steps}", "Status": display_action.task_status or "in_progress"}
+        visible_step, visible_max_steps = _visible_progress(result.steps_taken)
+        action_extra = {
+            "Step": f"{visible_step}/{visible_max_steps}",
+            "Status": display_action.task_status or "in_progress",
+        }
         if is_action_bundle:
             action_extra["Multi-Action"] = f"{len(actions_list)} actions"
         _emit_city_production_event(
             "plan",
             f"stage={memory.current_stage or '-'} | {memory.last_planned_action or planned_summary}",
         )
+        if primitive_name != "city_production_primitive":
+            _emit_runtime_trace(
+                rl=rl,
+                state_bridge=state_bridge,
+                primitive_name=primitive_name,
+                stage=memory.current_stage or "-",
+                phase="plan",
+                summary=memory.last_planned_action or planned_summary,
+            )
         _log_policy_state("planned-actions", actions_list)
         rl.action_result(
             action_type=display_action.action,
@@ -789,12 +896,22 @@ def run_primitive_loop(
             "exec",
             f"stage={memory.current_stage or '-'} | {memory.last_executed_action or executed_summary}",
         )
+        if primitive_name != "city_production_primitive":
+            _emit_runtime_trace(
+                rl=rl,
+                state_bridge=state_bridge,
+                primitive_name=primitive_name,
+                stage=memory.current_stage or "-",
+                phase="exec",
+                summary=memory.last_executed_action or executed_summary,
+            )
 
         stm_str = _multi_step_stm_summary()
+        visible_step, visible_max_steps = _visible_progress(result.steps_taken)
         rl.update_multi_step(
             active=True,
-            step=step + 1,
-            max_steps=max_steps,
+            step=visible_step,
+            max_steps=visible_max_steps,
             plan_ms=(plan_end - step_start) * 1000,
             exec_ms=(exec_end - plan_end) * 1000,
             stage=memory.current_stage,
@@ -805,8 +922,8 @@ def run_primitive_loop(
         if state_bridge:
             state_bridge.update_multi_step(
                 active=True,
-                step=step + 1,
-                max_steps=max_steps,
+                step=visible_step,
+                max_steps=visible_max_steps,
                 plan_ms=(plan_end - step_start) * 1000,
                 exec_ms=(exec_end - plan_end) * 1000,
                 stage=memory.current_stage,
@@ -843,7 +960,11 @@ def run_primitive_loop(
             stage=memory.current_stage,
         )
 
-        post_action_wait = 0.5 if primitive_name == "policy_primitive" else min(delay_before_action, 0.3)
+        post_action_wait = _post_action_wait_seconds(
+            primitive_name,
+            actions_list,
+            delay_before_action=delay_before_action,
+        )
         if post_action_wait > 0:
             time.sleep(post_action_wait)
         post_image, *_ = capture_screen_pil()
@@ -945,6 +1066,14 @@ def run_primitive_loop(
                 if verification.complete:
                     result.completed = True
                     result.success = True
+                    _emit_runtime_trace(
+                        rl=rl,
+                        state_bridge=state_bridge,
+                        primitive_name=primitive_name,
+                        stage=memory.current_stage or "-",
+                        phase="complete",
+                        summary=verification.reason or "completion verified",
+                    )
                     logger.info(f"Primitive loop completed: {primitive_name} in {step + 1} steps")
                     break
                 logger.warning(
@@ -1028,6 +1157,14 @@ def run_primitive_loop(
             if verification.complete:
                 result.completed = True
                 result.success = True
+                _emit_runtime_trace(
+                    rl=rl,
+                    state_bridge=state_bridge,
+                    primitive_name=primitive_name,
+                    stage=memory.current_stage or "-",
+                    phase="complete",
+                    summary=verification.reason or "completion verified",
+                )
                 logger.info(f"Primitive loop completed: {primitive_name} in {step + 1} steps")
                 break
             logger.warning(
@@ -1107,6 +1244,15 @@ def run_primitive_loop(
             img_config=planner_img_config,
         )
         if no_progress_resolution.handled:
+            _emit_runtime_trace(
+                rl=rl,
+                state_bridge=state_bridge,
+                primitive_name=primitive_name,
+                stage=memory.current_stage or "-",
+                phase="retry",
+                summary="no progress handled",
+                detail=memory.last_planned_action or "",
+            )
             memory.failure_count = 0
             _sync_policy_cache_to_context()
             _refresh_multi_step_debug()
@@ -1115,6 +1261,14 @@ def run_primitive_loop(
         if no_progress_resolution.reroute:
             result.re_route = True
             result.error_message = no_progress_resolution.error_message or "Process requested reroute"
+            _emit_runtime_trace(
+                rl=rl,
+                state_bridge=state_bridge,
+                primitive_name=primitive_name,
+                stage=memory.current_stage or "-",
+                phase="error",
+                summary=result.error_message,
+            )
             _sync_policy_cache_to_context()
             _log_policy_state("no-progress reroute", actions_list)
             break
@@ -1127,16 +1281,40 @@ def run_primitive_loop(
 
         if process.supports_observation and not rollback_used and memory.restore_last_checkpoint():
             rollback_used = True
+            _emit_runtime_trace(
+                rl=rl,
+                state_bridge=state_bridge,
+                primitive_name=primitive_name,
+                stage=memory.current_stage or "-",
+                phase="retry",
+                summary="rollback to last checkpoint",
+            )
             logger.info("No progress twice -> rollback to last observation checkpoint for %s", primitive_name)
             continue
 
         result.re_route = True
         result.error_message = "No UI change for 2 consecutive steps"
+        _emit_runtime_trace(
+            rl=rl,
+            state_bridge=state_bridge,
+            primitive_name=primitive_name,
+            stage=memory.current_stage or "-",
+            phase="error",
+            summary=result.error_message,
+        )
         logger.info("No UI change for 2 steps — signaling re-route from %s", primitive_name)
         break
 
     if not result.completed and not result.re_route and not result.error_message:
-        result.error_message = f"Primitive loop reached max_steps ({max_steps}) without completion"
+        result.error_message = f"Primitive loop reached safety action cap ({max_steps}) without completion"
+        _emit_runtime_trace(
+            rl=rl,
+            state_bridge=state_bridge,
+            primitive_name=primitive_name,
+            stage=memory.current_stage or "-",
+            phase="error",
+            summary=result.error_message,
+        )
         logger.warning(result.error_message)
 
     if result.error_message:
@@ -1519,9 +1697,27 @@ def run_one_turn(
                     )
                     if action is not None and not (isinstance(action, list) and len(action) == 0):
                         single_act = action[0] if isinstance(action, list) else action
+                        _emit_runtime_trace(
+                            rl=rl,
+                            state_bridge=state_bridge,
+                            primitive_name=primitive_name,
+                            stage="single_step",
+                            phase="plan",
+                            summary=f"{single_act.action} @ ({single_act.x}, {single_act.y})",
+                            detail=single_act.reasoning or "",
+                        )
                         if delay_before_action > 0:
                             time.sleep(delay_before_action)
                         execute_action(single_act, screen_w, screen_h, normalizing_range, x_offset, y_offset)
+                        _emit_runtime_trace(
+                            rl=rl,
+                            state_bridge=state_bridge,
+                            primitive_name=primitive_name,
+                            stage="single_step",
+                            phase="exec",
+                            summary=f"{single_act.action} executed",
+                            detail=single_act.reasoning or "",
+                        )
                         ctx.record_action(
                             action_type=single_act.action,
                             primitive=primitive_name,
@@ -1620,6 +1816,14 @@ def run_one_turn(
     if action is None or (isinstance(action, list) and len(action) == 0):
         logger.error("  VLM returned no action. Turn aborted.")
         rl.update_phase("idle")
+        _emit_runtime_trace(
+            rl=rl,
+            state_bridge=state_bridge,
+            primitive_name=primitive_name,
+            stage="single_step",
+            phase="error",
+            summary="VLM returned no action",
+        )
         ctx.record_action(
             action_type="none",
             primitive=primitive_name,
@@ -1645,6 +1849,23 @@ def run_one_turn(
         extra["Text"] = display_action.text
     if isinstance(action, list) and len(action) > 1:
         extra["Multi-Action"] = f"{len(action)} actions"
+    plan_summary = (
+        f"{display_action.action} @ ({display_action.x}, {display_action.y})"
+        if display_action.action != "drag"
+        else (
+            f"{display_action.action} @ ({display_action.x}, {display_action.y}) -> "
+            f"({display_action.end_x}, {display_action.end_y})"
+        )
+    )
+    _emit_runtime_trace(
+        rl=rl,
+        state_bridge=state_bridge,
+        primitive_name=primitive_name,
+        stage="single_step",
+        phase="plan",
+        summary=plan_summary,
+        detail=display_action.reasoning or "",
+    )
     rl.action_result(
         action_type=display_action.action,
         coords=(display_action.x, display_action.y),
@@ -1664,12 +1885,22 @@ def run_one_turn(
 
     # Normalize to list for uniform handling
     actions_list: list[AgentAction] = action if isinstance(action, list) else [action]
+    first_action = actions_list[0]
 
     execution_result = "success"
     error_message = ""
     for i, act in enumerate(actions_list):
         try:
             execute_action(act, screen_w, screen_h, normalizing_range, x_offset, y_offset)
+            _emit_runtime_trace(
+                rl=rl,
+                state_bridge=state_bridge,
+                primitive_name=primitive_name,
+                stage="single_step",
+                phase="exec",
+                summary=f"{act.action} executed",
+                detail=act.reasoning or "",
+            )
             if len(actions_list) > 1:
                 logger.debug(f"Multi-action {i + 1}/{len(actions_list)} executed: {act.action}")
                 if i < len(actions_list) - 1:
@@ -1678,16 +1909,33 @@ def run_one_turn(
             rl.execution_status(False, str(e))
             execution_result = "failed"
             error_message = str(e)
+            _emit_runtime_trace(
+                rl=rl,
+                state_bridge=state_bridge,
+                primitive_name=primitive_name,
+                stage="single_step",
+                phase="error",
+                summary=f"{act.action} failed",
+                detail=str(e),
+            )
             break
 
     if execution_result == "success":
         rl.execution_status(True)
+        _emit_runtime_trace(
+            rl=rl,
+            state_bridge=state_bridge,
+            primitive_name=primitive_name,
+            stage="single_step",
+            phase="complete",
+            summary="single-step execution complete",
+            detail=first_action.reasoning or "",
+        )
 
     rl.update_phase("idle")
 
     # Step 5: Record action(s) in context
     # Use the first action for summary; record all in context
-    first_action = actions_list[0]
     for act in actions_list:
         ctx.record_action(
             action_type=act.action,

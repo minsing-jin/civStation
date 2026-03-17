@@ -118,6 +118,32 @@ class TestShortTermMemoryChoiceCatalog:
 
         assert memory.get_best_choice() is None
 
+    def test_city_production_prompt_excludes_disabled_and_checked_choices(self):
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.begin_stage("observe_choices")
+
+        memory.remember_choices(
+            [
+                {"id": "campus", "label": "캠퍼스", "disabled": True},
+                {"id": "granary", "label": "곡창", "selected": True},
+                {"id": "monument", "label": "기념비"},
+            ],
+            end_of_list=True,
+        )
+
+        decision_prompt = memory.choice_catalog_decision_prompt()
+        summary = memory.to_prompt_string()
+
+        assert "[choice_catalog] 확인한 후보 1개" in decision_prompt
+        assert "기념비" in decision_prompt
+        assert "캠퍼스" not in decision_prompt
+        assert "곡창" not in decision_prompt
+        assert "[choice_catalog] 확인한 후보 1개" in summary
+        assert "- 기념비" in summary
+        assert "캠퍼스" not in summary
+        assert "곡창" not in summary
+
     def test_policy_state_rejects_negative_absolute_coordinates(self):
         memory = ShortTermMemory()
         memory.start_task("policy_primitive", normalizing_range=500, enable_policy_state=True)

@@ -8,6 +8,7 @@ a frozen AgentStatus snapshot for the FastAPI endpoint.
 from __future__ import annotations
 
 import threading
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -58,6 +59,7 @@ class AgentStatus:
     multi_step_stall_count: int = 0
     multi_step_best_choice: str = ""
     stm_summary: str = ""
+    recent_trace_events: list[dict[str, Any]] = field(default_factory=list)
 
     last_updated: str = ""
 
@@ -84,6 +86,7 @@ class AgentStatus:
             "multi_step_stall_count": self.multi_step_stall_count,
             "multi_step_best_choice": self.multi_step_best_choice,
             "stm_summary": self.stm_summary,
+            "recent_trace_events": self.recent_trace_events,
             "last_updated": self.last_updated,
         }
 
@@ -127,6 +130,7 @@ class AgentStateBridge:
         self._multi_step_stall_count: int = 0
         self._multi_step_best_choice: str = ""
         self._stm_summary: str = ""
+        self._recent_trace_events: deque[dict[str, Any]] = deque(maxlen=20)
 
     def _broadcast_if_connected(self) -> None:
         """Push current status to all WebSocket clients and the relay server."""
@@ -185,6 +189,29 @@ class AgentStateBridge:
             self._stm_summary = stm_summary
         self._broadcast_if_connected()
 
+    def append_trace_event(
+        self,
+        *,
+        primitive: str,
+        stage: str,
+        phase: str,
+        summary: str,
+        detail: str = "",
+    ) -> None:
+        """Append one recent process-trace event for Rich/HITL inspection."""
+        with self._lock:
+            self._recent_trace_events.append(
+                {
+                    "primitive": primitive,
+                    "stage": stage,
+                    "phase": phase,
+                    "summary": summary,
+                    "detail": detail,
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
+        self._broadcast_if_connected()
+
     def broadcast_agent_phase(self, phase: str) -> None:
         """Broadcast agent execution phase (e.g. '추론 중...', '실행 중', '대기 중')."""
         if self._ws_manager:
@@ -237,5 +264,6 @@ class AgentStateBridge:
                 multi_step_stall_count=self._multi_step_stall_count,
                 multi_step_best_choice=self._multi_step_best_choice,
                 stm_summary=self._stm_summary,
+                recent_trace_events=list(self._recent_trace_events),
                 last_updated=datetime.now().isoformat(),
             )
