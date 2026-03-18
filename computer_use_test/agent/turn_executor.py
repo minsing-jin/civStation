@@ -620,6 +620,23 @@ def run_primitive_loop(
                 stm_summary=stm_str,
             )
 
+    def _complete_from_terminal_state() -> bool:
+        if not process.is_terminal_state(memory):
+            return False
+        result.completed = True
+        result.success = True
+        reason = process.terminal_state_reason(memory)
+        _emit_runtime_trace(
+            rl=rl,
+            state_bridge=state_bridge,
+            primitive_name=primitive_name,
+            stage=memory.current_stage or "-",
+            phase="complete",
+            summary=reason,
+        )
+        logger.info("Primitive loop completed from terminal state: %s in %s steps", primitive_name, step + 1)
+        return True
+
     for step in range(max_steps):
         pre_image, screen_w, screen_h, x_offset, y_offset = capture_screen_pil()
         if primitive_name == "policy_primitive":
@@ -792,6 +809,8 @@ def run_primitive_loop(
             _sync_policy_cache_to_context()
             _emit_policy_event_if_changed()
             _log_policy_state("stage-transition")
+            if _complete_from_terminal_state():
+                break
             continue
 
         is_action_bundle = isinstance(action, list)
@@ -1116,6 +1135,8 @@ def run_primitive_loop(
             rollback_used = False
             _sync_policy_cache_to_context()
             _log_policy_state("stage-success", actions_list)
+            if _complete_from_terminal_state():
+                break
             continue
 
         raw_ui_changed = not screenshots_similar(
@@ -1175,6 +1196,23 @@ def run_primitive_loop(
             )
 
         if effective_ui_changed:
+            if semantic_verify_result is None and not process.should_verify_action_after_ui_change(
+                memory, display_action
+            ):
+                stage_before_success = memory.current_stage
+                if is_action_bundle:
+                    process.on_actions_success(memory, actions_list)
+                else:
+                    process.on_action_success(memory, display_action)
+                process.on_stage_success(memory, display_action, stage_name=stage_before_success)
+                memory.failure_count = 0
+                rollback_used = False
+                _sync_policy_cache_to_context()
+                _log_policy_state("stage-success", actions_list)
+                if _complete_from_terminal_state():
+                    break
+                continue
+
             semantic_verify = semantic_verify_result
             if semantic_verify is None or not verify_without_ui_change:
                 semantic_verify = process.verify_action_success(
@@ -1230,6 +1268,8 @@ def run_primitive_loop(
             rollback_used = False
             _sync_policy_cache_to_context()
             _log_policy_state("stage-success", actions_list)
+            if _complete_from_terminal_state():
+                break
             continue
 
         no_progress_resolution = process.handle_no_progress(
@@ -1635,13 +1675,27 @@ def run_one_turn(
             delay_before_action=delay_before_action,
         )
 
-        # Handle re-routing if UI didn't change
-        if loop_result.re_route:
+        # Handle follow-up routing after multi-step completion or reroute.
+        if loop_result.re_route or loop_result.completed:
             same_primitive_restart_used = False
-            for _ in range(2):
+            for _ in range(3):
+                if not (loop_result.re_route or loop_result.completed):
+                    break
                 re_image, *_ = capture_screen_pil()
+                rl.update_phase("routing")
+                if state_bridge:
+                    state_bridge.broadcast_agent_phase("라우팅 중...")
                 new_router = route_primitive(router_provider, re_image, img_config=router_img_config)
-                if new_router.primitive == primitive_name:
+                reroute_macro_turn = macro_turn_manager.macro_turn_number if macro_turn_manager else macro_turn
+                reroute_detected_turn = turn_detector.latest_turn if turn_detector else detected_turn
+                rl.route_result(
+                    new_router.primitive,
+                    new_router.reasoning,
+                    reroute_detected_turn,
+                    reroute_macro_turn,
+                    turn_number,
+                )
+                if new_router.primitive == primitive_name and loop_result.re_route:
                     if primitive_name == "policy_primitive" and not same_primitive_restart_used:
                         same_primitive_restart_used = True
                         logger.info("Policy requested re-route to same primitive -> restarting same primitive once")
@@ -1653,6 +1707,9 @@ def run_one_turn(
                         memory.begin_stage("bootstrap_tabs" if preserve_entry_done else "policy_entry")
                         memory.set_policy_mode("structured")
                         memory.set_policy_event("same-primitive reroute -> preserved restart")
+                        rl.update_phase("planning")
+                        if state_bridge:
+                            state_bridge.broadcast_agent_phase("추론 중...")
                         loop_result = run_primitive_loop(
                             planner_provider=planner_provider,
                             primitive_name=primitive_name,
@@ -1680,9 +1737,12 @@ def run_one_turn(
                     break  # Same primitive → give up re-routing
                 primitive_name = new_router.primitive
                 ctx.set_current_primitive(primitive_name)
-                logger.info(f"Re-routed to: {primitive_name}")
+                logger.info(f"Follow-up routed to: {primitive_name}")
 
                 entry = PRIMITIVE_REGISTRY.get(primitive_name, {})
+                rl.update_phase("planning")
+                if state_bridge:
+                    state_bridge.broadcast_agent_phase("추론 중...")
                 if not entry.get("multi_step", False):
                     # Single-step primitive → run once and exit
                     action = plan_action(
@@ -1725,6 +1785,11 @@ def run_one_turn(
                             y=single_act.y,
                             result="success",
                         )
+                        loop_result.last_action = single_act
+                        loop_result.success = True
+                        loop_result.completed = single_act.task_status == "complete"
+                        loop_result.re_route = False
+                        loop_result.steps_taken = 1
                     break
 
                 # Re-routed to another multi-step primitive
@@ -1775,7 +1840,7 @@ def run_one_turn(
                     state_bridge=state_bridge,
                     delay_before_action=delay_before_action,
                 )
-                if not loop_result.re_route:
+                if not (loop_result.re_route or loop_result.completed):
                     break
 
         memory.reset()

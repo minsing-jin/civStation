@@ -11,7 +11,8 @@ from computer_use_test.agent.modules.primitive.multi_step_process import (
     StageTransition,
     VerificationResult,
 )
-from computer_use_test.agent.turn_executor import run_primitive_loop
+from computer_use_test.agent.modules.router.primitive_registry import RouterResult
+from computer_use_test.agent.turn_executor import PrimitiveLoopResult, run_one_turn, run_primitive_loop
 from computer_use_test.utils.llm_provider.base import BaseVLMProvider, VLMResponse
 from computer_use_test.utils.llm_provider.parser import AgentAction
 
@@ -296,6 +297,110 @@ class CityProductionScrollSettleProcess(BaseMultiStepProcess):
 
     def verify_completion(self, provider, pil_image, memory, **kwargs) -> VerificationResult:
         return VerificationResult(True, "ok")
+
+
+class TerminalStateProcess(BaseMultiStepProcess):
+    def __init__(self):
+        super().__init__("city_production_primitive", "")
+        self.verify_completion_called = 0
+
+    def initialize(self, memory: ShortTermMemory) -> None:
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("choice_list")
+        memory.begin_stage("resolve_post_select_followup")
+
+    def plan_action(self, provider, pil_image, memory, **kwargs):
+        return AgentAction(
+            action="click",
+            x=500,
+            y=500,
+            reasoning="advance city production into an explicit terminal state",
+            task_status="in_progress",
+        )
+
+    def on_action_success(self, memory: ShortTermMemory, action: AgentAction) -> None:
+        memory.begin_stage("production_complete")
+
+    def is_terminal_state(self, memory: ShortTermMemory) -> bool:
+        return memory.current_stage == "production_complete"
+
+    def terminal_state_reason(self, memory: ShortTermMemory) -> str:
+        return "city production reached explicit terminal state"
+
+    def verify_completion(self, provider, pil_image, memory, **kwargs) -> VerificationResult:
+        self.verify_completion_called += 1
+        return VerificationResult(False, "city production should not use verify_completion here")
+
+
+class CityProductionSelectiveScrollVerifyProcess(BaseMultiStepProcess):
+    def __init__(self):
+        super().__init__("city_production_primitive", "")
+        self.plan_calls = 0
+        self.scroll_verify_calls = 0
+
+    def initialize(self, memory: ShortTermMemory) -> None:
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("choice_list")
+        memory.begin_stage("scroll_down_for_hidden_choices")
+
+    def plan_action(self, provider, pil_image, memory, **kwargs):
+        self.plan_calls += 1
+        if self.plan_calls == 1:
+            return AgentAction(
+                action="scroll",
+                x=880,
+                y=520,
+                scroll_amount=-420,
+                reasoning="scroll the production list downward",
+                task_status="in_progress",
+            )
+        return AgentAction(
+            action="click",
+            x=500,
+            y=500,
+            reasoning="finish after scroll handling",
+            task_status="complete",
+        )
+
+    def should_verify_action_without_ui_change(self, memory: ShortTermMemory, action: AgentAction) -> bool:
+        return action.action == "scroll"
+
+    def should_verify_action_after_ui_change(self, memory: ShortTermMemory, action: AgentAction) -> bool:
+        return action.action != "scroll"
+
+    def verify_action_success(self, provider, pil_image, memory, action, **kwargs) -> SemanticVerifyResult:
+        if action.action == "scroll":
+            self.scroll_verify_calls += 1
+        return SemanticVerifyResult(handled=True, passed=True, reason="scroll verified")
+
+    def on_action_success(self, memory: ShortTermMemory, action: AgentAction) -> None:
+        if action.action == "scroll":
+            memory.begin_stage("choose_from_memory")
+
+    def verify_completion(self, provider, pil_image, memory, **kwargs) -> VerificationResult:
+        return VerificationResult(True, "ok")
+
+
+class RecordingRichLogger:
+    def __init__(self):
+        self.phase_updates: list[str] = []
+        self.route_results: list[tuple[str, str]] = []
+
+    def update_phase(self, phase: str) -> None:
+        self.phase_updates.append(phase)
+
+    def route_result(
+        self,
+        primitive: str,
+        reasoning: str,
+        game_turn: int | None,
+        macro_turn: int,
+        micro_turn: int,
+    ) -> None:
+        self.route_results.append((primitive, reasoning))
+
+    def __getattr__(self, _name):
+        return lambda *args, **kwargs: None
 
 
 class TestRunPrimitiveLoop:
@@ -755,3 +860,247 @@ class TestRunPrimitiveLoop:
 
         assert result.success is True
         assert sleeps == [0.55]
+
+    def test_city_production_terminal_state_completes_without_verify_completion(self, monkeypatch):
+        process = TerminalStateProcess()
+        provider = DummyProvider()
+        image = Image.new("RGB", (100, 100))
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            lambda: (image, 1440, 900, 0, 0),
+        )
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
+
+        result = run_primitive_loop(
+            planner_provider=provider,
+            primitive_name="city_production_primitive",
+            screen_w=1440,
+            screen_h=900,
+            normalizing_range=1000,
+            x_offset=0,
+            y_offset=0,
+            strategy_string="",
+            recent_actions_str="없음",
+            hitl_directive=None,
+            memory=memory,
+            ctx=self.ctx,
+            max_steps=4,
+            completion_condition="",
+            planner_img_config=None,
+            delay_before_action=0,
+        )
+
+        assert result.success is True
+        assert result.completed is True
+        assert process.verify_completion_called == 0
+
+    def test_city_production_scroll_skips_semantic_verify_when_raw_ui_changed(self, monkeypatch):
+        process = CityProductionSelectiveScrollVerifyProcess()
+        provider = DummyProvider()
+        image = Image.new("RGB", (100, 100))
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            lambda: (image, 1440, 900, 0, 0),
+        )
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
+
+        result = run_primitive_loop(
+            planner_provider=provider,
+            primitive_name="city_production_primitive",
+            screen_w=1440,
+            screen_h=900,
+            normalizing_range=1000,
+            x_offset=0,
+            y_offset=0,
+            strategy_string="",
+            recent_actions_str="없음",
+            hitl_directive=None,
+            memory=memory,
+            ctx=self.ctx,
+            max_steps=4,
+            completion_condition="",
+            planner_img_config=None,
+            delay_before_action=0,
+        )
+
+        assert result.success is True
+        assert process.scroll_verify_calls == 0
+
+    def test_city_production_scroll_semantic_verifies_when_raw_ui_unchanged(self, monkeypatch):
+        process = CityProductionSelectiveScrollVerifyProcess()
+        provider = DummyProvider()
+        image = Image.new("RGB", (100, 100))
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            lambda: (image, 1440, 900, 0, 0),
+        )
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.screenshots_similar",
+            lambda *args, action=None, **kwargs: action.action == "scroll",
+        )
+
+        result = run_primitive_loop(
+            planner_provider=provider,
+            primitive_name="city_production_primitive",
+            screen_w=1440,
+            screen_h=900,
+            normalizing_range=1000,
+            x_offset=0,
+            y_offset=0,
+            strategy_string="",
+            recent_actions_str="없음",
+            hitl_directive=None,
+            memory=memory,
+            ctx=self.ctx,
+            max_steps=4,
+            completion_condition="",
+            planner_img_config=None,
+            delay_before_action=0,
+        )
+
+        assert result.success is True
+        assert process.scroll_verify_calls == 1
+
+    def test_run_one_turn_reroutes_after_completed_city_production(self, monkeypatch):
+        provider = DummyProvider()
+        image = Image.new("RGB", (100, 100))
+        routed_primitives = iter(
+            [
+                RouterResult("city_production_primitive", "initial city production"),
+                RouterResult("popup_primitive", "follow-up popup after production"),
+            ]
+        )
+        executed_actions: list[str] = []
+
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            lambda: (image, 1440, 900, 0, 0),
+        )
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.route_primitive",
+            lambda *args, **kwargs: next(routed_primitives),
+        )
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.run_primitive_loop",
+            lambda **kwargs: PrimitiveLoopResult(
+                success=True,
+                completed=True,
+                re_route=False,
+                steps_taken=2,
+                last_action=AgentAction(
+                    action="click",
+                    x=500,
+                    y=500,
+                    reasoning="city production completed",
+                    task_status="in_progress",
+                ),
+            ),
+        )
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.plan_action",
+            lambda *args, **kwargs: AgentAction(
+                action="press",
+                key="enter",
+                reasoning="dismiss popup after production",
+                task_status="complete",
+            ),
+        )
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.execute_action",
+            lambda action, *args: executed_actions.append(action.action),
+        )
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.time.sleep", lambda *_args: None)
+
+        summary = run_one_turn(
+            router_provider=provider,
+            planner_provider=provider,
+            context_manager=self.ctx,
+            turn_number=1,
+            delay_before_action=0,
+        )
+
+        assert summary is not None
+        assert summary.primitive == "popup_primitive"
+        assert summary.action_type == "press"
+        assert executed_actions == ["press"]
+
+    def test_run_one_turn_refreshes_rich_routing_after_completed_city_production(self, monkeypatch):
+        provider = DummyProvider()
+        image = Image.new("RGB", (100, 100))
+        rich = RecordingRichLogger()
+        routed_primitives = iter(
+            [
+                RouterResult("city_production_primitive", "initial city production"),
+                RouterResult("popup_primitive", "follow-up popup after production"),
+            ]
+        )
+
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.RichLogger.get", lambda: rich)
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            lambda: (image, 1440, 900, 0, 0),
+        )
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.route_primitive",
+            lambda *args, **kwargs: next(routed_primitives),
+        )
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.run_primitive_loop",
+            lambda **kwargs: PrimitiveLoopResult(
+                success=True,
+                completed=True,
+                re_route=False,
+                steps_taken=2,
+                last_action=AgentAction(
+                    action="click",
+                    x=500,
+                    y=500,
+                    reasoning="city production completed",
+                    task_status="in_progress",
+                ),
+            ),
+        )
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.plan_action",
+            lambda *args, **kwargs: AgentAction(
+                action="press",
+                key="enter",
+                reasoning="dismiss popup after production",
+                task_status="complete",
+            ),
+        )
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.time.sleep", lambda *_args: None)
+
+        summary = run_one_turn(
+            router_provider=provider,
+            planner_provider=provider,
+            context_manager=self.ctx,
+            turn_number=1,
+            delay_before_action=0,
+        )
+
+        assert summary is not None
+        assert rich.phase_updates.count("routing") == 2
+        assert rich.route_results == [
+            ("city_production_primitive", "initial city production"),
+            ("popup_primitive", "follow-up popup after production"),
+        ]

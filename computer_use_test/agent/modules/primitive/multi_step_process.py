@@ -212,6 +212,24 @@ class CityProductionObserver(ScrollableChoiceObserver):
         )
 
 
+class GovernorObserver(ScrollableChoiceObserver):
+    """Observer specialized for the governor card list panel."""
+
+    def build_prompt(self, primitive_name: str, memory: ShortTermMemory, *, normalizing_range: int) -> str:
+        base_prompt = super().build_prompt(primitive_name, memory, normalizing_range=normalizing_range)
+        return (
+            f"{base_prompt}\n"
+            "- 총독 카드 목록 패널에서 각 총독 카드를 관찰해.\n"
+            "- 각 카드의 id는 총독 이름 slug (예: 핑갈라, 리앙, 허미즈_비밀결사).\n"
+            "- note에 상태 정보를 기록해: '임명_가능' / '재배정' / '진급_가능' / '비밀결사' 등.\n"
+            "- 임명 버튼이 있으면 '임명_가능', 진급 버튼이 있으면 '진급_가능'.\n"
+            "- 이미 도시에 배정된 총독은 '재배정'.\n"
+            "- 활성 버튼이 없으면 disabled=true.\n"
+            "- scroll_anchor는 총독 카드 리스트 중앙이어야 한다.\n"
+            "- 비밀결사 총독은 스크롤 아래에 숨겨져 있을 수 있음.\n"
+        )
+
+
 class BaseMultiStepProcess:
     """Base class for a class-owned multi-step primitive process."""
 
@@ -441,6 +459,18 @@ class BaseMultiStepProcess:
     def should_verify_action_without_ui_change(self, memory: ShortTermMemory, action: AgentAction) -> bool:
         """Whether to run semantic verification even when raw UI diff is tiny."""
         return False
+
+    def should_verify_action_after_ui_change(self, memory: ShortTermMemory, action: AgentAction) -> bool:
+        """Whether to run semantic verification after raw UI change was already detected."""
+        return True
+
+    def is_terminal_state(self, memory: ShortTermMemory) -> bool:
+        """Whether the current process state is an explicit terminal state."""
+        return False
+
+    def terminal_state_reason(self, memory: ShortTermMemory) -> str:
+        """Human-readable reason for terminal-state completion."""
+        return f"terminal state reached: {memory.current_stage or 'unknown'}"
 
     def handle_no_progress(
         self,
@@ -2353,6 +2383,8 @@ class CityProductionProcess(ObservationAssistedProcess):
     _PLACEMENT_RESOLVE_STAGE = "resolve_placement_followup"
     _PLACEMENT_RECLICK_STAGE = "production_place_reclick"
     _PLACEMENT_CONFIRM_STAGE = "production_place_confirm"
+    _POST_SELECT_RESOLVE_STAGE = "resolve_post_select_followup"
+    _COMPLETE_STAGE = "production_complete"
     _HOVER_SCROLL_STAGE = "hover_scroll_anchor"
     _SCROLL_DOWN_STAGE = "scroll_down_for_hidden_choices"
     _RESTORE_HOVER_STAGE = "restore_hover_scroll_anchor"
@@ -2397,6 +2429,8 @@ class CityProductionProcess(ObservationAssistedProcess):
             self._SCROLL_DOWN_STAGE,
             self._RESTORE_HOVER_STAGE,
             self._RESTORE_SCROLL_STAGE,
+            self._POST_SELECT_RESOLVE_STAGE,
+            self._COMPLETE_STAGE,
         }:
             return False
         if memory.current_stage == "observe_choices":
@@ -2416,8 +2450,25 @@ class CityProductionProcess(ObservationAssistedProcess):
                 "현재 stage: production_place_confirm\n"
                 "- 직전에 고른 배치 타일에 대한 건설/구매 확인 팝업만 처리한다.\n"
                 "- '이곳에 ... 을 건설하겠습니까?' 또는 구매 후 건설 확인이면 '예'/확인 버튼만 클릭해.\n"
-                "- 이 단계에서만 task_status='complete'로 끝내라."
+                "- 클릭 후 primitive는 explicit terminal state로 종료된다. task_status는 in_progress로 유지해도 된다."
             )
+        if memory.current_stage == "select_from_memory":
+            best_choice = memory.get_best_choice()
+            best_label = best_choice.label if best_choice is not None else "-"
+            return (
+                "현재 stage: select_from_memory\n"
+                f"- memory에서 고른 생산 품목 '{best_label}' 을 클릭한다.\n"
+                "- 클릭 직후 화면을 한 번 더 판별해 배치/확인/완료 중 어디로 갈지 state machine이 결정한다.\n"
+                "- 여기서는 task_status를 complete로 끝내지 마."
+            )
+        if memory.current_stage == self._POST_SELECT_RESOLVE_STAGE:
+            return (
+                "현재 stage: resolve_post_select_followup\n"
+                "- 방금 생산 품목 클릭 이후 화면이 배치 화면인지, 확인 팝업인지, 바로 완료인지 판별만 한다.\n"
+                "- 추가 클릭/스크롤은 하지 마."
+            )
+        if memory.current_stage == self._COMPLETE_STAGE:
+            return "현재 stage: production_complete\n- city production primitive의 explicit terminal state다."
         if memory.current_stage == self._PLACEMENT_RECLICK_STAGE:
             return (
                 "현재 stage: production_place_reclick\n"
@@ -2440,7 +2491,7 @@ class CityProductionProcess(ObservationAssistedProcess):
                 "실제로 지불 가능한 경우에만 구매형 타일을 고른다.\n"
                 "- 초록색 즉시 배치 가능 타일과 파란색/보라색 구매 후 배치 가능 타일을 비교할 때 인접 보너스, "
                 "지형 시너지, 상위 전략 목표를 함께 고려한다.\n"
-                "- 구매형 타일은 타일 본체가 아니라 골드와 숫자가 있는 구매 버튼/배지를 먼저 클릭한다.\n"
+                "- 구매형 타일은 타일 위에 있는 골드와 숫자가 있는 구매 버튼/배지를 먼저 클릭한다.\n"
                 "- 파란색/보라색 구매형 타일을 구매한 뒤에도 배치 화면이 유지되면 "
                 "같은 타일 본체를 다시 클릭해 실제 배치를 이어간다.\n"
                 "- 타일 선택 action을 바로 1회 수행하고, 아직 task_status를 complete로 끝내지 마.\n"
@@ -2546,7 +2597,13 @@ class CityProductionProcess(ObservationAssistedProcess):
                 return 2, 4
             if stage in {"choose_from_memory", "decide_best_choice"}:
                 return 3, 4
-            if stage in {self._RESTORE_HOVER_STAGE, self._RESTORE_SCROLL_STAGE, "select_from_memory"}:
+            if stage in {
+                self._RESTORE_HOVER_STAGE,
+                self._RESTORE_SCROLL_STAGE,
+                "select_from_memory",
+                self._POST_SELECT_RESOLVE_STAGE,
+                self._COMPLETE_STAGE,
+            }:
                 return 4, 4
 
         return super().get_visible_progress(memory, executed_steps=0, hard_max_steps=1)
@@ -2585,6 +2642,14 @@ class CityProductionProcess(ObservationAssistedProcess):
             "city_production_placement_fast",
             img_config,
         )
+
+    @staticmethod
+    def _legacy_coord_scale_factor(normalizing_range: int) -> int | None:
+        """Return legacy 0-1000 scale factor when runtime range is a clean multiple."""
+        if normalizing_range <= 1000 or normalizing_range % 1000 != 0:
+            return None
+        factor = normalizing_range // 1000
+        return factor if factor > 1 else None
 
     def _detect_post_select_followup(
         self,
@@ -2672,7 +2737,8 @@ class CityProductionProcess(ObservationAssistedProcess):
             '"reason":"짧게"}\n'
             "- 지금 화면은 특수지구/불가사의/건물 배치 지도다.\n"
             "- 초록색 타일은 즉시 배치 가능 타일이다.\n"
-            "- 파란색/보라색 타일은 골드와 숫자가 있는 구매 버튼/배지를 먼저 눌러야 하는 구매형 타일이다.\n"
+            "- 파란색/보라색 타일은 타일 위에 있는 골드와 숫자가 있는 "
+            "구매 버튼/배지를 먼저 눌러야 하는 구매형 타일이다.\n"
             "- 구매형 타일을 고르면 placement_action='click_purchase_button' 으로 하고, "
             "x/y 는 골드+숫자 구매 버튼 중심을 반환해.\n"
             "- 구매형 타일을 고를 때 tile_x/tile_y 는 같은 타일 본체 중심을 반환해. "
@@ -2715,6 +2781,8 @@ class CityProductionProcess(ObservationAssistedProcess):
         if tile_color not in self._PLACEMENT_TILE_COLORS:
             tile_color = "unknown"
         reason = str(data.get("reason", "")).strip()
+        scale_factor = self._legacy_coord_scale_factor(normalizing_range)
+        scale_note = ""
 
         if action_kind == "click_purchase_button":
             try:
@@ -2727,6 +2795,18 @@ class CityProductionProcess(ObservationAssistedProcess):
             tile_button = str(data.get("tile_button", "right")).strip().lower() or "right"
             if tile_button not in {"left", "right"}:
                 tile_button = "right"
+            if (
+                scale_factor is not None
+                and 0 <= x <= 1000
+                and 0 <= y <= 1000
+                and 0 <= tile_x <= 1000
+                and 0 <= tile_y <= 1000
+            ):
+                x *= scale_factor
+                y *= scale_factor
+                tile_x *= scale_factor
+                tile_y *= scale_factor
+                scale_note = f" | coord_scale=legacy1000x{scale_factor}"
             memory.remember_city_placement_target(
                 x=tile_x,
                 y=tile_y,
@@ -2737,6 +2817,10 @@ class CityProductionProcess(ObservationAssistedProcess):
             )
             action_reason = reason or "구매형 타일의 골드 버튼을 먼저 눌러 배치를 준비"
         else:
+            if scale_factor is not None and 0 <= x <= 1000 and 0 <= y <= 1000:
+                x *= scale_factor
+                y *= scale_factor
+                scale_note = f" | coord_scale=legacy1000x{scale_factor}"
             memory.clear_city_placement_target()
             action_reason = reason or "즉시 배치 가능한 타일 본체를 클릭"
 
@@ -2748,7 +2832,7 @@ class CityProductionProcess(ObservationAssistedProcess):
             reasoning=action_reason,
             task_status="in_progress",
         )
-        memory.set_last_planned_action_debug(self._format_action_debug(action))
+        memory.set_last_planned_action_debug(f"{self._format_action_debug(action)}{scale_note}")
         return action
 
     def _build_saved_placement_reclick_action(self, memory: ShortTermMemory) -> AgentAction | None:
@@ -3253,6 +3337,7 @@ class CityProductionProcess(ObservationAssistedProcess):
                 if followup_state == "placement":
                     if (
                         memory.get_city_placement_target() is not None
+                        and memory.city_placement_state.target_origin == "purchase_button"
                         and memory.city_placement_state.reclick_attempts < 1
                     ):
                         memory.bump_city_placement_reclick_attempt()
@@ -3298,12 +3383,44 @@ class CityProductionProcess(ObservationAssistedProcess):
                     img_config=img_config,
                     extra_note=(
                         "방금 도시 생산의 마지막 확인 팝업 단계다. "
-                        "지금 보이는 '예' 또는 확인 버튼만 클릭하고 task_status를 complete로 설정해. "
+                        "지금 보이는 '예' 또는 확인 버튼만 클릭해. "
+                        "클릭 성공 후 state machine이 terminal state로 종료를 처리한다. "
                         "다른 목록 스크롤, 품목 선택, 타일 클릭은 하지 마."
                     ),
                 ),
-                "complete",
+                "in_progress",
             )
+
+        if memory.current_stage == self._POST_SELECT_RESOLVE_STAGE:
+            followup_state, reason = self._detect_post_select_followup(
+                provider,
+                pil_image,
+                img_config=img_config,
+            )
+            if followup_state == "placement":
+                memory.set_branch(self._PLACEMENT_BRANCH)
+                memory.begin_stage(self._PLACEMENT_STAGE)
+                memory.set_last_planned_action_debug("post-select follow-up -> production_place")
+                return StageTransition(
+                    stage=self._PLACEMENT_STAGE,
+                    reason=reason or "post-select follow-up: placement",
+                )
+            if followup_state == "confirm":
+                memory.begin_stage(self._PLACEMENT_CONFIRM_STAGE)
+                memory.set_last_planned_action_debug("post-select follow-up -> production_place_confirm")
+                return StageTransition(
+                    stage=self._PLACEMENT_CONFIRM_STAGE,
+                    reason=reason or "post-select follow-up: confirm",
+                )
+            if followup_state == "done":
+                memory.begin_stage(self._COMPLETE_STAGE)
+                memory.set_last_planned_action_debug("post-select follow-up -> production_complete")
+                return StageTransition(
+                    stage=self._COMPLETE_STAGE,
+                    reason=reason or "post-select follow-up: done",
+                )
+            self._queue_generic_fallback(memory, reason="post-select follow-up unknown -> generic_fallback")
+            return StageTransition(stage="generic_fallback", reason=reason or "post-select follow-up: unknown")
 
         if memory.branch == self._LIST_BRANCH:
             if memory.current_stage == self._HOVER_SCROLL_STAGE:
@@ -3339,7 +3456,8 @@ class CityProductionProcess(ObservationAssistedProcess):
                     reason=f"선택한 생산 품목 '{best_choice.label}' 을 다시 찾기 전에 생산 목록 패널 중앙 hover를 고정",
                 )
 
-        return super().plan_action(
+        current_stage = memory.current_stage
+        action = super().plan_action(
             provider,
             pil_image,
             memory,
@@ -3349,6 +3467,9 @@ class CityProductionProcess(ObservationAssistedProcess):
             hitl_directive=hitl_directive,
             img_config=img_config,
         )
+        if current_stage == "select_from_memory":
+            return self._force_task_status(action, "in_progress")
+        return action
 
     def should_verify_action_without_ui_change(self, memory: ShortTermMemory, action: AgentAction) -> bool:
         """Treat hover-only cursor moves as successful even when screenshots do not change."""
@@ -3357,6 +3478,12 @@ class CityProductionProcess(ObservationAssistedProcess):
         if action.action == "scroll" and memory.branch == self._LIST_BRANCH:
             return True
         return super().should_verify_action_without_ui_change(memory, action)
+
+    def should_verify_action_after_ui_change(self, memory: ShortTermMemory, action: AgentAction) -> bool:
+        """Skip redundant semantic verification for list scrolls that already produced raw UI change."""
+        if action.action == "scroll" and memory.branch == self._LIST_BRANCH:
+            return False
+        return super().should_verify_action_after_ui_change(memory, action)
 
     def verify_action_success(
         self,
@@ -3387,23 +3514,16 @@ class CityProductionProcess(ObservationAssistedProcess):
         *,
         img_config=None,
     ) -> VerificationResult:
-        """Check whether a selected list item still needs placement or confirmation follow-up."""
-        if memory.current_stage == "select_from_memory":
-            followup_state, reason = self._detect_post_select_followup(
-                provider,
-                pil_image,
-                img_config=img_config,
-            )
-            if followup_state == "placement":
-                memory.set_branch(self._PLACEMENT_BRANCH)
-                memory.begin_stage(self._PLACEMENT_STAGE)
-                return VerificationResult(False, reason or "post-select follow-up: placement")
-            if followup_state == "confirm":
-                memory.begin_stage(self._PLACEMENT_CONFIRM_STAGE)
-                return VerificationResult(False, reason or "post-select follow-up: confirm")
-            if followup_state == "done":
-                return VerificationResult(True, reason or "post-select follow-up: done")
-        return super().verify_completion(provider, pil_image, memory, img_config=img_config)
+        """City production completes only from explicit terminal states."""
+        if self.is_terminal_state(memory):
+            return VerificationResult(True, self.terminal_state_reason(memory))
+        return VerificationResult(False, f"city production not terminal: {memory.current_stage or '-'}")
+
+    def is_terminal_state(self, memory: ShortTermMemory) -> bool:
+        return memory.current_stage == self._COMPLETE_STAGE
+
+    def terminal_state_reason(self, memory: ShortTermMemory) -> str:
+        return "city production reached explicit terminal state"
 
     def handle_no_progress(
         self,
@@ -3495,6 +3615,14 @@ class CityProductionProcess(ObservationAssistedProcess):
             memory.begin_stage(self._PLACEMENT_RESOLVE_STAGE)
             return
 
+        if memory.current_stage == "select_from_memory" and action.action in {"click", "double_click"}:
+            memory.begin_stage(self._POST_SELECT_RESOLVE_STAGE)
+            return
+
+        if memory.current_stage == self._PLACEMENT_CONFIRM_STAGE and action.action in {"click", "double_click"}:
+            memory.begin_stage(self._COMPLETE_STAGE)
+            return
+
         if action.action == "scroll":
             if memory.current_stage == self._SCROLL_DOWN_STAGE:
                 memory.register_choice_scroll(direction="down")
@@ -3506,63 +3634,241 @@ class CityProductionProcess(ObservationAssistedProcess):
                 return
 
 
-class GovernorProcess(ScriptedMultiStepProcess):
-    """Governor flow with explicit entry, promotion, and assignment gating."""
+class GovernorProcess(ObservationAssistedProcess):
+    """Observation-assisted governor flow: scan → decide → fixed branch."""
 
+    _ANCHOR_SCROLL_DELTA = 120
+
+    # Entry
     _ENTRY_SUBSTEP = "governor_entry_done"
     _ENTRY_STAGE = "governor_entry"
-    _OVERVIEW_STAGE = "governor_overview"
-    _PROMOTE_SELECT_STAGE = "governor_promote_select"
-    _PROMOTE_CONFIRM_STAGE = "governor_promote_confirm"
-    _ASSIGN_CITY_STAGE = "governor_assign_city"
-    _ASSIGN_CONFIRM_STAGE = "governor_assign_confirm"
+
+    # Branches
+    _PROMOTE_BRANCH = "governor_promote"
+    _APPOINT_BRANCH = "governor_appoint"
+
+    # Observation (reuse ObservationAssistedProcess base stages)
+    _HOVER_SCROLL_STAGE = "hover_scroll_anchor"
+    _SCROLL_DOWN_STAGE = "scroll_down_for_hidden_choices"
+    _RESTORE_HOVER_STAGE = "restore_hover_scroll_anchor"
+    _RESTORE_SCROLL_STAGE = "restore_best_choice_visibility"
+
+    # Promote branch (fixed steps)
+    _PROMOTE_CLICK = "governor_promote_click"
+    _PROMOTE_SELECT = "governor_promote_select"
+    _PROMOTE_CONFIRM = "governor_promote_confirm"
+    _PROMOTE_POPUP = "governor_promote_popup"
+    _EXIT_ESC1 = "governor_exit_esc1"
+    _EXIT_ESC2 = "governor_exit_esc2"
+
+    # Appoint branch (fixed steps)
+    _APPOINT_CLICK = "governor_appoint_click"
+    _APPOINT_CITY = "governor_appoint_city"
+    _APPOINT_CONFIRM = "governor_appoint_confirm"
+
+    _PROMOTE_STAGES = {
+        "governor_promote_click",
+        "governor_promote_select",
+        "governor_promote_confirm",
+        "governor_promote_popup",
+        "governor_exit_esc1",
+        "governor_exit_esc2",
+    }
+    _APPOINT_STAGES = {
+        "governor_appoint_click",
+        "governor_appoint_city",
+        "governor_appoint_confirm",
+    }
+
+    def __init__(self, primitive_name: str, completion_condition: str = ""):
+        super().__init__(
+            primitive_name,
+            completion_condition,
+            target_description="총독 카드 목록이 표시되는 스크롤 가능 패널",
+        )
+        self.observer = GovernorObserver("총독 카드 목록이 표시되는 스크롤 가능 패널")
 
     def initialize(self, memory: ShortTermMemory) -> None:
         if not memory.current_stage:
             memory.begin_stage(self._ENTRY_STAGE)
 
+    # ------------------------------------------------------------------
+    # Observation gating
+    # ------------------------------------------------------------------
+    def should_observe(self, memory: ShortTermMemory) -> bool:
+        if self._ENTRY_SUBSTEP not in memory.completed_substeps:
+            return False
+        if memory.branch:
+            return False
+        if memory.current_stage in {
+            "generic_fallback",
+            self._HOVER_SCROLL_STAGE,
+            self._SCROLL_DOWN_STAGE,
+            self._RESTORE_HOVER_STAGE,
+            self._RESTORE_SCROLL_STAGE,
+        }:
+            return False
+        if memory.current_stage == "observe_choices":
+            return True
+        return super().should_observe(memory)
+
+    # ------------------------------------------------------------------
+    # Decision override — also captures action_type (promote/appoint)
+    # ------------------------------------------------------------------
+    def decide_from_memory(
+        self,
+        provider: BaseVLMProvider,
+        memory: ShortTermMemory,
+        *,
+        high_level_strategy: str,
+    ) -> bool:
+        if memory.get_best_choice() is not None:
+            return True
+
+        memory.begin_stage("decide_best_choice")
+        max_tokens = memory.choice_catalog_decision_max_tokens()
+        prompt = (
+            "너는 문명6 총독 선택 결정 서브에이전트야. 아래 short-term memory에 누적된 전체 총독 후보 중 "
+            "상위 전략에 가장 적합한 하나를 고르고, 진급(promote)인지 임명(appoint)인지도 결정해.\n"
+            'JSON: {"best_option_id":"stable_id","action_type":"promote|appoint","reason":"짧은 이유"}\n'
+            "- best_option_id는 후보 catalog에 적힌 id를 그대로 복사해.\n"
+            "- note에 '진급_가능'이면 action_type='promote', '임명_가능'이면 action_type='appoint'.\n"
+            "- 비활성(disabled) 후보는 고르지 마.\n\n"
+            f"Primitive: {self.primitive_name}\n"
+            f"상위 전략:\n{high_level_strategy}\n\n"
+            f"후보 catalog:\n{memory.choice_catalog_decision_prompt()}\n"
+        )
+        try:
+            response = provider.call_vlm(
+                prompt=prompt,
+                image_path=None,
+                temperature=0.2,
+                max_tokens=max_tokens,
+                use_thinking=False,
+            )
+            content = strip_markdown(response.content)
+            data = json.loads(content)
+            option_id = str(data.get("best_option_id", "")).strip()
+            reason = str(data.get("reason", "")).strip()
+            action_type = str(data.get("action_type", "")).strip().lower()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Governor best-choice decision failed: %s", exc)
+            return False
+
+        if not option_id:
+            logger.warning("Governor decide_from_memory: VLM returned empty best_option_id")
+            return False
+
+        catalog_ids = list(memory.choice_catalog.candidates.keys())
+        logger.info(
+            "Governor decide_from_memory: VLM chose id='%s' action_type='%s' | catalog_ids=%s",
+            option_id,
+            action_type,
+            catalog_ids[:10],
+        )
+
+        memory.set_best_choice(option_id=option_id, reason=reason)
+        if memory.get_best_choice() is None:
+            logger.warning(
+                "Governor decide_from_memory: set_best_choice failed — id='%s' not in catalog or not selectable",
+                option_id,
+            )
+            # Fallback: try matching by label
+            memory.set_best_choice(label=option_id, reason=reason)
+            if memory.get_best_choice() is None:
+                logger.warning("Governor decide_from_memory: label fallback also failed for '%s'", option_id)
+                return False
+
+        # Set branch based on action_type
+        if action_type == "appoint":
+            memory.set_branch(self._APPOINT_BRANCH)
+            memory.begin_stage(self._APPOINT_CLICK)
+        else:
+            memory.set_branch(self._PROMOTE_BRANCH)
+            memory.begin_stage(self._PROMOTE_CLICK)
+        return True
+
+    # ------------------------------------------------------------------
+    # Entry check (one-time VLM state classification)
+    # ------------------------------------------------------------------
+    def _governor_entry_check(self, provider: BaseVLMProvider, pil_image, *, img_config=None) -> dict | None:
+        prompt = (
+            "너는 문명6 총독 화면 진입 상태 판별기야. JSON만 출력해.\n"
+            '{"governor_mode":"overview|notification|other",'
+            '"governor_screen_ready":true/false,'
+            '"notification_visible":true/false,'
+            '"reasoning":"짧은 이유"}\n'
+            "- 총독 카드 목록과 [임명]/[진급] 버튼이 보이면 "
+            "governor_mode='overview', governor_screen_ready=true.\n"
+            "- 우하단 '총독 타이틀' 버튼 또는 펜 아이콘만 보이고 실제 총독 화면이 안 열렸으면 "
+            "governor_mode='notification', notification_visible=true, governor_screen_ready=false.\n"
+            "- 확실하지 않으면 governor_mode='other', governor_screen_ready=false.\n"
+        )
+        try:
+            return _analyze_structured_json(provider, pil_image, prompt, img_config=img_config, max_tokens=256)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Governor entry check failed: %s", exc)
+            return None
+
+    # ------------------------------------------------------------------
+    # Stage notes
+    # ------------------------------------------------------------------
     def build_stage_note(self, memory: ShortTermMemory) -> str:
         stage = memory.current_stage or self._ENTRY_STAGE
+
         if self._ENTRY_SUBSTEP not in memory.completed_substeps:
             return (
                 "현재 stage: governor_entry\n"
-                "- 실제 총독 목록/진급/배정 화면이 열렸는지 먼저 확인해.\n"
+                "- 실제 총독 목록 화면이 열렸는지 먼저 확인해.\n"
                 "- 우하단 '총독 타이틀' 버튼 또는 펜 아이콘만 보이면 press enter로 진입해.\n"
                 "- 아직 총독 카드, 스킬, 도시 선택을 하지 마."
             )
-        if stage == self._OVERVIEW_STAGE:
+
+        # Promote branch stages
+        if stage == self._PROMOTE_CLICK:
+            best = memory.get_best_choice()
+            label = best.label if best else "선택된 총독"
+            return f"현재 stage: governor_promote_click\n- memory의 best choice 총독 '{label}'의 [진급] 버튼을 클릭해."
+        if stage == self._PROMOTE_SELECT:
+            return "현재 stage: governor_promote_select\n- 활성화된(밝은) 진급 스킬 박스 1개만 클릭. [확정] 누르지 마."
+        if stage == self._PROMOTE_CONFIRM:
+            return "현재 stage: governor_promote_confirm\n- 초록색 [확정] 버튼만 클릭."
+        if stage == self._PROMOTE_POPUP:
+            return "현재 stage: governor_promote_popup\n- '정말입니까?' 팝업에서 '예' 버튼 클릭."
+        if stage in {self._EXIT_ESC1, self._EXIT_ESC2}:
+            return f"현재 stage: {stage}\n- ESC 키를 1회 눌러 총독 화면을 닫는다."
+
+        # Appoint branch stages
+        if stage == self._APPOINT_CLICK:
+            best = memory.get_best_choice()
+            label = best.label if best else "선택된 총독"
+            return f"현재 stage: governor_appoint_click\n- memory의 best choice 총독 '{label}'의 [임명] 버튼 클릭."
+        if stage == self._APPOINT_CITY:
+            return "현재 stage: governor_appoint_city\n- 왼쪽 도시 목록에서 사람얼굴 아이콘 없는 도시 클릭."
+        if stage == self._APPOINT_CONFIRM:
+            return "현재 stage: governor_appoint_confirm\n- 초록색 [배정] 버튼 클릭."
+
+        # Observation/scroll stages
+        if stage == self._HOVER_SCROLL_STAGE:
+            return "현재 stage: hover_scroll_anchor\n- 총독 카드 리스트 패널 중앙으로 커서만 이동해 hover를 고정한다."
+        if stage == self._SCROLL_DOWN_STAGE:
             return (
-                "현재 stage: governor_overview\n"
-                "- 총독 카드 목록 화면이다.\n"
-                "- 상위 전략에 맞는 총독의 [임명] 또는 [진급]만 선택해.\n"
-                "- 이 단계에서는 [확정] 또는 [배정] 버튼을 누르지 마."
+                "현재 stage: scroll_down_for_hidden_choices\n"
+                "- 이미 hover된 총독 카드 리스트 중앙에서 아래로 스크롤해 숨은 총독을 더 본다."
             )
-        if stage == self._PROMOTE_SELECT_STAGE:
+        if stage == self._RESTORE_HOVER_STAGE:
             return (
-                "현재 stage: governor_promote_select\n"
-                "- 이미 진급 흐름에 들어왔다. 스킬 1개를 반드시 먼저 선택한다.\n"
-                "- [확정]이 검은색/비활성이면 절대 클릭하지 마.\n"
-                "- 스킬 타일/버튼만 1회 클릭하고 task_status는 complete로 끝내지 마."
+                "현재 stage: restore_hover_scroll_anchor\n"
+                "- 선택한 총독이 현재 안 보인다. 카드 리스트 패널 중앙에 다시 hover를 고정한다."
             )
-        if stage == self._PROMOTE_CONFIRM_STAGE:
+        if stage == self._RESTORE_SCROLL_STAGE:
+            best = memory.get_best_choice()
+            label = best.label if best else "-"
             return (
-                "현재 stage: governor_promote_confirm\n"
-                "- 진급 스킬이 선택되어 [확정] 버튼이 초록색/활성화 상태다.\n"
-                "- [확정] 버튼만 클릭하고 task_status='complete'로 끝내라."
+                "현재 stage: restore_best_choice_visibility\n"
+                f"- 선택한 총독 '{label}' 이 다시 보이도록 패널을 재복원 스크롤한다."
             )
-        if stage == self._ASSIGN_CITY_STAGE:
-            return (
-                "현재 stage: governor_assign_city\n"
-                "- 왼쪽 팝업/목록에 보이는 도시 단서를 기준으로 배치 도시를 먼저 선택해.\n"
-                "- [배정] 버튼이 검은색/비활성이면 절대 클릭하지 마.\n"
-                "- 도시 선택 클릭만 수행하고 task_status는 complete로 끝내지 마."
-            )
-        if stage == self._ASSIGN_CONFIRM_STAGE:
-            return (
-                "현재 stage: governor_assign_confirm\n"
-                "- 배치 도시가 선택되어 [배정] 버튼이 초록색/활성화 상태다.\n"
-                "- [배정] 버튼만 클릭하고 task_status='complete'로 끝내라."
-            )
+
         return super().build_stage_note(memory)
 
     def build_generic_fallback_note(self, memory: ShortTermMemory) -> str:
@@ -3574,58 +3880,103 @@ class GovernorProcess(ScriptedMultiStepProcess):
             "검은색/비활성 [확정], [배정] 버튼은 누르지 마."
         )
 
-    def _governor_screen_state(self, provider: BaseVLMProvider, pil_image, *, img_config=None) -> dict | None:
-        prompt = (
-            "너는 문명6 총독 화면 상태 판별기야. 현재 총독 UI가 어떤 단계인지 JSON만 출력해.\n"
-            "{"
-            '"governor_mode":"overview|promote_select|promote_confirm|assign_city|assign_confirm|notification|other",'
-            '"governor_screen_ready": true/false,'
-            '"notification_visible": true/false,'
-            '"confirm_enabled": true/false,'
-            '"assign_enabled": true/false,'
-            '"left_city_popup_visible": true/false,'
-            '"reasoning":"짧은 이유"'
-            "}\n"
-            "- 총독 카드 목록과 [임명]/[진급] 버튼이 보이면 governor_mode='overview', governor_screen_ready=true.\n"
-            "- 총독 진급 팝업이 보이고 [확정] 버튼이 검은색/비활성이면 "
-            "governor_mode='promote_select', confirm_enabled=false.\n"
-            "- 총독 진급 팝업이 보이고 [확정] 버튼이 초록색/활성이면 "
-            "governor_mode='promote_confirm', confirm_enabled=true.\n"
-            "- 좌상단 '총독 배정' 텍스트와 왼쪽 도시 팝업/목록이 보이고 [배정] 버튼이 아직 비활성이면 "
-            "governor_mode='assign_city', left_city_popup_visible=true.\n"
-            "- 좌상단 '총독 배정' 상태에서 [배정] 버튼이 초록색/활성이면 "
-            "governor_mode='assign_confirm', assign_enabled=true.\n"
-            "- 우하단 '총독 타이틀' 버튼 또는 펜 아이콘만 보이고 실제 총독 화면이 안 열렸으면 "
-            "governor_mode='notification', notification_visible=true, governor_screen_ready=false.\n"
-            "- 확실하지 않으면 governor_mode='other', governor_screen_ready=false.\n"
+    # ------------------------------------------------------------------
+    # Scroll anchor helpers (simplified vs CityProduction — no right-side constraint)
+    # ------------------------------------------------------------------
+    def _get_runtime_scroll_anchor(self, memory: ShortTermMemory) -> ScrollAnchor:
+        anchor = memory.get_scroll_anchor()
+        if anchor is not None:
+            return anchor
+        nr = memory.normalizing_range
+        return ScrollAnchor(x=nr // 2, y=nr // 2, left=nr // 4, top=nr // 4, right=3 * nr // 4, bottom=3 * nr // 4)
+
+    def _build_anchor_move_action(self, memory: ShortTermMemory, *, stage_name: str, reason: str) -> AgentAction:
+        anchor = self._get_runtime_scroll_anchor(memory)
+        memory.begin_stage(stage_name)
+        return AgentAction(
+            action="move",
+            x=anchor.x,
+            y=anchor.y,
+            reasoning=reason,
+            task_status="in_progress",
         )
-        try:
-            return _analyze_structured_json(provider, pil_image, prompt, img_config=img_config, max_tokens=256)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Governor state check failed: %s", exc)
+
+    def _build_anchor_scroll_action(
+        self,
+        memory: ShortTermMemory,
+        *,
+        direction: str,
+        reason: str,
+    ) -> AgentAction:
+        anchor = self._get_runtime_scroll_anchor(memory)
+        memory.choice_catalog.last_scroll_direction = direction
+        return AgentAction(
+            action="scroll",
+            x=anchor.x,
+            y=anchor.y,
+            scroll_amount=-self._ANCHOR_SCROLL_DELTA if direction == "down" else self._ANCHOR_SCROLL_DELTA,
+            reasoning=reason,
+            task_status="in_progress",
+        )
+
+    def _build_restore_scroll_action(self, memory: ShortTermMemory) -> AgentAction | None:
+        best_choice = memory.get_best_choice()
+        if best_choice is None:
+            return None
+        if best_choice.position_hint == "above":
+            memory.begin_stage(self._RESTORE_SCROLL_STAGE)
+            return self._build_anchor_scroll_action(
+                memory,
+                direction="up",
+                reason=f"선택한 총독 '{best_choice.label}' 이 다시 보이도록 위로 재복원 스크롤",
+            )
+        if best_choice.position_hint == "below":
+            memory.begin_stage(self._RESTORE_SCROLL_STAGE)
+            return self._build_anchor_scroll_action(
+                memory,
+                direction="down",
+                reason=f"선택한 총독 '{best_choice.label}' 이 다시 보이도록 아래로 재복원 스크롤",
+            )
+        return None
+
+    # ------------------------------------------------------------------
+    # consume_observation — update memory from observer scan
+    # ------------------------------------------------------------------
+    def consume_observation(self, memory: ShortTermMemory, observation: ObservationBundle) -> AgentAction | None:
+        memory.begin_stage("observe_choices")
+        scroll_direction = memory.choice_catalog.last_scroll_direction or "down"
+        memory.remember_choices(
+            observation.visible_options,
+            end_of_list=observation.end_of_list,
+            scroll_anchor=observation.scroll_anchor,
+            scroll_direction=scroll_direction,
+        )
+
+        best_choice = memory.get_best_choice()
+        if best_choice is not None:
+            if best_choice.visible_now:
+                memory.begin_stage("select_from_memory")
+                return None
+            return self._build_anchor_move_action(
+                memory,
+                stage_name=self._RESTORE_HOVER_STAGE,
+                reason=f"선택한 총독 '{best_choice.label}' 을 다시 찾기 전에 카드 리스트 패널 중앙 hover를 고정",
+            )
+
+        if observation.end_of_list or memory.choice_catalog.end_reached:
+            memory.mark_substep("full_scan_complete")
+            memory.begin_stage("choose_from_memory")
             return None
 
-    def _transition_from_governor_state(self, memory: ShortTermMemory, state: dict | None) -> StageTransition | None:
-        if not state or not bool(state.get("governor_screen_ready", False)):
-            return None
+        return self._build_anchor_move_action(
+            memory,
+            stage_name=self._HOVER_SCROLL_STAGE,
+            reason="총독 카드 리스트 패널 중앙으로 커서를 먼저 이동해 hover를 고정",
+        )
 
-        mode = str(state.get("governor_mode", "")).strip()
-        reason = str(state.get("reasoning", "")).strip()
-        stage_by_mode = {
-            "overview": self._OVERVIEW_STAGE,
-            "promote_select": self._PROMOTE_SELECT_STAGE,
-            "promote_confirm": self._PROMOTE_CONFIRM_STAGE,
-            "assign_city": self._ASSIGN_CITY_STAGE,
-            "assign_confirm": self._ASSIGN_CONFIRM_STAGE,
-        }
-        next_stage = stage_by_mode.get(mode)
-        if not next_stage:
-            return None
-        if memory.current_stage == next_stage:
-            return None
-        memory.begin_stage(next_stage)
-        return StageTransition(stage=next_stage, reason=reason or mode)
-
+    # ------------------------------------------------------------------
+    # Plan action — main dispatch
+    # ------------------------------------------------------------------
     def plan_action(
         self,
         provider: BaseVLMProvider,
@@ -3638,13 +3989,13 @@ class GovernorProcess(ScriptedMultiStepProcess):
         hitl_directive: str | None,
         img_config=None,
     ) -> AgentAction | list[AgentAction] | StageTransition | None:
-        state = self._governor_screen_state(provider, pil_image, img_config=img_config)
-
+        # 1. Entry gate (ONE-TIME VLM state check)
         if self._ENTRY_SUBSTEP not in memory.completed_substeps:
-            transition = self._transition_from_governor_state(memory, state)
-            if transition is not None:
+            state = self._governor_entry_check(provider, pil_image, img_config=img_config)
+            if state and bool(state.get("governor_screen_ready", False)):
                 memory.mark_substep(self._ENTRY_SUBSTEP)
-                return transition
+                memory.begin_stage("observe_choices")
+                return StageTransition(stage="observe_choices", reason="governor overview screen ready")
             if state and bool(state.get("notification_visible", False)):
                 memory.begin_stage(self._ENTRY_STAGE)
                 return AgentAction(
@@ -3669,27 +4020,64 @@ class GovernorProcess(ScriptedMultiStepProcess):
                 ),
             )
 
-        transition = self._transition_from_governor_state(memory, state)
-        if transition is not None:
-            return transition
+        # 2. Promote branch (fixed)
+        if memory.branch == self._PROMOTE_BRANCH:
+            return self._plan_promote_branch(
+                provider,
+                pil_image,
+                memory,
+                normalizing_range=normalizing_range,
+                high_level_strategy=high_level_strategy,
+                recent_actions=recent_actions,
+                hitl_directive=hitl_directive,
+                img_config=img_config,
+            )
 
-        if memory.current_stage == self._PROMOTE_CONFIRM_STAGE:
-            if state and not bool(state.get("confirm_enabled", False)):
-                memory.begin_stage(self._PROMOTE_SELECT_STAGE)
-                return StageTransition(
-                    stage=self._PROMOTE_SELECT_STAGE,
-                    reason="promotion confirm is still disabled -> choose a skill first",
-                )
-        if memory.current_stage == self._ASSIGN_CONFIRM_STAGE:
-            if state and not bool(state.get("assign_enabled", False)):
-                memory.begin_stage(self._ASSIGN_CITY_STAGE)
-                return StageTransition(
-                    stage=self._ASSIGN_CITY_STAGE,
-                    reason="assignment confirm is still disabled -> choose a city first",
-                )
+        # 3. Appoint branch (fixed)
+        if memory.branch == self._APPOINT_BRANCH:
+            return self._plan_appoint_branch(
+                provider,
+                pil_image,
+                memory,
+                normalizing_range=normalizing_range,
+                high_level_strategy=high_level_strategy,
+                recent_actions=recent_actions,
+                hitl_directive=hitl_directive,
+                img_config=img_config,
+            )
 
-        if not memory.current_stage:
-            memory.begin_stage(self._OVERVIEW_STAGE)
+        # 4. Observation + scroll-back flow (handled by base + local overrides)
+        if memory.current_stage == self._HOVER_SCROLL_STAGE:
+            return self._build_anchor_move_action(
+                memory,
+                stage_name=self._HOVER_SCROLL_STAGE,
+                reason="총독 카드 리스트 패널 중앙으로 커서를 먼저 이동해 hover를 고정",
+            )
+        if memory.current_stage == self._SCROLL_DOWN_STAGE:
+            memory.begin_stage(self._SCROLL_DOWN_STAGE)
+            return self._build_anchor_scroll_action(
+                memory,
+                direction="down",
+                reason="hover된 총독 카드 리스트 중앙에서 아래로 스크롤해 숨은 총독을 확인",
+            )
+
+        best_choice = memory.get_best_choice()
+        if best_choice is not None and not best_choice.visible_now:
+            if memory.current_stage == self._RESTORE_HOVER_STAGE:
+                return self._build_anchor_move_action(
+                    memory,
+                    stage_name=self._RESTORE_HOVER_STAGE,
+                    reason=f"선택한 총독 '{best_choice.label}' 을 다시 찾기 전에 카드 리스트 패널 중앙 hover를 고정",
+                )
+            if memory.current_stage == self._RESTORE_SCROLL_STAGE:
+                restore = self._build_restore_scroll_action(memory)
+                if restore is not None:
+                    return restore
+            return self._build_anchor_move_action(
+                memory,
+                stage_name=self._RESTORE_HOVER_STAGE,
+                reason=f"선택한 총독 '{best_choice.label}' 을 다시 찾기 전에 카드 리스트 패널 중앙 hover를 고정",
+            )
 
         return super().plan_action(
             provider,
@@ -3701,6 +4089,201 @@ class GovernorProcess(ScriptedMultiStepProcess):
             hitl_directive=hitl_directive,
             img_config=img_config,
         )
+
+    # ------------------------------------------------------------------
+    # Promote branch — fixed step sequence
+    # ------------------------------------------------------------------
+    def _plan_promote_branch(
+        self,
+        provider: BaseVLMProvider,
+        pil_image,
+        memory: ShortTermMemory,
+        *,
+        normalizing_range: int,
+        high_level_strategy: str,
+        recent_actions: str,
+        hitl_directive: str | None,
+        img_config=None,
+    ) -> AgentAction | list[AgentAction] | StageTransition | None:
+        stage = memory.current_stage
+
+        # Deterministic ESC stages (no VLM needed)
+        if stage == self._EXIT_ESC1:
+            return AgentAction(
+                action="press",
+                key="escape",
+                reasoning="진급 완료 후 ESC 1회 — 총독 화면 닫기",
+                task_status="in_progress",
+            )
+        if stage == self._EXIT_ESC2:
+            return AgentAction(
+                action="press",
+                key="escape",
+                reasoning="ESC 2회 — 총독 화면 완전 종료",
+                task_status="complete",
+            )
+
+        # VLM-guided stages
+        return self._force_task_status(
+            self._plan_generic_fallback_action(
+                provider,
+                pil_image,
+                memory,
+                normalizing_range=normalizing_range,
+                high_level_strategy=high_level_strategy,
+                recent_actions=recent_actions,
+                hitl_directive=hitl_directive,
+                img_config=img_config,
+                extra_note=self.build_stage_note(memory),
+            ),
+            "in_progress",
+        )
+
+    # ------------------------------------------------------------------
+    # Appoint branch — fixed step sequence
+    # ------------------------------------------------------------------
+    def _plan_appoint_branch(
+        self,
+        provider: BaseVLMProvider,
+        pil_image,
+        memory: ShortTermMemory,
+        *,
+        normalizing_range: int,
+        high_level_strategy: str,
+        recent_actions: str,
+        hitl_directive: str | None,
+        img_config=None,
+    ) -> AgentAction | list[AgentAction] | StageTransition | None:
+        stage = memory.current_stage
+
+        task_status = "complete" if stage == self._APPOINT_CONFIRM else "in_progress"
+        return self._force_task_status(
+            self._plan_generic_fallback_action(
+                provider,
+                pil_image,
+                memory,
+                normalizing_range=normalizing_range,
+                high_level_strategy=high_level_strategy,
+                recent_actions=recent_actions,
+                hitl_directive=hitl_directive,
+                img_config=img_config,
+                extra_note=self.build_stage_note(memory),
+            ),
+            task_status,
+        )
+
+    # ------------------------------------------------------------------
+    # on_action_success — deterministic stage transitions
+    # ------------------------------------------------------------------
+    def on_action_success(self, memory: ShortTermMemory, action: AgentAction) -> None:
+        stage = memory.current_stage
+
+        # Observation scroll stages
+        if action.action == "move":
+            if stage == self._HOVER_SCROLL_STAGE:
+                memory.begin_stage(self._SCROLL_DOWN_STAGE)
+                return
+            if stage == self._RESTORE_HOVER_STAGE:
+                memory.begin_stage(self._RESTORE_SCROLL_STAGE)
+                return
+
+        if action.action == "scroll":
+            if stage == self._SCROLL_DOWN_STAGE:
+                memory.register_choice_scroll(direction="down")
+                memory.begin_stage("observe_choices")
+                return
+            if stage == self._RESTORE_SCROLL_STAGE:
+                memory.register_choice_scroll(direction="up")
+                memory.begin_stage("observe_choices")
+                return
+
+        # Promote branch transitions
+        if action.action == "click":
+            if stage == self._PROMOTE_CLICK:
+                memory.begin_stage(self._PROMOTE_SELECT)
+                return
+            if stage == self._PROMOTE_SELECT:
+                memory.begin_stage(self._PROMOTE_CONFIRM)
+                return
+            if stage == self._PROMOTE_CONFIRM:
+                memory.begin_stage(self._PROMOTE_POPUP)
+                return
+            if stage == self._PROMOTE_POPUP:
+                memory.begin_stage(self._EXIT_ESC1)
+                return
+
+        if action.action == "press":
+            if stage == self._EXIT_ESC1:
+                memory.begin_stage(self._EXIT_ESC2)
+                return
+
+        # Appoint branch transitions
+        if action.action == "click":
+            if stage == self._APPOINT_CLICK:
+                memory.begin_stage(self._APPOINT_CITY)
+                return
+            if stage == self._APPOINT_CITY:
+                memory.begin_stage(self._APPOINT_CONFIRM)
+                return
+
+    # ------------------------------------------------------------------
+    # should_verify_action_without_ui_change
+    # ------------------------------------------------------------------
+    def should_verify_action_without_ui_change(self, memory: ShortTermMemory, action: AgentAction) -> bool:
+        if action.action == "move":
+            return True
+        if action.action == "scroll" and memory.current_stage in {
+            self._SCROLL_DOWN_STAGE,
+            self._RESTORE_SCROLL_STAGE,
+        }:
+            return True
+        if action.action == "press" and action.key == "escape":
+            return True
+        return super().should_verify_action_without_ui_change(memory, action)
+
+    # ------------------------------------------------------------------
+    # get_visible_progress — branch-aware progress display
+    # ------------------------------------------------------------------
+    def get_visible_progress(
+        self,
+        memory: ShortTermMemory,
+        *,
+        executed_steps: int,
+        hard_max_steps: int,
+    ) -> tuple[int, int]:
+        del executed_steps, hard_max_steps
+
+        if self._ENTRY_SUBSTEP not in memory.completed_substeps:
+            return 1, 2
+
+        stage = memory.current_stage or "observe_choices"
+
+        if memory.branch == self._PROMOTE_BRANCH:
+            promote_order = [
+                self._PROMOTE_CLICK,
+                self._PROMOTE_SELECT,
+                self._PROMOTE_CONFIRM,
+                self._PROMOTE_POPUP,
+                self._EXIT_ESC1,
+                self._EXIT_ESC2,
+            ]
+            if stage in promote_order:
+                return promote_order.index(stage) + 3, 8
+            return 3, 8
+
+        if memory.branch == self._APPOINT_BRANCH:
+            appoint_order = [self._APPOINT_CLICK, self._APPOINT_CITY, self._APPOINT_CONFIRM]
+            if stage in appoint_order:
+                return appoint_order.index(stage) + 3, 5
+            return 3, 5
+
+        # Observation phase
+        if stage in {self._HOVER_SCROLL_STAGE, self._SCROLL_DOWN_STAGE, "observe_choices"}:
+            return 2, 4
+        if stage in {"choose_from_memory", "decide_best_choice"}:
+            return 3, 4
+
+        return super().get_visible_progress(memory, executed_steps=0, hard_max_steps=1)
 
 
 class CultureDecisionProcess(ScriptedMultiStepProcess):

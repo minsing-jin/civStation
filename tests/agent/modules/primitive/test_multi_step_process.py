@@ -285,11 +285,11 @@ class TestPromptUpdates:
         assert "다른 유닛이 서 있는 타일" in prompt
         assert "공격일 때만" in prompt
 
-    def test_governor_prompt_handles_lower_right_governor_entry(self):
+    def test_governor_prompt_stage_note_driven(self):
         prompt = get_primitive_prompt("governor_primitive")
-        assert "우하단" in prompt
-        assert "총독 타이틀" in prompt
-        assert 'press "enter"' in prompt
+        assert "stage note" in prompt
+        assert "확정" in prompt
+        assert "배정" in prompt
 
     def test_governor_registry_criteria_includes_lower_right_governor_entry(self):
         criteria = PRIMITIVE_REGISTRY["governor_primitive"]["criteria"]
@@ -297,9 +297,8 @@ class TestPromptUpdates:
         assert "총독 타이틀" in criteria
         assert "펜" in criteria
 
-    def test_governor_prompt_requires_skill_selection_before_confirm_and_city_before_assign(self):
+    def test_governor_prompt_contains_essential_rules(self):
         prompt = get_primitive_prompt("governor_primitive")
-        assert "왼쪽 팝업" in prompt
         assert "확정" in prompt
         assert "비활성" in prompt
         assert "배정" in prompt
@@ -376,109 +375,58 @@ class TestEntryGatedProcesses:
         assert action.key == "enter"
         assert memory.current_stage == "governor_entry"
 
-    def test_governor_process_disabled_confirm_returns_to_skill_selection(self):
+    def test_governor_promote_branch_transitions_via_on_action_success(self):
         process = get_multi_step_process("governor_primitive", "")
         memory = ShortTermMemory()
-        memory.start_task("governor_primitive")
+        memory.start_task("governor_primitive", enable_choice_catalog=True)
         memory.mark_substep("governor_entry_done")
-        memory.begin_stage("governor_promote_confirm")
-        provider = FakeProvider(
-            [
-                json.dumps(
-                    {
-                        "governor_mode": "promote_select",
-                        "governor_screen_ready": True,
-                        "notification_visible": False,
-                        "confirm_enabled": False,
-                        "assign_enabled": False,
-                        "left_city_popup_visible": False,
-                        "reasoning": "스킬 미선택이라 확정 비활성",
-                    }
-                )
-            ]
-        )
+        memory.set_branch("governor_promote")
+        memory.begin_stage("governor_promote_click")
 
-        action = process.plan_action(
-            provider,
-            Image.new("RGB", (100, 100)),
-            memory,
-            normalizing_range=1000,
-            high_level_strategy="과학 승리",
-            recent_actions="없음",
-            hitl_directive=None,
-        )
-
-        assert isinstance(action, StageTransition)
-        assert action.stage == "governor_promote_select"
+        # promote_click -> promote_select
+        process.on_action_success(memory, AgentAction(action="click", x=500, y=500))
         assert memory.current_stage == "governor_promote_select"
 
-    def test_governor_process_disabled_assign_returns_to_city_selection(self):
+        # promote_select -> promote_confirm
+        process.on_action_success(memory, AgentAction(action="click", x=500, y=500))
+        assert memory.current_stage == "governor_promote_confirm"
+
+        # promote_confirm -> promote_popup
+        process.on_action_success(memory, AgentAction(action="click", x=500, y=500))
+        assert memory.current_stage == "governor_promote_popup"
+
+        # promote_popup -> exit_esc1
+        process.on_action_success(memory, AgentAction(action="click", x=500, y=500))
+        assert memory.current_stage == "governor_exit_esc1"
+
+        # exit_esc1 -> exit_esc2
+        process.on_action_success(memory, AgentAction(action="press", key="escape"))
+        assert memory.current_stage == "governor_exit_esc2"
+
+    def test_governor_appoint_branch_transitions_via_on_action_success(self):
         process = get_multi_step_process("governor_primitive", "")
         memory = ShortTermMemory()
-        memory.start_task("governor_primitive")
+        memory.start_task("governor_primitive", enable_choice_catalog=True)
         memory.mark_substep("governor_entry_done")
-        memory.begin_stage("governor_assign_confirm")
-        provider = FakeProvider(
-            [
-                json.dumps(
-                    {
-                        "governor_mode": "assign_city",
-                        "governor_screen_ready": True,
-                        "notification_visible": False,
-                        "confirm_enabled": False,
-                        "assign_enabled": False,
-                        "left_city_popup_visible": True,
-                        "reasoning": "왼쪽 도시 팝업은 보이지만 배정 비활성",
-                    }
-                )
-            ]
-        )
+        memory.set_branch("governor_appoint")
+        memory.begin_stage("governor_appoint_click")
 
-        action = process.plan_action(
-            provider,
-            Image.new("RGB", (100, 100)),
-            memory,
-            normalizing_range=1000,
-            high_level_strategy="과학 승리",
-            recent_actions="없음",
-            hitl_directive=None,
-        )
+        # appoint_click -> appoint_city
+        process.on_action_success(memory, AgentAction(action="click", x=500, y=500))
+        assert memory.current_stage == "governor_appoint_city"
 
-        assert isinstance(action, StageTransition)
-        assert action.stage == "governor_assign_city"
-        assert memory.current_stage == "governor_assign_city"
+        # appoint_city -> appoint_confirm
+        process.on_action_success(memory, AgentAction(action="click", x=500, y=500))
+        assert memory.current_stage == "governor_appoint_confirm"
 
-    def test_governor_process_enabled_assign_clicks_confirm(self):
+    def test_governor_promote_esc_stages_are_deterministic(self):
         process = get_multi_step_process("governor_primitive", "")
         memory = ShortTermMemory()
-        memory.start_task("governor_primitive")
+        memory.start_task("governor_primitive", enable_choice_catalog=True)
         memory.mark_substep("governor_entry_done")
-        memory.begin_stage("governor_assign_confirm")
-        provider = FakeProvider(
-            [
-                json.dumps(
-                    {
-                        "governor_mode": "assign_confirm",
-                        "governor_screen_ready": True,
-                        "notification_visible": False,
-                        "confirm_enabled": False,
-                        "assign_enabled": True,
-                        "left_city_popup_visible": True,
-                        "reasoning": "도시 선택이 끝나 배정 가능",
-                    }
-                ),
-                json.dumps(
-                    {
-                        "action": "click",
-                        "x": 840,
-                        "y": 910,
-                        "button": "left",
-                        "reasoning": "초록색 배정 버튼 클릭",
-                        "task_status": "complete",
-                    }
-                ),
-            ]
-        )
+        memory.set_branch("governor_promote")
+        memory.begin_stage("governor_exit_esc1")
+        provider = FakeProvider([])
 
         action = process.plan_action(
             provider,
@@ -491,9 +439,13 @@ class TestEntryGatedProcesses:
         )
 
         assert action is not None
-        assert action.action == "click"
-        assert action.task_status == "complete"
-        assert "배정" in (action.reasoning or "")
+        assert action.action == "press"
+        assert action.key == "escape"
+        assert action.task_status == "in_progress"
+
+    def test_governor_registry_uses_observation_assisted(self):
+        assert PRIMITIVE_REGISTRY["governor_primitive"]["process_kind"] == "observation_assisted"
+        assert PRIMITIVE_REGISTRY["governor_primitive"]["max_steps"] >= 20
 
     def test_research_process_uses_entry_action_before_tree_is_ready(self):
         process = get_multi_step_process("research_select_primitive", "")
@@ -1117,6 +1069,95 @@ class TestEntryGatedProcesses:
         assert memory.current_stage == "production_place"
         assert memory.branch == "placement_map"
 
+    def test_city_production_placement_upscales_legacy_1000_click_tile_coords_for_10000_range(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task(
+            "city_production_primitive",
+            normalizing_range=10000,
+            enable_choice_catalog=True,
+        )
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("placement_map")
+        memory.begin_stage("production_place")
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "placement_action": "click_tile",
+                        "x": 438,
+                        "y": 645,
+                        "button": "right",
+                        "tile_x": 438,
+                        "tile_y": 645,
+                        "tile_button": "right",
+                        "tile_color": "green",
+                        "reason": "산과 인접한 초록 타일",
+                    }
+                )
+            ]
+        )
+
+        action = process.plan_action(
+            provider,
+            Image.new("RGB", (1600, 900)),
+            memory,
+            normalizing_range=10000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert isinstance(action, AgentAction)
+        assert action.action == "click"
+        assert action.button == "right"
+        assert (action.x, action.y) == (4380, 6450)
+
+    def test_city_production_purchase_button_upscales_legacy_1000_coords_for_10000_range(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task(
+            "city_production_primitive",
+            normalizing_range=10000,
+            enable_choice_catalog=True,
+        )
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("placement_map")
+        memory.begin_stage("production_place")
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "placement_action": "click_purchase_button",
+                        "x": 438,
+                        "y": 645,
+                        "button": "right",
+                        "tile_x": 510,
+                        "tile_y": 690,
+                        "tile_button": "right",
+                        "tile_color": "purple",
+                        "reason": "구매형 타일 골드 배지 클릭",
+                    }
+                )
+            ]
+        )
+
+        action = process.plan_action(
+            provider,
+            Image.new("RGB", (1600, 900)),
+            memory,
+            normalizing_range=10000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert isinstance(action, AgentAction)
+        assert action.action == "click"
+        assert action.button == "right"
+        assert (action.x, action.y) == (4380, 6450)
+        assert memory.get_city_placement_target() == (5100, 6900, "right")
+
     def test_city_production_placement_tile_click_transitions_to_confirmation_stage(self):
         process = get_multi_step_process("city_production_primitive", "")
         memory = ShortTermMemory()
@@ -1290,6 +1331,56 @@ class TestEntryGatedProcesses:
         assert second_transition.stage == "production_place_confirm"
         assert memory.current_stage == "production_place_confirm"
 
+    def test_city_production_placement_followup_retries_planning_instead_of_same_tile_reclick(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("placement_map")
+        memory.begin_stage("production_place")
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "placement_action": "click_tile",
+                        "x": 640,
+                        "y": 730,
+                        "button": "right",
+                        "tile_color": "blue",
+                        "reason": "파란 타일이라도 건설할 땅을 직접 클릭",
+                    }
+                ),
+                json.dumps({"placement_followup_state": "placement", "reason": "여전히 배치 지도라 재평가 필요"}),
+            ]
+        )
+
+        placement_action = process.plan_action(
+            provider,
+            Image.new("RGB", (1600, 900)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+        assert isinstance(placement_action, AgentAction)
+        assert (placement_action.x, placement_action.y) == (640, 730)
+
+        process.on_action_success(memory, placement_action)
+
+        first_transition = process.plan_action(
+            provider,
+            Image.new("RGB", (1600, 900)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+        assert isinstance(first_transition, StageTransition)
+        assert first_transition.stage == "production_place"
+        assert memory.current_stage == "production_place"
+
     def test_city_production_placement_stage_prompt_mentions_gold_badge_blue_purple_and_adjacency(self):
         process = get_multi_step_process("city_production_primitive", "")
         memory = ShortTermMemory()
@@ -1310,6 +1401,7 @@ class TestEntryGatedProcesses:
         assert "인접 보너스" in instruction
         assert "골드" in instruction
         assert "보라" in instruction
+        assert "골드와 숫자가 있는 구매 버튼/배지를 먼저 클릭" in instruction
         assert "같은 타일 본체를 다시 클릭" in instruction
         assert "캠퍼스를 기본값처럼 고르지 마" in instruction
 
@@ -1400,6 +1492,12 @@ class TestEntryGatedProcesses:
             end_of_list=False,
             scroll_direction="down",
         )
+        memory.register_choice_scroll(direction="down")
+        memory.remember_choices(
+            [{"label": "기념비"}],
+            end_of_list=False,
+            scroll_direction="down",
+        )
 
         prompt_memory = memory.to_prompt_string()
 
@@ -1436,7 +1534,7 @@ class TestEntryGatedProcesses:
         assert memory.get_best_choice() is not None
         assert memory.get_best_choice().visible_now is True
 
-    def test_city_production_select_click_verification_routes_to_placement_followup(self):
+    def test_city_production_select_click_success_routes_to_post_select_resolve(self):
         process = get_multi_step_process("city_production_primitive", "")
         memory = ShortTermMemory()
         memory.start_task("city_production_primitive", enable_choice_catalog=True)
@@ -1450,15 +1548,40 @@ class TestEntryGatedProcesses:
             position_hint="visible",
         )
         memory.set_best_choice(option_id="캠퍼스", reason="과학 우선")
+        process.on_action_success(
+            memory,
+            AgentAction(
+                action="click",
+                x=640,
+                y=420,
+                reasoning="캠퍼스 선택",
+                task_status="in_progress",
+            ),
+        )
+
+        assert memory.current_stage == "resolve_post_select_followup"
+
+    def test_city_production_post_select_resolve_routes_to_placement_followup(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("choice_list")
+        memory.begin_stage("resolve_post_select_followup")
         provider = FakeProvider([json.dumps({"post_select_state": "placement", "reason": "지구 배치 필요"})])
 
-        verification = process.verify_completion(
+        transition = process.plan_action(
             provider,
             Image.new("RGB", (2000, 1000)),
             memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
         )
 
-        assert verification.complete is False
+        assert isinstance(transition, StageTransition)
+        assert transition.stage == "production_place"
         assert memory.branch == "placement_map"
         assert memory.current_stage == "production_place"
         assert provider.last_use_thinking is False
@@ -1468,29 +1591,27 @@ class TestEntryGatedProcesses:
         assert provider.last_pil_size[0] <= 640
         assert "post_select_state" in provider.last_text
 
-    def test_city_production_select_click_verification_routes_to_confirm_followup(self):
+    def test_city_production_post_select_resolve_routes_to_confirm_followup(self):
         process = get_multi_step_process("city_production_primitive", "")
         memory = ShortTermMemory()
         memory.start_task("city_production_primitive", enable_choice_catalog=True)
         memory.mark_substep("production_entry_done")
         memory.set_branch("choice_list")
-        memory.begin_stage("select_from_memory")
-        memory.choice_catalog.candidates["곡물 창고"] = ChoiceCandidate(
-            id="곡물_창고",
-            label="곡물 창고",
-            visible_now=True,
-            position_hint="visible",
-        )
-        memory.set_best_choice(option_id="곡물_창고", reason="성장 우선")
+        memory.begin_stage("resolve_post_select_followup")
         provider = FakeProvider([json.dumps({"post_select_state": "confirm", "reason": "확인 팝업 표시"})])
 
-        verification = process.verify_completion(
+        transition = process.plan_action(
             provider,
             Image.new("RGB", (1600, 900)),
             memory,
+            normalizing_range=1000,
+            high_level_strategy="성장 우선",
+            recent_actions="없음",
+            hitl_directive=None,
         )
 
-        assert verification.complete is False
+        assert isinstance(transition, StageTransition)
+        assert transition.stage == "production_place_confirm"
         assert memory.current_stage == "production_place_confirm"
         assert provider.last_use_thinking is False
 
@@ -1526,8 +1647,22 @@ class TestEntryGatedProcesses:
         )
 
         assert action is not None
-        assert action.task_status == "complete"
+        assert action.task_status == "in_progress"
         assert "'예' 또는 확인 버튼" in provider.last_text
+
+        process.on_action_success(
+            memory,
+            AgentAction(
+                action="click",
+                x=610,
+                y=560,
+                reasoning="확인 팝업의 예 버튼 클릭",
+                task_status="in_progress",
+            ),
+        )
+
+        assert process.is_terminal_state(memory) is True
+        assert memory.current_stage == "production_complete"
 
     def test_city_production_scroll_verification_rejects_unchanged_visible_options(self):
         process = get_multi_step_process("city_production_primitive", "")
@@ -1728,6 +1863,22 @@ class TestEntryGatedProcesses:
 
         assert progress == (2, 3)
 
+    def test_city_production_visible_progress_uses_three_step_placement_flow(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("placement_map")
+        memory.begin_stage("production_place")
+
+        placement_progress = process.get_visible_progress(memory, executed_steps=2, hard_max_steps=18)
+
+        memory.begin_stage("production_place_confirm")
+        confirm_progress = process.get_visible_progress(memory, executed_steps=3, hard_max_steps=18)
+
+        assert placement_progress == (2, 3)
+        assert confirm_progress == (3, 3)
+
     def test_city_production_visible_progress_expands_for_purchase_reclick_branch(self):
         process = get_multi_step_process("city_production_primitive", "")
         memory = ShortTermMemory()
@@ -1803,31 +1954,29 @@ class TestEntryGatedProcesses:
         assert memory.current_stage == "observe_choices"
         assert memory.choice_catalog.last_scroll_direction == "up"
 
-    def test_city_production_select_click_verification_can_finish_without_followup(self):
+    def test_city_production_post_select_resolve_can_finish_without_followup(self):
         process = get_multi_step_process("city_production_primitive", "")
         memory = ShortTermMemory()
         memory.start_task("city_production_primitive", enable_choice_catalog=True)
         memory.mark_substep("production_entry_done")
         memory.set_branch("choice_list")
-        memory.begin_stage("select_from_memory")
-        memory.choice_catalog.candidates["기념비"] = ChoiceCandidate(
-            id="기념비",
-            label="기념비",
-            visible_now=True,
-            position_hint="visible",
-        )
-        memory.set_best_choice(option_id="기념비", reason="초반 문화")
+        memory.begin_stage("resolve_post_select_followup")
         provider = FakeProvider([json.dumps({"post_select_state": "done", "reason": "추가 단계 없음"})])
 
-        verification = process.verify_completion(
+        transition = process.plan_action(
             provider,
             Image.new("RGB", (1600, 900)),
             memory,
+            normalizing_range=1000,
+            high_level_strategy="초반 문화",
+            recent_actions="없음",
+            hitl_directive=None,
         )
 
-        assert verification.complete is True
+        assert isinstance(transition, StageTransition)
+        assert transition.stage == "production_complete"
         assert memory.branch == "choice_list"
-        assert memory.current_stage == "select_from_memory"
+        assert memory.current_stage == "production_complete"
 
 
 class TestPolicyProcess:
