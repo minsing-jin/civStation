@@ -32,18 +32,50 @@ class _TeeBinaryStream:
 
     def write(self, data: bytes) -> int:
         with self._lock:
-            written = self._primary.write(data)
-            self._mirror.write(data)
-            self._mirror.flush()
+            written = self._write_primary(data)
+            self._write_mirror(data)
+            self._flush_mirror()
         return written if written is not None else len(data)
 
     def flush(self) -> None:
         with self._lock:
-            self._primary.flush()
-            self._mirror.flush()
+            self._flush_primary()
+            self._flush_mirror()
 
     def close(self) -> None:
         self.flush()
+
+    def _write_primary(self, data: bytes) -> int | None:
+        if self._primary is None or getattr(self._primary, "closed", False):
+            return None
+        try:
+            return self._primary.write(data)
+        except (ValueError, OSError):
+            return None
+
+    def _flush_primary(self) -> None:
+        if self._primary is None or getattr(self._primary, "closed", False):
+            return
+        try:
+            self._primary.flush()
+        except (ValueError, OSError):
+            return
+
+    def _write_mirror(self, data: bytes) -> None:
+        if self._mirror is None or getattr(self._mirror, "closed", False):
+            return
+        try:
+            self._mirror.write(data)
+        except (ValueError, OSError):
+            return
+
+    def _flush_mirror(self) -> None:
+        if self._mirror is None or getattr(self._mirror, "closed", False):
+            return
+        try:
+            self._mirror.flush()
+        except (ValueError, OSError):
+            return
 
     def __getattr__(self, name: str):
         return getattr(self._primary, name)
@@ -68,11 +100,11 @@ class _TeeTextStream:
     def write(self, data: str) -> int:
         text = str(data)
         with self._lock:
-            written = self._primary.write(text)
+            written = self._write_primary(text)
             mirrored = _sanitize_terminal_text(text)
             if mirrored:
-                self._mirror.write(mirrored)
-                self._mirror.flush()
+                self._write_mirror(mirrored)
+                self._flush_mirror()
         return written if written is not None else len(text)
 
     def writelines(self, lines) -> None:
@@ -81,11 +113,43 @@ class _TeeTextStream:
 
     def flush(self) -> None:
         with self._lock:
-            self._primary.flush()
-            self._mirror.flush()
+            self._flush_primary()
+            self._flush_mirror()
 
     def close(self) -> None:
         self.flush()
+
+    def _write_primary(self, text: str) -> int | None:
+        if self._primary is None or getattr(self._primary, "closed", False):
+            return None
+        try:
+            return self._primary.write(text)
+        except (ValueError, OSError):
+            return None
+
+    def _flush_primary(self) -> None:
+        if self._primary is None or getattr(self._primary, "closed", False):
+            return
+        try:
+            self._primary.flush()
+        except (ValueError, OSError):
+            return
+
+    def _write_mirror(self, text: str) -> None:
+        if self._mirror is None or getattr(self._mirror, "closed", False):
+            return
+        try:
+            self._mirror.write(text)
+        except (ValueError, OSError):
+            return
+
+    def _flush_mirror(self) -> None:
+        if self._mirror is None or getattr(self._mirror, "closed", False):
+            return
+        try:
+            self._mirror.flush()
+        except (ValueError, OSError):
+            return
 
     def __getattr__(self, name: str):
         return getattr(self._primary, name)
@@ -106,18 +170,17 @@ class RunLogSession:
         self._previous_hook = sys.excepthook
         self._previous_stdout = sys.stdout
         self._previous_stderr = sys.stderr
-        self._handler = logging.FileHandler(self.path, mode="w", encoding="utf-8")
+        self.path.write_text("", encoding="utf-8")
+        self._handler = logging.FileHandler(self.path, mode="a", encoding="utf-8")
         self._handler.setFormatter(logging.Formatter(_LOG_FORMAT))
         self._handler.setLevel(logging.NOTSET)
         self._lock = threading.RLock()
         self._closed = False
+        self._mirror_stream = self.path.open("a", encoding="utf-8")
 
         self._root_logger.addHandler(self._handler)
-        stream = self._handler.stream
-        if stream is None:
-            raise RuntimeError("Run log file handler did not open a writable stream")
-        sys.stdout = _TeeTextStream(self._previous_stdout, stream, self._lock)
-        sys.stderr = _TeeTextStream(self._previous_stderr, stream, self._lock)
+        sys.stdout = _TeeTextStream(self._previous_stdout, self._mirror_stream, self._lock)
+        sys.stderr = _TeeTextStream(self._previous_stderr, self._mirror_stream, self._lock)
         sys.excepthook = self._handle_uncaught_exception
 
     def _handle_uncaught_exception(
@@ -126,8 +189,8 @@ class RunLogSession:
         exc_value: BaseException,
         exc_traceback: TracebackType | None,
     ) -> None:
-        stream = self._handler.stream
-        if stream is not None:
+        stream = self._mirror_stream
+        if not getattr(stream, "closed", False):
             traceback.print_exception(exc_type, exc_value, exc_traceback, file=stream)
             stream.flush()
 
@@ -137,15 +200,17 @@ class RunLogSession:
 
     def close(self) -> None:
         """Detach the file handler and restore the prior exception hook."""
-        if self._closed:
-            return
+        with self._lock:
+            if self._closed:
+                return
 
-        sys.stdout = self._previous_stdout
-        sys.stderr = self._previous_stderr
-        sys.excepthook = self._previous_hook
-        self._root_logger.removeHandler(self._handler)
-        self._handler.close()
-        self._closed = True
+            sys.stdout = self._previous_stdout
+            sys.stderr = self._previous_stderr
+            sys.excepthook = self._previous_hook
+            self._root_logger.removeHandler(self._handler)
+            self._handler.close()
+            self._mirror_stream.close()
+            self._closed = True
 
 
 def start_run_log_session(base_dir: Path | str | None = None) -> RunLogSession:
