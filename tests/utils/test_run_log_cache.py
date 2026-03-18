@@ -1,6 +1,8 @@
 import logging
 import sys
 
+from rich.console import Console
+
 from computer_use_test.utils.run_log_cache import start_run_log_session
 
 
@@ -57,3 +59,26 @@ def test_run_log_session_writes_uncaught_traceback_and_restores_hook(tmp_path, m
     assert "RuntimeError: boom" in contents
     assert delegated and delegated[0][0] is RuntimeError
     assert sys.excepthook is fake_previous_hook
+
+
+def test_run_log_session_captures_stdout_stderr_and_restores_streams(tmp_path):
+    previous_stdout = sys.stdout
+    previous_stderr = sys.stderr
+    session = start_run_log_session(base_dir=tmp_path)
+
+    try:
+        assert sys.stdout is not previous_stdout
+        assert sys.stderr is not previous_stderr
+        print("stdout line", flush=True)
+        Console().print("rich line")
+        sys.stderr.write("stderr line\n")
+        sys.stderr.flush()
+    finally:
+        session.close()
+
+    contents = session.path.read_text(encoding="utf-8")
+    assert "stdout line" in contents
+    assert "rich line" in contents
+    assert "stderr line" in contents
+    assert sys.stdout is previous_stdout
+    assert sys.stderr is previous_stderr
