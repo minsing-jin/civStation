@@ -205,7 +205,7 @@ class TestObservationAssistedProcess:
         decided = process.decide_from_memory(
             provider,
             memory,
-            high_level_strategy="과학 승리",
+            high_level_strategy="[사용자 최우선 지시] 이번 task에서는 캠퍼스 먼저 지어\n\n과학 승리",
         )
 
         assert decided is True
@@ -271,11 +271,96 @@ class TestObservationAssistedProcess:
         decided = process.decide_from_memory(
             provider,
             memory,
-            high_level_strategy="과학 승리",
+            high_level_strategy="[사용자 최우선 지시] 이번 task에서는 캠퍼스 먼저 지어\n\n과학 승리",
         )
 
         assert decided is True
         assert provider.last_use_thinking is False
+
+    def test_decide_from_memory_applies_task_hitl_when_one_candidate_matches(self):
+        process = get_multi_step_process("religion_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("religion_primitive", enable_choice_catalog=True)
+        process.initialize(memory)
+        memory.remember_choices(
+            [
+                {"id": "campus", "label": "캠퍼스"},
+                {"id": "market", "label": "시장"},
+            ],
+            end_of_list=True,
+            scroll_direction="down",
+        )
+        memory.set_task_hitl_directive("이번 task에서는 캠퍼스 먼저 지어")
+        provider = FakeProvider([])
+
+        decided = process.decide_from_memory(
+            provider,
+            memory,
+            high_level_strategy="[사용자 최우선 지시] 이번 task에서는 캠퍼스 먼저 지어\n\n과학 승리",
+        )
+
+        assert decided is True
+        assert memory.get_best_choice() is not None
+        assert memory.get_best_choice().id == "campus"
+        assert memory.choice_catalog.best_option_reason == "task HITL matched candidate '캠퍼스'"
+        assert provider.last_text == ""
+
+    def test_decide_from_memory_ignores_impossible_task_hitl_and_falls_back_to_strategy(self):
+        process = get_multi_step_process("religion_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("religion_primitive", enable_choice_catalog=True)
+        process.initialize(memory)
+        memory.remember_choices(
+            [
+                {"id": "market", "label": "시장"},
+                {"id": "settler", "label": "개척자"},
+            ],
+            end_of_list=True,
+            scroll_direction="down",
+        )
+        memory.set_task_hitl_directive("이번 task에서는 캠퍼스 먼저 지어")
+        provider = FakeProvider([json.dumps({"best_option_id": "market", "reason": "전략상 금 수급 우선"})])
+
+        decided = process.decide_from_memory(
+            provider,
+            memory,
+            high_level_strategy="[사용자 최우선 지시] 이번 task에서는 캠퍼스 먼저 지어\n\n과학 승리",
+        )
+
+        assert decided is True
+        assert memory.get_best_choice() is not None
+        assert memory.get_best_choice().id == "market"
+        assert "상위 전략" in provider.last_text
+        assert "캠퍼스" not in provider.last_text
+
+    def test_governor_decide_from_memory_applies_task_hitl_before_vlm(self):
+        process = get_multi_step_process("governor_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("governor_primitive", enable_choice_catalog=True)
+        process.initialize(memory)
+        memory.remember_choices(
+            [
+                {"id": "pingala", "label": "핑갈라", "note": "진급_가능"},
+                {"id": "magnus", "label": "마그누스", "note": "임명_가능"},
+            ],
+            end_of_list=True,
+            scroll_direction="down",
+        )
+        memory.set_task_hitl_directive("이번 task에서는 핑갈라 진급")
+        provider = FakeProvider([])
+
+        decided = process.decide_from_memory(
+            provider,
+            memory,
+            high_level_strategy="과학 승리",
+        )
+
+        assert decided is True
+        assert memory.get_best_choice() is not None
+        assert memory.get_best_choice().id == "pingala"
+        assert memory.branch == "governor_promote"
+        assert memory.current_stage == "governor_promote_click"
+        assert provider.last_text == ""
 
 
 class TestPromptUpdates:
@@ -375,6 +460,138 @@ class TestEntryGatedProcesses:
         assert action.key == "enter"
         assert memory.current_stage == "governor_entry"
 
+    def test_governor_entry_press_runs_semantic_verify_without_ui_change(self):
+        process = get_multi_step_process("governor_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("governor_primitive", enable_choice_catalog=True)
+        process.initialize(memory)
+
+        should_verify = process.should_verify_action_without_ui_change(
+            memory,
+            AgentAction(action="press", key="enter"),
+        )
+
+        assert should_verify is True
+
+    def test_governor_entry_press_semantic_verify_marks_entry_done(self):
+        process = get_multi_step_process("governor_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("governor_primitive", enable_choice_catalog=True)
+        process.initialize(memory)
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "governor_mode": "overview",
+                        "governor_screen_ready": True,
+                        "notification_visible": False,
+                        "reasoning": "총독 카드와 진급 버튼이 보임",
+                    }
+                )
+            ]
+        )
+
+        verify = process.verify_action_success(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            AgentAction(action="press", key="enter"),
+        )
+
+        assert verify.handled is True
+        assert verify.passed is True
+        assert "governor_entry_done" in memory.completed_substeps
+
+    def test_governor_hover_move_semantic_verify_succeeds_without_ui_change(self):
+        process = get_multi_step_process("governor_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("governor_primitive", enable_choice_catalog=True)
+        memory.mark_substep("governor_entry_done")
+        memory.begin_stage("hover_scroll_anchor")
+
+        verify = process.verify_action_success(
+            FakeProvider([]),
+            Image.new("RGB", (100, 100)),
+            memory,
+            AgentAction(action="move", x=500, y=520),
+        )
+
+        assert verify.handled is True
+        assert verify.passed is True
+
+    def test_governor_scroll_semantic_verify_detects_list_progress(self):
+        process = get_multi_step_process("governor_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("governor_primitive", enable_choice_catalog=True)
+        memory.mark_substep("governor_entry_done")
+        memory.begin_stage("scroll_down_for_hidden_choices")
+        memory.remember_choices(
+            [{"id": "pingala", "label": "핑갈라", "note": "진급_가능"}],
+            end_of_list=False,
+            scroll_anchor={"x": 500, "y": 520, "left": 250, "top": 120, "right": 760, "bottom": 920},
+            scroll_direction="down",
+        )
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "visible_options": [{"id": "victor", "label": "빅토르", "note": "진급_가능"}],
+                        "end_of_list": False,
+                        "scroll_anchor": {
+                            "x": 500,
+                            "y": 520,
+                            "left": 250,
+                            "top": 120,
+                            "right": 760,
+                            "bottom": 920,
+                        },
+                        "reasoning": "다른 총독 카드가 새로 보임",
+                    }
+                )
+            ]
+        )
+
+        verify = process.verify_action_success(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            AgentAction(action="scroll", x=500, y=520, scroll_amount=-120),
+        )
+
+        assert verify.handled is True
+        assert verify.passed is True
+
+    def test_governor_entry_press_success_transitions_directly_to_observe_choices(self):
+        process = get_multi_step_process("governor_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("governor_primitive", enable_choice_catalog=True)
+        process.initialize(memory)
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "governor_mode": "overview",
+                        "governor_screen_ready": True,
+                        "notification_visible": False,
+                        "reasoning": "총독 카드와 진급 버튼이 보임",
+                    }
+                )
+            ]
+        )
+        action = AgentAction(action="press", key="enter")
+
+        verify = process.verify_action_success(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            action,
+        )
+        assert verify.passed is True
+
+        process.on_action_success(memory, action)
+
+        assert memory.current_stage == "observe_choices"
+
     def test_governor_promote_branch_transitions_via_on_action_success(self):
         process = get_multi_step_process("governor_primitive", "")
         memory = ShortTermMemory()
@@ -442,6 +659,178 @@ class TestEntryGatedProcesses:
         assert action.action == "press"
         assert action.key == "escape"
         assert action.task_status == "in_progress"
+
+    def test_governor_observation_requires_one_downward_scroll_before_choose_from_memory(self):
+        process = get_multi_step_process("governor_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("governor_primitive", enable_choice_catalog=True)
+        memory.mark_substep("governor_entry_done")
+        memory.begin_stage("observe_choices")
+
+        first_action = process.consume_observation(
+            memory,
+            ObservationBundle(
+                visible_options=[{"id": "pingala", "label": "핑갈라", "note": "진급_가능"}],
+                end_of_list=True,
+                scroll_anchor={"x": 500, "y": 520, "left": 250, "top": 120, "right": 760, "bottom": 920},
+            ),
+        )
+
+        assert first_action is not None
+        assert first_action.action == "move"
+        assert memory.current_stage == "hover_scroll_anchor"
+        assert memory.choice_catalog.end_reached is False
+
+    def test_governor_observation_chooses_from_memory_after_one_downward_scroll_and_no_new_candidates(self):
+        process = get_multi_step_process("governor_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("governor_primitive", enable_choice_catalog=True)
+        memory.mark_substep("governor_entry_done")
+        memory.begin_stage("observe_choices")
+
+        first_action = process.consume_observation(
+            memory,
+            ObservationBundle(
+                visible_options=[{"id": "pingala", "label": "핑갈라", "note": "진급_가능"}],
+                end_of_list=True,
+                scroll_anchor={"x": 500, "y": 520, "left": 250, "top": 120, "right": 760, "bottom": 920},
+            ),
+        )
+        assert first_action is not None
+        process.on_action_success(memory, first_action)
+
+        scroll_action = process.plan_action(
+            FakeProvider([]),
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+        assert scroll_action is not None
+        assert scroll_action.action == "scroll"
+        process.on_action_success(memory, scroll_action)
+
+        second_action = process.consume_observation(
+            memory,
+            ObservationBundle(
+                visible_options=[{"id": "pingala", "label": "핑갈라", "note": "진급_가능"}],
+                end_of_list=False,
+                scroll_anchor={"x": 500, "y": 520, "left": 250, "top": 120, "right": 760, "bottom": 920},
+            ),
+        )
+
+        assert second_action is None
+        assert memory.current_stage == "choose_from_memory"
+        assert "full_scan_complete" in memory.completed_substeps
+
+    def test_governor_secret_society_best_choice_with_appoint_uses_secret_branch(self):
+        process = get_multi_step_process("governor_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("governor_primitive", enable_choice_catalog=True)
+        process.initialize(memory)
+        memory.remember_choices(
+            [
+                {"id": "hermes_secret", "label": "허미즈", "note": "비밀결사 임명_가능"},
+            ],
+            end_of_list=True,
+            scroll_direction="down",
+        )
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "best_option_id": "hermes_secret",
+                        "action_type": "appoint",
+                        "reason": "비밀결사 총독 임명",
+                    }
+                )
+            ]
+        )
+
+        decided = process.decide_from_memory(
+            provider,
+            memory,
+            high_level_strategy="과학 승리",
+        )
+
+        assert decided is True
+        assert memory.branch == "governor_secret_society"
+        assert memory.current_stage == "governor_secret_society_appoint_click"
+
+    def test_governor_secret_society_best_choice_with_promote_stays_on_promote_branch(self):
+        process = get_multi_step_process("governor_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("governor_primitive", enable_choice_catalog=True)
+        process.initialize(memory)
+        memory.remember_choices(
+            [
+                {"id": "hermes_secret", "label": "허미즈", "note": "비밀결사 진급_가능"},
+            ],
+            end_of_list=True,
+            scroll_direction="down",
+        )
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "best_option_id": "hermes_secret",
+                        "action_type": "promote",
+                        "reason": "비밀결사 총독 진급",
+                    }
+                )
+            ]
+        )
+
+        decided = process.decide_from_memory(
+            provider,
+            memory,
+            high_level_strategy="과학 승리",
+        )
+
+        assert decided is True
+        assert memory.branch == "governor_promote"
+        assert memory.current_stage == "governor_promote_click"
+
+    def test_governor_secret_society_branch_merges_into_promote_when_green_promote_is_visible(self):
+        process = get_multi_step_process("governor_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("governor_primitive", enable_choice_catalog=True)
+        memory.mark_substep("governor_entry_done")
+        memory.choice_catalog.candidates["hermes_secret"] = ChoiceCandidate(
+            id="hermes_secret",
+            label="허미즈",
+            metadata={"note": "비밀결사 임명_가능"},
+        )
+        memory.set_best_choice(option_id="hermes_secret", reason="비밀결사 선택")
+        memory.set_branch("governor_secret_society")
+        memory.begin_stage("governor_secret_society_post_appoint_check")
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "promote_visible": True,
+                        "reasoning": "허미즈 카드에 초록색 진급 버튼이 활성화됨",
+                    }
+                )
+            ]
+        )
+
+        action = process.plan_action(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert isinstance(action, StageTransition)
+        assert action.stage == "governor_promote_click"
+        assert memory.branch == "governor_promote"
+        assert memory.current_stage == "governor_promote_click"
 
     def test_governor_registry_uses_observation_assisted(self):
         assert PRIMITIVE_REGISTRY["governor_primitive"]["process_kind"] == "observation_assisted"

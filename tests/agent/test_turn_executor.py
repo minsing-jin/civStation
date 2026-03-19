@@ -1,7 +1,7 @@
 from PIL import Image
 
 from computer_use_test.agent.modules.context.context_manager import ContextManager
-from computer_use_test.agent.modules.hitl.command_queue import CommandQueue
+from computer_use_test.agent.modules.hitl.command_queue import CommandQueue, Directive, DirectiveType
 from computer_use_test.agent.modules.hitl.status_ui.state_bridge import AgentStateBridge
 from computer_use_test.agent.modules.memory.short_term_memory import ShortTermMemory
 from computer_use_test.agent.modules.primitive.multi_step_process import (
@@ -262,6 +262,32 @@ class CityProductionVisibleProgressProcess(BaseMultiStepProcess):
         return VerificationResult(True, "ok")
 
 
+class TaskLocalHitlLoopProcess(BaseMultiStepProcess):
+    def __init__(self):
+        super().__init__("city_production_primitive", "")
+        self.seen_task_hitl_directive = ""
+        self.seen_high_level_strategy = ""
+        self.seen_hitl_directive = ""
+
+    def initialize(self, memory: ShortTermMemory) -> None:
+        memory.begin_stage("choose_from_memory")
+
+    def plan_action(self, provider, pil_image, memory, **kwargs):
+        self.seen_task_hitl_directive = memory.get_task_hitl_directive()
+        self.seen_high_level_strategy = kwargs.get("high_level_strategy", "")
+        self.seen_hitl_directive = kwargs.get("hitl_directive", "")
+        return AgentAction(
+            action="click",
+            x=500,
+            y=500,
+            reasoning="complete after capturing task-local hitl directive",
+            task_status="complete",
+        )
+
+    def verify_completion(self, provider, pil_image, memory, **kwargs) -> VerificationResult:
+        return VerificationResult(True, "ok")
+
+
 class CityProductionScrollSettleProcess(BaseMultiStepProcess):
     def __init__(self):
         super().__init__("city_production_primitive", "")
@@ -288,6 +314,42 @@ class CityProductionScrollSettleProcess(BaseMultiStepProcess):
             x=500,
             y=500,
             reasoning="finish after stabilized city production scroll",
+            task_status="complete",
+        )
+
+    def on_action_success(self, memory: ShortTermMemory, action: AgentAction) -> None:
+        if action.action == "scroll":
+            memory.begin_stage("choose_from_memory")
+
+    def verify_completion(self, provider, pil_image, memory, **kwargs) -> VerificationResult:
+        return VerificationResult(True, "ok")
+
+
+class GovernorScrollSettleProcess(BaseMultiStepProcess):
+    def __init__(self):
+        super().__init__("governor_primitive", "")
+        self.calls = 0
+
+    def initialize(self, memory: ShortTermMemory) -> None:
+        memory.mark_substep("governor_entry_done")
+        memory.begin_stage("scroll_down_for_hidden_choices")
+
+    def plan_action(self, provider, pil_image, memory, **kwargs):
+        self.calls += 1
+        if self.calls == 1:
+            return AgentAction(
+                action="scroll",
+                x=500,
+                y=520,
+                scroll_amount=-120,
+                reasoning="scroll the governor list downward before selecting",
+                task_status="in_progress",
+            )
+        return AgentAction(
+            action="click",
+            x=500,
+            y=500,
+            reasoning="finish after stabilized governor scroll",
             task_status="complete",
         )
 
@@ -381,10 +443,63 @@ class CityProductionSelectiveScrollVerifyProcess(BaseMultiStepProcess):
         return VerificationResult(True, "ok")
 
 
+class GovernorTraceProcess(BaseMultiStepProcess):
+    supports_observation = True
+
+    def __init__(self):
+        super().__init__("governor_primitive", "")
+
+    def initialize(self, memory: ShortTermMemory) -> None:
+        memory.begin_stage("observe_choices")
+
+    def should_observe(self, memory: ShortTermMemory) -> bool:
+        return memory.current_stage == "observe_choices"
+
+    def observe(self, provider, pil_image, memory, **kwargs) -> ObservationBundle | None:
+        return ObservationBundle(
+            visible_options=[{"id": "pingala", "label": "핑갈라", "note": "진급_가능"}],
+            end_of_list=False,
+            scroll_anchor={"x": 500, "y": 520, "left": 250, "top": 120, "right": 760, "bottom": 920},
+        )
+
+    def consume_observation(self, memory: ShortTermMemory, observation: ObservationBundle) -> AgentAction | None:
+        memory.begin_stage("scroll_down_for_hidden_choices")
+        return AgentAction(
+            action="scroll",
+            x=500,
+            y=520,
+            scroll_amount=-120,
+            reasoning="governor trace scroll",
+            task_status="in_progress",
+        )
+
+    def on_action_success(self, memory: ShortTermMemory, action: AgentAction) -> None:
+        if action.action == "scroll":
+            memory.begin_stage("after_governor_scroll")
+        elif action.action == "click":
+            memory.begin_stage("governor_done")
+
+    def plan_action(self, provider, pil_image, memory, **kwargs):
+        if memory.current_stage == "after_governor_scroll":
+            memory.begin_stage("governor_promote_click")
+            return StageTransition(stage="governor_promote_click", reason="continue governor flow")
+        return AgentAction(
+            action="click",
+            x=500,
+            y=500,
+            reasoning="finish traced governor flow",
+            task_status="complete",
+        )
+
+    def verify_completion(self, provider, pil_image, memory, **kwargs) -> VerificationResult:
+        return VerificationResult(True, "ok")
+
+
 class RecordingRichLogger:
     def __init__(self):
         self.phase_updates: list[str] = []
         self.route_results: list[tuple[str, str]] = []
+        self.primitive_events: list[tuple[str, str]] = []
 
     def update_phase(self, phase: str) -> None:
         self.phase_updates.append(phase)
@@ -398,6 +513,9 @@ class RecordingRichLogger:
         micro_turn: int,
     ) -> None:
         self.route_results.append((primitive, reasoning))
+
+    def primitive_event(self, primitive_tag: str, detail: str) -> None:
+        self.primitive_events.append((primitive_tag, detail))
 
     def __getattr__(self, _name):
         return lambda *args, **kwargs: None
@@ -765,6 +883,49 @@ class TestRunPrimitiveLoop:
         assert any(event["phase"] == "plan" for event in status.recent_trace_events)
         assert any(event["phase"] == "exec" for event in status.recent_trace_events)
 
+    def test_governor_multistep_trace_events_are_published_to_rich(self, monkeypatch):
+        process = GovernorTraceProcess()
+        provider = DummyProvider()
+        image = Image.new("RGB", (100, 100))
+        memory = ShortTermMemory()
+        memory.start_task("governor_primitive", enable_choice_catalog=True)
+        rich = RecordingRichLogger()
+
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.RichLogger.get", lambda: rich)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            lambda: (image, 1440, 900, 0, 0),
+        )
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
+
+        result = run_primitive_loop(
+            planner_provider=provider,
+            primitive_name="governor_primitive",
+            screen_w=1440,
+            screen_h=900,
+            normalizing_range=1000,
+            x_offset=0,
+            y_offset=0,
+            strategy_string="과학 승리",
+            recent_actions_str="없음",
+            hitl_directive=None,
+            memory=memory,
+            ctx=self.ctx,
+            max_steps=5,
+            completion_condition="",
+            planner_img_config=None,
+            delay_before_action=0,
+        )
+
+        assert result.success is True
+        assert any(tag == "GOVERNOR" and "observe" in detail for tag, detail in rich.primitive_events)
+        assert any(tag == "GOVERNOR" and "plan" in detail for tag, detail in rich.primitive_events)
+        assert any(tag == "GOVERNOR" and "exec" in detail for tag, detail in rich.primitive_events)
+        assert any(tag == "GOVERNOR" and "stage" in detail for tag, detail in rich.primitive_events)
+
     def test_city_production_uses_process_visible_progress_in_state_updates(self, monkeypatch):
         process = CityProductionVisibleProgressProcess()
         provider = DummyProvider()
@@ -842,6 +1003,46 @@ class TestRunPrimitiveLoop:
         result = run_primitive_loop(
             planner_provider=provider,
             primitive_name="city_production_primitive",
+            screen_w=1440,
+            screen_h=900,
+            normalizing_range=1000,
+            x_offset=0,
+            y_offset=0,
+            strategy_string="",
+            recent_actions_str="없음",
+            hitl_directive=None,
+            memory=memory,
+            ctx=self.ctx,
+            max_steps=18,
+            completion_condition="",
+            planner_img_config=None,
+            delay_before_action=0,
+        )
+
+        assert result.success is True
+        assert sleeps == [0.55]
+
+    def test_governor_scroll_waits_before_post_action_capture(self, monkeypatch):
+        process = GovernorScrollSettleProcess()
+        provider = DummyProvider()
+        image = Image.new("RGB", (100, 100))
+        memory = ShortTermMemory()
+        memory.start_task("governor_primitive", enable_choice_catalog=True)
+        sleeps: list[float] = []
+
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            lambda: (image, 1440, 900, 0, 0),
+        )
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.time.sleep", lambda seconds: sleeps.append(seconds))
+
+        result = run_primitive_loop(
+            planner_provider=provider,
+            primitive_name="governor_primitive",
             screen_w=1440,
             screen_h=900,
             normalizing_range=1000,
@@ -1041,6 +1242,55 @@ class TestRunPrimitiveLoop:
         assert summary.primitive == "popup_primitive"
         assert summary.action_type == "press"
         assert executed_actions == ["press"]
+
+    def test_run_primitive_loop_persists_mid_task_hitl_override_in_memory(self, monkeypatch):
+        process = TaskLocalHitlLoopProcess()
+        provider = DummyProvider()
+        image = Image.new("RGB", (100, 100))
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive")
+        command_queue = CommandQueue()
+        command_queue.push(
+            Directive(
+                directive_type=DirectiveType.CHANGE_STRATEGY,
+                payload="이번 task에서는 캠퍼스 먼저 지어",
+                source="test",
+            )
+        )
+
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            lambda: (image, 1440, 900, 0, 0),
+        )
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
+
+        result = run_primitive_loop(
+            planner_provider=provider,
+            primitive_name="city_production_primitive",
+            screen_w=1440,
+            screen_h=900,
+            normalizing_range=1000,
+            x_offset=0,
+            y_offset=0,
+            strategy_string="과학 승리",
+            recent_actions_str="없음",
+            hitl_directive=None,
+            memory=memory,
+            ctx=self.ctx,
+            max_steps=3,
+            completion_condition="",
+            planner_img_config=None,
+            command_queue=command_queue,
+            delay_before_action=0,
+        )
+
+        assert result.success is True
+        assert process.seen_task_hitl_directive == "이번 task에서는 캠퍼스 먼저 지어"
+        assert process.seen_hitl_directive == "이번 task에서는 캠퍼스 먼저 지어"
+        assert "[사용자 최우선 지시] 이번 task에서는 캠퍼스 먼저 지어" in process.seen_high_level_strategy
 
     def test_run_one_turn_refreshes_rich_routing_after_completed_city_production(self, monkeypatch):
         provider = DummyProvider()

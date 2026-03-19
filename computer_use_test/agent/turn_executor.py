@@ -68,7 +68,7 @@ logger = logging.getLogger(__name__)
 
 # finish_reason values that indicate truncation across providers
 _TRUNCATION_REASONS = {"max_tokens", "length", "MAX_TOKENS"}
-_CITY_PRODUCTION_SCROLL_POST_ACTION_WAIT_SECONDS = 0.55
+_SCROLL_LIST_POST_ACTION_WAIT_SECONDS = 0.55
 
 # Module-level TurnValidator singleton (created on first use)
 _turn_validator: TurnValidator | None = None
@@ -133,8 +133,10 @@ def _post_action_wait_seconds(
     if primitive_name == "policy_primitive":
         return 0.5
     default_wait = min(delay_before_action, 0.3)
-    if primitive_name == "city_production_primitive" and any(action.action == "scroll" for action in actions):
-        return max(default_wait, _CITY_PRODUCTION_SCROLL_POST_ACTION_WAIT_SECONDS)
+    if primitive_name in {"city_production_primitive", "governor_primitive"} and any(
+        action.action == "scroll" for action in actions
+    ):
+        return max(default_wait, _SCROLL_LIST_POST_ACTION_WAIT_SECONDS)
     return default_wait
 
 
@@ -438,6 +440,7 @@ def run_primitive_loop(
     command_queue: CommandQueue | None = None,
     agent_gate: AgentGate | None = None,
     state_bridge: AgentStateBridge | None = None,
+    strategy_updater: StrategyUpdater | None = None,
     delay_before_action: float = 0.5,
 ) -> PrimitiveLoopResult:
     """Execute a class-based multi-step primitive until completion, rollback, or reroute."""
@@ -447,6 +450,19 @@ def run_primitive_loop(
     process.initialize(memory)
     rollback_used = False
     last_policy_event_emitted = ""
+    active_strategy_string = strategy_string or ""
+    active_hitl_directive = (hitl_directive or "").strip()
+
+    def _strip_user_priority_prefix(text: str) -> str:
+        prefix = "[사용자 최우선 지시] "
+        if not text.startswith(prefix):
+            return text
+        parts = text.split("\n\n", 1)
+        return parts[1] if len(parts) == 2 else ""
+
+    base_strategy_string = _strip_user_priority_prefix(active_strategy_string)
+    if active_hitl_directive:
+        memory.set_task_hitl_directive(active_hitl_directive, reason="initial task hitl directive")
 
     def _emit_policy_event_if_changed() -> None:
         nonlocal last_policy_event_emitted
@@ -660,6 +676,19 @@ def run_primitive_loop(
             if queue_check.should_stop:
                 result.error_message = "STOP directive received during loop"
                 break
+            if queue_check.strategy_override:
+                override_text = str(queue_check.strategy_override).strip()
+                if override_text:
+                    memory.set_task_hitl_directive(override_text, reason="mid-task hitl directive")
+                    active_hitl_directive = override_text
+                    active_strategy_string = f"[사용자 최우선 지시] {override_text}\n\n{base_strategy_string}".strip()
+                    if strategy_updater:
+                        from computer_use_test.agent.modules.strategy.strategy_updater import (
+                            StrategyRequest,
+                            StrategyTrigger,
+                        )
+
+                        strategy_updater.submit(StrategyRequest(StrategyTrigger.HITL_CHANGE, human_input=override_text))
 
         step_start = time.monotonic()
         action: AgentAction | list[AgentAction] | None = None
@@ -732,7 +761,7 @@ def run_primitive_loop(
                 decided = process.decide_from_memory(
                     planner_provider,
                     memory,
-                    high_level_strategy=strategy_string,
+                    high_level_strategy=active_strategy_string,
                 )
                 if not decided:
                     result.error_message = "Failed to decide best choice from short-term memory"
@@ -751,9 +780,9 @@ def run_primitive_loop(
                 pre_image,
                 memory,
                 normalizing_range=normalizing_range,
-                high_level_strategy=strategy_string,
+                high_level_strategy=active_strategy_string,
                 recent_actions=combined_recent_actions or "없음",
-                hitl_directive=hitl_directive,
+                hitl_directive=active_hitl_directive or None,
                 img_config=planner_img_config,
             )
             plan_end = time.monotonic()
@@ -1672,6 +1701,7 @@ def run_one_turn(
             command_queue=command_queue,
             agent_gate=agent_gate,
             state_bridge=state_bridge,
+            strategy_updater=strategy_updater,
             delay_before_action=delay_before_action,
         )
 
@@ -1729,6 +1759,7 @@ def run_one_turn(
                             command_queue=command_queue,
                             agent_gate=agent_gate,
                             state_bridge=state_bridge,
+                            strategy_updater=strategy_updater,
                             delay_before_action=delay_before_action,
                         )
                         if not loop_result.re_route:
@@ -1838,6 +1869,7 @@ def run_one_turn(
                     command_queue=command_queue,
                     agent_gate=agent_gate,
                     state_bridge=state_bridge,
+                    strategy_updater=strategy_updater,
                     delay_before_action=delay_before_action,
                 )
                 if not (loop_result.re_route or loop_result.completed):

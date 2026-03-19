@@ -637,6 +637,16 @@ class ObservationAssistedProcess(BaseMultiStepProcess):
             return True
 
         memory.begin_stage("decide_best_choice")
+        matched_candidate, matched_reason = memory.resolve_task_hitl_choice_candidate()
+        if matched_candidate is not None:
+            memory.set_best_choice(option_id=matched_candidate.id, reason=matched_reason)
+            return memory.get_best_choice() is not None
+
+        strategy_for_decision = high_level_strategy
+        if memory.task_hitl_status == "ignored" and strategy_for_decision.startswith("[사용자 최우선 지시] "):
+            parts = strategy_for_decision.split("\n\n", 1)
+            strategy_for_decision = parts[1] if len(parts) == 2 else ""
+
         max_tokens = memory.choice_catalog_decision_max_tokens()
         prompt = (
             "너는 문명6 선택 결정 서브에이전트야. 아래 short-term memory에 누적된 전체 후보 중 "
@@ -645,7 +655,7 @@ class ObservationAssistedProcess(BaseMultiStepProcess):
             "- best_option_id는 후보 catalog에 적힌 id를 그대로 복사해.\n"
             "- 체크됨, 이미 지음, 비활성 후보는 고르지 마.\n\n"
             f"Primitive: {self.primitive_name}\n"
-            f"상위 전략:\n{high_level_strategy}\n\n"
+            f"상위 전략:\n{strategy_for_decision}\n\n"
             f"후보 catalog:\n{memory.choice_catalog_decision_prompt()}\n"
         )
         try:
@@ -3646,6 +3656,7 @@ class GovernorProcess(ObservationAssistedProcess):
     # Branches
     _PROMOTE_BRANCH = "governor_promote"
     _APPOINT_BRANCH = "governor_appoint"
+    _SECRET_SOCIETY_BRANCH = "governor_secret_society"
 
     # Observation (reuse ObservationAssistedProcess base stages)
     _HOVER_SCROLL_STAGE = "hover_scroll_anchor"
@@ -3666,6 +3677,13 @@ class GovernorProcess(ObservationAssistedProcess):
     _APPOINT_CITY = "governor_appoint_city"
     _APPOINT_CONFIRM = "governor_appoint_confirm"
 
+    # Secret society branch (appoint -> cleanup -> optional promote merge)
+    _SECRET_APPOINT_CLICK = "governor_secret_society_appoint_click"
+    _SECRET_EXIT_ESC1 = "governor_secret_society_exit_esc1"
+    _SECRET_EXIT_ESC2 = "governor_secret_society_exit_esc2"
+    _SECRET_POST_APPOINT_CHECK = "governor_secret_society_post_appoint_check"
+    _SECRET_COMPLETE = "governor_secret_society_complete"
+
     _PROMOTE_STAGES = {
         "governor_promote_click",
         "governor_promote_select",
@@ -3678,6 +3696,13 @@ class GovernorProcess(ObservationAssistedProcess):
         "governor_appoint_click",
         "governor_appoint_city",
         "governor_appoint_confirm",
+    }
+    _SECRET_STAGES = {
+        "governor_secret_society_appoint_click",
+        "governor_secret_society_exit_esc1",
+        "governor_secret_society_exit_esc2",
+        "governor_secret_society_post_appoint_check",
+        "governor_secret_society_complete",
     }
 
     def __init__(self, primitive_name: str, completion_condition: str = ""):
@@ -3712,6 +3737,24 @@ class GovernorProcess(ObservationAssistedProcess):
             return True
         return super().should_observe(memory)
 
+    @staticmethod
+    def _is_secret_society_note(note: str) -> bool:
+        return "비밀결사" in note
+
+    def _apply_decision_branch(self, memory: ShortTermMemory, *, action_type: str) -> None:
+        best_choice = memory.get_best_choice()
+        note = str(best_choice.metadata.get("note", "")).strip() if best_choice is not None else ""
+        if action_type == "appoint" and self._is_secret_society_note(note):
+            memory.set_branch(self._SECRET_SOCIETY_BRANCH)
+            memory.begin_stage(self._SECRET_APPOINT_CLICK)
+            return
+        if action_type == "appoint":
+            memory.set_branch(self._APPOINT_BRANCH)
+            memory.begin_stage(self._APPOINT_CLICK)
+            return
+        memory.set_branch(self._PROMOTE_BRANCH)
+        memory.begin_stage(self._PROMOTE_CLICK)
+
     # ------------------------------------------------------------------
     # Decision override — also captures action_type (promote/appoint)
     # ------------------------------------------------------------------
@@ -3726,6 +3769,35 @@ class GovernorProcess(ObservationAssistedProcess):
             return True
 
         memory.begin_stage("decide_best_choice")
+        matched_candidate, matched_reason = memory.resolve_task_hitl_choice_candidate()
+        if matched_candidate is not None:
+            note = str(matched_candidate.metadata.get("note", "")).strip()
+            directive = memory.get_task_hitl_directive()
+            action_type = ""
+            if "진급" in directive and "진급_가능" in note:
+                action_type = "promote"
+            elif "임명" in directive and "임명_가능" in note:
+                action_type = "appoint"
+            elif "진급_가능" in note and "임명_가능" not in note:
+                action_type = "promote"
+            elif "임명_가능" in note and "진급_가능" not in note:
+                action_type = "appoint"
+
+            if action_type:
+                memory.set_best_choice(option_id=matched_candidate.id, reason=matched_reason)
+                if memory.get_best_choice() is None:
+                    return False
+                self._apply_decision_branch(memory, action_type=action_type)
+                return True
+
+            memory.task_hitl_status = "ignored"
+            memory.task_hitl_reason = "task HITL matched governor candidate but action_type was unclear"
+
+        strategy_for_decision = high_level_strategy
+        if memory.task_hitl_status == "ignored" and strategy_for_decision.startswith("[사용자 최우선 지시] "):
+            parts = strategy_for_decision.split("\n\n", 1)
+            strategy_for_decision = parts[1] if len(parts) == 2 else ""
+
         max_tokens = memory.choice_catalog_decision_max_tokens()
         prompt = (
             "너는 문명6 총독 선택 결정 서브에이전트야. 아래 short-term memory에 누적된 전체 총독 후보 중 "
@@ -3735,7 +3807,7 @@ class GovernorProcess(ObservationAssistedProcess):
             "- note에 '진급_가능'이면 action_type='promote', '임명_가능'이면 action_type='appoint'.\n"
             "- 비활성(disabled) 후보는 고르지 마.\n\n"
             f"Primitive: {self.primitive_name}\n"
-            f"상위 전략:\n{high_level_strategy}\n\n"
+            f"상위 전략:\n{strategy_for_decision}\n\n"
             f"후보 catalog:\n{memory.choice_catalog_decision_prompt()}\n"
         )
         try:
@@ -3780,13 +3852,74 @@ class GovernorProcess(ObservationAssistedProcess):
                 return False
 
         # Set branch based on action_type
-        if action_type == "appoint":
-            memory.set_branch(self._APPOINT_BRANCH)
-            memory.begin_stage(self._APPOINT_CLICK)
-        else:
-            memory.set_branch(self._PROMOTE_BRANCH)
-            memory.begin_stage(self._PROMOTE_CLICK)
+        self._apply_decision_branch(memory, action_type=action_type)
         return True
+
+    def _secret_society_post_appoint_check(
+        self,
+        provider: BaseVLMProvider,
+        pil_image,
+        memory: ShortTermMemory,
+        *,
+        img_config=None,
+    ) -> dict | None:
+        best = memory.get_best_choice()
+        label = best.label if best is not None else "선택된 비밀결사 총독"
+        prompt = (
+            "너는 문명6 비밀결사 총독 임명 후속 상태 판별기야. JSON만 출력해.\n"
+            '{"promote_visible":true/false,"reasoning":"짧은 이유"}\n'
+            f"- 대상 총독은 '{label}' 이다.\n"
+            "- 이 총독 카드에 초록색/활성 [진급] 버튼이 보이면 promote_visible=true.\n"
+            "- 활성 [진급] 버튼이 안 보이면 promote_visible=false.\n"
+        )
+        try:
+            return _analyze_structured_json(provider, pil_image, prompt, img_config=img_config, max_tokens=256)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Governor secret-society post-appoint check failed: %s", exc)
+            return None
+
+    @staticmethod
+    def _observation_option_signature(visible_options: list[dict]) -> tuple[str, ...]:
+        signature: list[str] = []
+        for raw in visible_options:
+            if bool(raw.get("disabled", False)):
+                continue
+            label = str(raw.get("label", "")).strip()
+            if not label:
+                continue
+            signature.append(str(raw.get("id", "")).strip() or label)
+        return tuple(signature)
+
+    def _verify_scroll_progress(
+        self,
+        provider: BaseVLMProvider,
+        pil_image,
+        memory: ShortTermMemory,
+        *,
+        img_config=None,
+    ) -> SemanticVerifyResult:
+        prompt = self.observer.build_prompt(
+            self.primitive_name,
+            memory,
+            normalizing_range=memory.normalizing_range,
+        )
+        effective_img_config = (
+            PRESETS.get("observation_fast") if img_config is None else PRESETS.get("observation_fast", img_config)
+        )
+        observation = self.observer.observe(provider, pil_image, prompt, img_config=effective_img_config)
+        if observation is None:
+            return SemanticVerifyResult(handled=False)
+
+        previous_signature = tuple(memory.choice_catalog.last_visible_option_ids)
+        current_signature = self._observation_option_signature(observation.visible_options)
+        if observation.end_of_list or current_signature != previous_signature:
+            return SemanticVerifyResult(handled=True, passed=True, reason="governor scroll changed visible options")
+
+        return SemanticVerifyResult(
+            handled=True,
+            passed=False,
+            reason="스크롤 후에도 같은 총독 카드만 보여 실제 목록 이동을 확인하지 못함",
+        )
 
     # ------------------------------------------------------------------
     # Entry check (one-time VLM state classification)
@@ -3798,8 +3931,11 @@ class GovernorProcess(ObservationAssistedProcess):
             '"governor_screen_ready":true/false,'
             '"notification_visible":true/false,'
             '"reasoning":"짧은 이유"}\n'
-            "- 총독 카드 목록과 [임명]/[진급] 버튼이 보이면 "
+            "- 총독 카드 목록과 [임명]/[진급] 버튼이 보이거나, "
+            "총독 진급 스킬 선택 팝업/도시 배정 목록/[확정]/[배정] 버튼 등 실제 총독 UI가 보이면 "
             "governor_mode='overview', governor_screen_ready=true.\n"
+            "- overview 신호가 하나라도 보이면 우하단 '총독 타이틀'/펜 아이콘이 같이 보여도 "
+            "반드시 overview를 우선 판정해.\n"
             "- 우하단 '총독 타이틀' 버튼 또는 펜 아이콘만 보이고 실제 총독 화면이 안 열렸으면 "
             "governor_mode='notification', notification_visible=true, governor_screen_ready=false.\n"
             "- 확실하지 않으면 governor_mode='other', governor_screen_ready=false.\n"
@@ -3847,6 +3983,20 @@ class GovernorProcess(ObservationAssistedProcess):
             return "현재 stage: governor_appoint_city\n- 왼쪽 도시 목록에서 사람얼굴 아이콘 없는 도시 클릭."
         if stage == self._APPOINT_CONFIRM:
             return "현재 stage: governor_appoint_confirm\n- 초록색 [배정] 버튼 클릭."
+        if stage == self._SECRET_APPOINT_CLICK:
+            best = memory.get_best_choice()
+            label = best.label if best else "선택된 비밀결사 총독"
+            return (
+                f"현재 stage: {self._SECRET_APPOINT_CLICK}\n"
+                f"- memory의 best choice 비밀결사 총독 '{label}'의 초록색 [임명] 버튼 클릭."
+            )
+        if stage in {self._SECRET_EXIT_ESC1, self._SECRET_EXIT_ESC2}:
+            return f"현재 stage: {stage}\n- ESC 키를 1회 눌러 비밀결사 임명 후속 화면을 정리한다."
+        if stage == self._SECRET_POST_APPOINT_CHECK:
+            return (
+                f"현재 stage: {self._SECRET_POST_APPOINT_CHECK}\n"
+                "- 임명 정리 후 같은 비밀결사 총독 카드에 초록색 [진급] 버튼이 생겼는지 확인한다."
+            )
 
         # Observation/scroll stages
         if stage == self._HOVER_SCROLL_STAGE:
@@ -3963,6 +4113,21 @@ class GovernorProcess(ObservationAssistedProcess):
                 reason=f"선택한 총독 '{best_choice.label}' 을 다시 찾기 전에 카드 리스트 패널 중앙 hover를 고정",
             )
 
+        scanned_down = memory.choice_catalog.downward_scan_scrolls > 0
+        if not scanned_down:
+            memory.choice_catalog.end_reached = False
+            memory.choice_catalog.scan_end_reason = ""
+            return self._build_anchor_move_action(
+                memory,
+                stage_name=self._HOVER_SCROLL_STAGE,
+                reason="최소 1회는 아래로 스크롤해 가려진 총독 후보를 추가로 확인",
+            )
+
+        no_new_candidates_after_scan = memory.choice_catalog.last_new_candidate_count == 0
+        if no_new_candidates_after_scan and not observation.end_of_list:
+            memory.choice_catalog.end_reached = True
+            memory.choice_catalog.scan_end_reason = "governor_no_new_after_min_scroll"
+
         if observation.end_of_list or memory.choice_catalog.end_reached:
             memory.mark_substep("full_scan_complete")
             memory.begin_stage("choose_from_memory")
@@ -4046,7 +4211,20 @@ class GovernorProcess(ObservationAssistedProcess):
                 img_config=img_config,
             )
 
-        # 4. Observation + scroll-back flow (handled by base + local overrides)
+        # 4. Secret-society branch (appoint -> cleanup -> optional promote)
+        if memory.branch == self._SECRET_SOCIETY_BRANCH:
+            return self._plan_secret_society_branch(
+                provider,
+                pil_image,
+                memory,
+                normalizing_range=normalizing_range,
+                high_level_strategy=high_level_strategy,
+                recent_actions=recent_actions,
+                hitl_directive=hitl_directive,
+                img_config=img_config,
+            )
+
+        # 5. Observation + scroll-back flow (handled by base + local overrides)
         if memory.current_stage == self._HOVER_SCROLL_STAGE:
             return self._build_anchor_move_action(
                 memory,
@@ -4172,6 +4350,64 @@ class GovernorProcess(ObservationAssistedProcess):
             task_status,
         )
 
+    def _plan_secret_society_branch(
+        self,
+        provider: BaseVLMProvider,
+        pil_image,
+        memory: ShortTermMemory,
+        *,
+        normalizing_range: int,
+        high_level_strategy: str,
+        recent_actions: str,
+        hitl_directive: str | None,
+        img_config=None,
+    ) -> AgentAction | list[AgentAction] | StageTransition | None:
+        stage = memory.current_stage
+
+        if stage == self._SECRET_EXIT_ESC1:
+            return AgentAction(
+                action="press",
+                key="escape",
+                reasoning="비밀결사 총독 임명 후 ESC 1회 — 후속 화면 정리",
+                task_status="in_progress",
+            )
+        if stage == self._SECRET_EXIT_ESC2:
+            return AgentAction(
+                action="press",
+                key="escape",
+                reasoning="비밀결사 총독 임명 후 ESC 2회 — 총독 카드 화면 복귀",
+                task_status="in_progress",
+            )
+        if stage == self._SECRET_POST_APPOINT_CHECK:
+            state = self._secret_society_post_appoint_check(provider, pil_image, memory, img_config=img_config)
+            if state and bool(state.get("promote_visible", False)):
+                memory.set_branch(self._PROMOTE_BRANCH)
+                memory.begin_stage(self._PROMOTE_CLICK)
+                return StageTransition(
+                    stage=self._PROMOTE_CLICK,
+                    reason="secret society appointment unlocked green promote button",
+                )
+            memory.begin_stage(self._SECRET_COMPLETE)
+            return StageTransition(
+                stage=self._SECRET_COMPLETE,
+                reason="secret society appointment finished without immediate promotion",
+            )
+
+        return self._force_task_status(
+            self._plan_generic_fallback_action(
+                provider,
+                pil_image,
+                memory,
+                normalizing_range=normalizing_range,
+                high_level_strategy=high_level_strategy,
+                recent_actions=recent_actions,
+                hitl_directive=hitl_directive,
+                img_config=img_config,
+                extra_note=self.build_stage_note(memory),
+            ),
+            "in_progress",
+        )
+
     # ------------------------------------------------------------------
     # on_action_success — deterministic stage transitions
     # ------------------------------------------------------------------
@@ -4213,12 +4449,28 @@ class GovernorProcess(ObservationAssistedProcess):
                 return
 
         if action.action == "press":
+            if (
+                stage == self._ENTRY_STAGE
+                and action.key == "enter"
+                and self._ENTRY_SUBSTEP in memory.completed_substeps
+            ):
+                memory.begin_stage("observe_choices")
+                return
+            if stage == self._SECRET_EXIT_ESC1:
+                memory.begin_stage(self._SECRET_EXIT_ESC2)
+                return
+            if stage == self._SECRET_EXIT_ESC2:
+                memory.begin_stage(self._SECRET_POST_APPOINT_CHECK)
+                return
             if stage == self._EXIT_ESC1:
                 memory.begin_stage(self._EXIT_ESC2)
                 return
 
         # Appoint branch transitions
         if action.action == "click":
+            if stage == self._SECRET_APPOINT_CLICK:
+                memory.begin_stage(self._SECRET_EXIT_ESC1)
+                return
             if stage == self._APPOINT_CLICK:
                 memory.begin_stage(self._APPOINT_CITY)
                 return
@@ -4229,7 +4481,52 @@ class GovernorProcess(ObservationAssistedProcess):
     # ------------------------------------------------------------------
     # should_verify_action_without_ui_change
     # ------------------------------------------------------------------
+    def verify_action_success(
+        self,
+        provider: BaseVLMProvider,
+        pil_image,
+        memory: ShortTermMemory,
+        action: AgentAction,
+        *,
+        img_config=None,
+    ) -> SemanticVerifyResult:
+        if action.action == "move":
+            return SemanticVerifyResult(handled=True, passed=True, reason="hover move is non-visual by design")
+        if action.action == "scroll" and memory.current_stage in {
+            self._SCROLL_DOWN_STAGE,
+            self._RESTORE_SCROLL_STAGE,
+        }:
+            return self._verify_scroll_progress(
+                provider,
+                pil_image,
+                memory,
+                img_config=img_config,
+            )
+        if action.action == "press" and action.key == "enter" and self._ENTRY_SUBSTEP not in memory.completed_substeps:
+            state = self._governor_entry_check(provider, pil_image, img_config=img_config)
+            if state and bool(state.get("governor_screen_ready", False)):
+                memory.mark_substep(self._ENTRY_SUBSTEP)
+                return SemanticVerifyResult(
+                    handled=True,
+                    passed=True,
+                    reason="governor overview ready after entry",
+                )
+            if state and bool(state.get("notification_visible", False)):
+                return SemanticVerifyResult(
+                    handled=True,
+                    passed=False,
+                    reason="governor entry still shows lower-right notification only",
+                )
+            return SemanticVerifyResult(
+                handled=True,
+                passed=False,
+                reason="governor overview not detected after entry",
+            )
+        return super().verify_action_success(provider, pil_image, memory, action, img_config=img_config)
+
     def should_verify_action_without_ui_change(self, memory: ShortTermMemory, action: AgentAction) -> bool:
+        if action.action == "press" and action.key == "enter" and self._ENTRY_SUBSTEP not in memory.completed_substeps:
+            return True
         if action.action == "move":
             return True
         if action.action == "scroll" and memory.current_stage in {
@@ -4277,6 +4574,19 @@ class GovernorProcess(ObservationAssistedProcess):
                 return appoint_order.index(stage) + 3, 5
             return 3, 5
 
+        if memory.branch == self._SECRET_SOCIETY_BRANCH:
+            secret_order = [
+                self._SECRET_APPOINT_CLICK,
+                self._SECRET_EXIT_ESC1,
+                self._SECRET_EXIT_ESC2,
+                self._SECRET_POST_APPOINT_CHECK,
+            ]
+            if stage in secret_order:
+                return secret_order.index(stage) + 3, 6
+            if stage == self._SECRET_COMPLETE:
+                return 6, 6
+            return 3, 6
+
         # Observation phase
         if stage in {self._HOVER_SCROLL_STAGE, self._SCROLL_DOWN_STAGE, "observe_choices"}:
             return 2, 4
@@ -4284,6 +4594,12 @@ class GovernorProcess(ObservationAssistedProcess):
             return 3, 4
 
         return super().get_visible_progress(memory, executed_steps=0, hard_max_steps=1)
+
+    def is_terminal_state(self, memory: ShortTermMemory) -> bool:
+        return memory.current_stage == self._SECRET_COMPLETE
+
+    def terminal_state_reason(self, memory: ShortTermMemory) -> str:
+        return "governor secret-society appointment branch finished"
 
 
 class CultureDecisionProcess(ScriptedMultiStepProcess):
