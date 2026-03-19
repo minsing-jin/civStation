@@ -213,6 +213,27 @@ python -m computer_use_test.agent.turn_runner \
     --planner-provider claude --planner-model claude-sonnet-4-5
 ```
 
+### Computer-Use Planner Providers
+
+Use the normal vision provider for routing, and switch only the planner to a
+computer-use provider for single-step action planning:
+
+```bash
+python -m computer_use_test.agent.turn_runner \
+    --router-provider gemini --router-model gemini-2.0-flash \
+    --planner-provider openai-computer --planner-model computer-use-preview
+
+python -m computer_use_test.agent.turn_runner \
+    --router-provider claude --router-model claude-4-5-sonnet-20241022 \
+    --planner-provider anthropic-computer --planner-model claude-4-5-sonnet-20241022
+```
+
+Notes:
+
+- `openai-computer` and `anthropic-computer` override only planner `analyze()` calls.
+- Router classification and multi-action JSON flows still use the normal VLM path.
+- Environment variables follow the existing vendor keys: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`.
+
 ### Chat App Integration (Discord / WhatsApp)
 
 ```bash

@@ -49,6 +49,7 @@ except Exception:  # pragma: no cover - depends on runtime display availability
         moveTo=_unavailable_pyautogui_method,
         click=_unavailable_pyautogui_method,
         doubleClick=_unavailable_pyautogui_method,
+        hotkey=_unavailable_pyautogui_method,
         mouseDown=_unavailable_pyautogui_method,
         mouseUp=_unavailable_pyautogui_method,
         scroll=_unavailable_pyautogui_method,
@@ -362,7 +363,11 @@ def execute_action(
         key = action.key
         if key:
             logger.debug(f"Press key: {key}")
-            pyautogui.press(key)
+            chord = [part.strip() for part in key.split("+") if part.strip()]
+            if len(chord) > 1:
+                pyautogui.hotkey(*chord)
+            else:
+                pyautogui.press(key)
         else:
             logger.error(f"Press action missing 'key' field. Full action: {action}")
 

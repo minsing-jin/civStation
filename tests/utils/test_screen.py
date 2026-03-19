@@ -101,3 +101,29 @@ def test_execute_action_scroll_waits_briefly_after_hover_before_wheel(monkeypatc
         ("sleep", (0.18,), {}),
         ("scroll", (-650,), {}),
     ]
+
+
+def test_execute_action_press_uses_hotkey_for_chords(monkeypatch):
+    calls: list[tuple[str, tuple, dict]] = []
+
+    monkeypatch.setattr(
+        "computer_use_test.utils.screen.pyautogui.hotkey",
+        lambda *args, **kwargs: calls.append(("hotkey", args, kwargs)),
+        raising=False,
+    )
+
+    execute_action(
+        AgentAction(
+            action="press",
+            key="cmd+s",
+        ),
+        screen_w=1600,
+        screen_h=900,
+        normalizing_range=1000,
+        x_offset=0,
+        y_offset=0,
+    )
+
+    assert calls == [
+        ("hotkey", ("cmd", "s"), {}),
+    ]
