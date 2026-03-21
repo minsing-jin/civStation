@@ -258,6 +258,40 @@ class MemoryDecisionFailureProcess(BaseMultiStepProcess):
         raise AssertionError("plan_action should not run when decide_from_memory fails first")
 
 
+class ManualDecisionDuringPlanProcess(BaseMultiStepProcess):
+    supports_observation = True
+
+    def __init__(self):
+        super().__init__("governor_primitive", "")
+        self.decide_calls = 0
+        self.plan_calls = 0
+
+    def initialize(self, memory: ShortTermMemory) -> None:
+        memory.mark_substep("governor_entry_done")
+        memory.set_branch("governor_appoint")
+        memory.begin_stage("governor_appoint_city_decide")
+
+    def should_auto_decide_from_memory(self, memory: ShortTermMemory) -> bool:
+        return False
+
+    def decide_from_memory(self, provider, memory, *, high_level_strategy: str) -> bool:
+        self.decide_calls += 1
+        return False
+
+    def plan_action(self, provider, pil_image, memory, **kwargs):
+        self.plan_calls += 1
+        return AgentAction(
+            action="click",
+            x=500,
+            y=500,
+            reasoning="branch-specific decision should happen during plan_action",
+            task_status="complete",
+        )
+
+    def verify_completion(self, provider, pil_image, memory, **kwargs) -> VerificationResult:
+        return VerificationResult(True, "ok")
+
+
 class CityProductionVisibleProgressProcess(BaseMultiStepProcess):
     def __init__(self):
         super().__init__("city_production_primitive", "")
@@ -1002,6 +1036,50 @@ class TestRunPrimitiveLoop:
         assert result.error_message == "Failed to decide best choice from short-term memory"
         assert status.current_action == "error"
         assert status.current_reasoning == "Failed to decide best choice from short-term memory"
+
+    def test_multistep_can_skip_auto_memory_decision_and_let_plan_handle_it(self, monkeypatch):
+        process = ManualDecisionDuringPlanProcess()
+        provider = DummyProvider()
+        image = Image.new("RGB", (100, 100))
+        memory = ShortTermMemory()
+        memory.start_task("governor_primitive", enable_choice_catalog=True)
+        memory.remember_choices(
+            [{"id": "lugdunum", "label": "루구두눔", "note": "미배정"}],
+            end_of_list=True,
+            scroll_direction="down",
+        )
+
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            lambda: (image, 1440, 900, 0, 0),
+        )
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
+
+        result = run_primitive_loop(
+            planner_provider=provider,
+            primitive_name="governor_primitive",
+            screen_w=1440,
+            screen_h=900,
+            normalizing_range=1000,
+            x_offset=0,
+            y_offset=0,
+            strategy_string="",
+            recent_actions_str="없음",
+            hitl_directive=None,
+            memory=memory,
+            ctx=self.ctx,
+            max_steps=2,
+            completion_condition="",
+            planner_img_config=None,
+            delay_before_action=0,
+        )
+
+        assert result.success is True
+        assert process.decide_calls == 0
+        assert process.plan_calls == 1
 
     def test_multistep_trace_events_are_published_to_state_bridge(self, monkeypatch):
         process = TransitionProcess()

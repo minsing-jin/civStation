@@ -812,7 +812,12 @@ def run_primitive_loop(
             if action is None:
                 continue
         else:
-            if process.supports_observation and memory.choice_catalog.end_reached and memory.get_best_choice() is None:
+            if (
+                process.supports_observation
+                and memory.choice_catalog.end_reached
+                and memory.get_best_choice() is None
+                and process.should_auto_decide_from_memory(memory)
+            ):
                 decided = process.decide_from_memory(
                     planner_provider,
                     memory,

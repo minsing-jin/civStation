@@ -439,6 +439,12 @@ class TestPromptUpdates:
         assert "계속" in prompt
         assert "클릭" in prompt
 
+    def test_popup_prompt_handles_secret_society_discovery_with_continue_button(self):
+        prompt = get_primitive_prompt("popup_primitive")
+        assert "결사 발견" in prompt
+        assert "계속" in prompt
+        assert "총독화면으로 이동" not in prompt
+
     def test_popup_prompt_does_not_own_lower_right_screen_entry_buttons(self):
         prompt = get_primitive_prompt("popup_primitive")
         assert "우하단 '연구 선택'" not in prompt
@@ -916,6 +922,16 @@ class TestEntryGatedProcesses:
         assert isinstance(transition, StageTransition)
         assert transition.stage == "governor_appoint_city_restore_hover_scroll_anchor"
         assert memory.current_stage == "governor_appoint_city_restore_hover_scroll_anchor"
+
+    def test_governor_appoint_branch_defers_memory_decision_to_branch_specific_stage(self):
+        process = get_multi_step_process("governor_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("governor_primitive", enable_choice_catalog=True)
+        memory.mark_substep("governor_entry_done")
+        memory.set_branch("governor_appoint")
+        memory.begin_stage("governor_appoint_city_decide")
+
+        assert process.should_auto_decide_from_memory(memory) is False
 
     def test_governor_appoint_city_no_progress_reobserves_without_generic_fallback(self):
         process = get_multi_step_process("governor_primitive", "")

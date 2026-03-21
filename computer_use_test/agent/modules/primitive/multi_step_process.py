@@ -420,6 +420,11 @@ class BaseMultiStepProcess:
         """Optional text-only decision stage before action planning."""
         return True
 
+    def should_auto_decide_from_memory(self, memory: ShortTermMemory) -> bool:
+        """Whether the loop may run decide_from_memory before plan_action."""
+        del memory
+        return True
+
     def resolve_action(self, action: AgentAction, memory: ShortTermMemory) -> AgentAction:
         """Apply runtime constraints before execution."""
         if action.action == "scroll":
@@ -4757,6 +4762,11 @@ class GovernorProcess(ObservationAssistedProcess):
             return
         memory.set_branch(self._PROMOTE_BRANCH)
         memory.begin_stage(self._PROMOTE_CLICK)
+
+    def should_auto_decide_from_memory(self, memory: ShortTermMemory) -> bool:
+        if memory.branch == self._APPOINT_BRANCH:
+            return False
+        return True
 
     # ------------------------------------------------------------------
     # Decision override — also captures action_type (promote/appoint)
