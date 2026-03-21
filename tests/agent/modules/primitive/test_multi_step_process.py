@@ -1033,6 +1033,11 @@ class TestEntryGatedProcesses:
         process.on_action_success(memory, AgentAction(action="click", x=500, y=500))
         assert memory.current_stage == "governor_appoint_confirm"
 
+        # appoint_confirm -> exit_esc1
+        memory.begin_stage("governor_appoint_confirm")
+        process.on_action_success(memory, AgentAction(action="click", x=500, y=500))
+        assert memory.current_stage == "governor_exit_esc1"
+
     def test_governor_promote_esc_stages_are_deterministic(self):
         process = get_multi_step_process("governor_primitive", "")
         memory = ShortTermMemory()
@@ -1056,6 +1061,61 @@ class TestEntryGatedProcesses:
         assert action.action == "press"
         assert action.key == "escape"
         assert action.task_status == "in_progress"
+
+    def test_governor_appoint_exit_esc_stages_are_deterministic(self):
+        process = get_multi_step_process("governor_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("governor_primitive", enable_choice_catalog=True)
+        memory.mark_substep("governor_entry_done")
+        memory.set_branch("governor_appoint")
+        memory.begin_stage("governor_exit_esc1")
+
+        action1 = process.plan_action(
+            FakeProvider([]),
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert action1 is not None
+        assert action1.action == "press"
+        assert action1.key == "escape"
+        assert action1.task_status == "in_progress"
+
+        memory.begin_stage("governor_exit_esc2")
+        action2 = process.plan_action(
+            FakeProvider([]),
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert action2 is not None
+        assert action2.action == "press"
+        assert action2.key == "escape"
+        assert action2.task_status == "complete"
+
+    def test_governor_appoint_exit_terminal_state_completes_without_vlm_verification(self):
+        process = get_multi_step_process("governor_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("governor_primitive", enable_choice_catalog=True)
+        memory.mark_substep("governor_entry_done")
+        memory.set_branch("governor_appoint")
+        memory.begin_stage("governor_exit_esc2")
+
+        verification = process.verify_completion(
+            FakeProvider([]),
+            Image.new("RGB", (100, 100)),
+            memory,
+        )
+
+        assert verification.complete is True
 
     def test_governor_observation_requires_one_downward_scroll_before_choose_from_memory(self):
         process = get_multi_step_process("governor_primitive", "")

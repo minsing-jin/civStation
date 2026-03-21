@@ -4587,6 +4587,8 @@ class GovernorProcess(ObservationAssistedProcess):
         "governor_appoint_city_restore_visibility",
         "governor_appoint_city",
         "governor_appoint_confirm",
+        "governor_exit_esc1",
+        "governor_exit_esc2",
     }
     _SECRET_STAGES = {
         "governor_secret_society_appoint_click",
@@ -5518,6 +5520,21 @@ class GovernorProcess(ObservationAssistedProcess):
     ) -> AgentAction | list[AgentAction] | StageTransition | None:
         stage = memory.current_stage
 
+        if stage == self._EXIT_ESC1:
+            return AgentAction(
+                action="press",
+                key="escape",
+                reasoning="총독 배정 완료 후 ESC 1회 — 총독 화면 닫기",
+                task_status="in_progress",
+            )
+        if stage == self._EXIT_ESC2:
+            return AgentAction(
+                action="press",
+                key="escape",
+                reasoning="ESC 2회 — 총독 화면 완전 종료",
+                task_status="complete",
+            )
+
         if stage == self._APPOINT_CITY_OBSERVE:
             return None
 
@@ -5583,7 +5600,6 @@ class GovernorProcess(ObservationAssistedProcess):
             if restore is not None:
                 return restore
 
-        task_status = "complete" if stage == self._APPOINT_CONFIRM else "in_progress"
         return self._force_task_status(
             self._plan_generic_fallback_action(
                 provider,
@@ -5596,7 +5612,7 @@ class GovernorProcess(ObservationAssistedProcess):
                 img_config=img_config,
                 extra_note=self.build_stage_note(memory),
             ),
-            task_status,
+            "in_progress",
         )
 
     def _plan_secret_society_branch(
@@ -5741,6 +5757,9 @@ class GovernorProcess(ObservationAssistedProcess):
                 return
             if stage == self._APPOINT_CITY:
                 memory.begin_stage(self._APPOINT_CONFIRM)
+                return
+            if stage == self._APPOINT_CONFIRM:
+                memory.begin_stage(self._EXIT_ESC1)
                 return
 
     # ------------------------------------------------------------------
@@ -5934,10 +5953,12 @@ class GovernorProcess(ObservationAssistedProcess):
                 self._APPOINT_CITY_RESTORE_SCROLL,
                 self._APPOINT_CITY,
                 self._APPOINT_CONFIRM,
+                self._EXIT_ESC1,
+                self._EXIT_ESC2,
             ]
             if stage in appoint_order:
-                return appoint_order.index(stage) + 3, 11
-            return 3, 11
+                return appoint_order.index(stage) + 3, 13
+            return 3, 13
 
         if memory.branch == self._SECRET_SOCIETY_BRANCH:
             secret_order = [
@@ -5961,10 +5982,26 @@ class GovernorProcess(ObservationAssistedProcess):
         return super().get_visible_progress(memory, executed_steps=0, hard_max_steps=1)
 
     def is_terminal_state(self, memory: ShortTermMemory) -> bool:
-        return memory.current_stage == self._SECRET_COMPLETE
+        return memory.current_stage in {self._EXIT_ESC2, self._SECRET_COMPLETE}
 
     def terminal_state_reason(self, memory: ShortTermMemory) -> str:
+        if memory.current_stage == self._EXIT_ESC2:
+            if memory.branch == self._APPOINT_BRANCH:
+                return "governor appointment branch closed governor screen"
+            return "governor promote branch closed governor screen"
         return "governor secret-society appointment branch finished"
+
+    def verify_completion(
+        self,
+        provider: BaseVLMProvider,
+        pil_image,
+        memory: ShortTermMemory,
+        *,
+        img_config=None,
+    ) -> VerificationResult:
+        if self.is_terminal_state(memory):
+            return VerificationResult(True, self.terminal_state_reason(memory))
+        return super().verify_completion(provider, pil_image, memory, img_config=img_config)
 
 
 class CultureDecisionProcess(ScriptedMultiStepProcess):

@@ -1798,6 +1798,10 @@ def run_one_turn(
                     reroute_macro_turn,
                     turn_number,
                 )
+                reroute_detail = f"follow-up route -> {new_router.primitive}"
+                if new_router.reasoning:
+                    reroute_detail = f"{reroute_detail} | {new_router.reasoning}"
+                rl.primitive_event("ROUTER", reroute_detail)
                 if (
                     new_router.primitive == primitive_name
                     and loop_result.completed

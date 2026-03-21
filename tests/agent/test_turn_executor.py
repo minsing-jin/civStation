@@ -1597,6 +1597,10 @@ class TestRunPrimitiveLoop:
             ("city_production_primitive", "initial city production"),
             ("popup_primitive", "follow-up popup after production"),
         ]
+        assert (
+            "ROUTER",
+            "follow-up route -> popup_primitive | follow-up popup after production",
+        ) in rich.primitive_events
 
     def test_run_one_turn_does_not_restart_completed_voting_on_same_primitive_reroute(self, monkeypatch):
         provider = DummyProvider()
