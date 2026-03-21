@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from computer_use_test.agent.modules.memory.short_term_memory import ShortTermMemory
 from computer_use_test.utils.llm_provider.base import BaseVLMProvider
@@ -29,6 +29,7 @@ class SemanticVerifyResult:
     handled: bool = False
     passed: bool = True
     reason: str = ""
+    details: dict[str, object] = field(default_factory=dict)
 
 
 class RetryFallbackHook:

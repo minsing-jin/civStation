@@ -37,6 +37,29 @@ class DummyProvider(BaseVLMProvider):
         return "dummy"
 
 
+class QueuedProvider(BaseVLMProvider):
+    def __init__(self, responses: list[str]):
+        super().__init__(api_key=None, model="queued", resize_for_vlm=False)
+        self.responses = list(responses)
+
+    def _send_to_api(self, content_parts, temperature=0.7, max_tokens=8192, use_thinking=True) -> VLMResponse:
+        if not self.responses:
+            raise AssertionError("No more queued provider responses")
+        return VLMResponse(content=self.responses.pop(0))
+
+    def _build_image_content(self, image_path):
+        return {"image_path": str(image_path)}
+
+    def _build_pil_image_content(self, pil_image, jpeg_quality=None):
+        return {"pil_size": getattr(pil_image, "size", None), "jpeg_quality": jpeg_quality}
+
+    def _build_text_content(self, text: str):
+        return {"text": text}
+
+    def get_provider_name(self) -> str:
+        return "queued"
+
+
 class TransitionProcess(BaseMultiStepProcess):
     def __init__(self):
         super().__init__("research_select_primitive", "")
@@ -572,6 +595,148 @@ class TestRunPrimitiveLoop:
         assert process.calls == 2
         assert result.steps_taken == 1
         assert executed == ["click"]
+
+    def test_culture_complete_action_ends_loop_from_terminal_state_when_generic_completion_verifier_fails(
+        self, monkeypatch
+    ):
+        provider = QueuedProvider(
+            [
+                '{"action":"click","x":500,"y":500,"end_x":0,"end_y":0,"scroll_amount":0,'
+                '"button":"left","key":"","text":"","reasoning":"pick civics","task_status":"complete"}',
+                '{"complete": false, "reason": "post-click screenshot alone is ambiguous"}',
+            ]
+        )
+        image = Image.new("RGB", (100, 100))
+        memory = ShortTermMemory()
+        memory.start_task("culture_decision_primitive")
+        memory.mark_substep("culture_entry_done")
+        memory.begin_stage("direct_culture_select")
+
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            lambda: (image, 1440, 900, 0, 0),
+        )
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
+
+        result = run_primitive_loop(
+            planner_provider=provider,
+            primitive_name="culture_decision_primitive",
+            screen_w=1440,
+            screen_h=900,
+            normalizing_range=1000,
+            x_offset=0,
+            y_offset=0,
+            strategy_string="문화 승리",
+            recent_actions_str="없음",
+            hitl_directive=None,
+            memory=memory,
+            ctx=self.ctx,
+            max_steps=1,
+            completion_condition="사회 제도 클릭 완료 시 task_status='complete'.",
+            planner_img_config=None,
+            delay_before_action=0,
+        )
+
+        assert result.success is True
+        assert result.completed is True
+        assert memory.current_stage == "culture_complete"
+
+    def test_research_complete_action_ends_loop_from_terminal_state_when_generic_completion_verifier_fails(
+        self, monkeypatch
+    ):
+        provider = QueuedProvider(
+            [
+                '{"action":"click","x":500,"y":500,"end_x":0,"end_y":0,"scroll_amount":0,'
+                '"button":"left","key":"","text":"","reasoning":"pick research","task_status":"complete"}',
+                '{"complete": false, "reason": "post-click screenshot alone is ambiguous"}',
+            ]
+        )
+        image = Image.new("RGB", (100, 100))
+        memory = ShortTermMemory()
+        memory.start_task("research_select_primitive")
+        memory.mark_substep("research_entry_done")
+        memory.begin_stage("direct_research_select")
+
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            lambda: (image, 1440, 900, 0, 0),
+        )
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
+
+        result = run_primitive_loop(
+            planner_provider=provider,
+            primitive_name="research_select_primitive",
+            screen_w=1440,
+            screen_h=900,
+            normalizing_range=1000,
+            x_offset=0,
+            y_offset=0,
+            strategy_string="과학 승리",
+            recent_actions_str="없음",
+            hitl_directive=None,
+            memory=memory,
+            ctx=self.ctx,
+            max_steps=1,
+            completion_condition="기술 클릭 완료 시 task_status='complete'.",
+            planner_img_config=None,
+            delay_before_action=0,
+        )
+
+        assert result.success is True
+        assert result.completed is True
+        assert memory.current_stage == "research_complete"
+
+    def test_culture_entry_no_diff_uses_semantic_verify_and_continues_loop(self, monkeypatch):
+        provider = QueuedProvider(
+            [
+                '{"culture_screen_ready": false, "notification_visible": true, "reasoning": "우하단 알림만 보임"}',
+                '{"culture_screen_ready": true, "notification_visible": false, '
+                '"reasoning": "좌측 상단 선택 창이 열림"}',
+                '{"action":"click","x":500,"y":500,"end_x":0,"end_y":0,"scroll_amount":0,'
+                '"button":"left","key":"","text":"","reasoning":"pick civics","task_status":"complete"}',
+            ]
+        )
+        image = Image.new("RGB", (100, 100))
+        memory = ShortTermMemory()
+        memory.start_task("culture_decision_primitive")
+
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            lambda: (image, 1440, 900, 0, 0),
+        )
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.screenshots_similar",
+            lambda *args, action=None, **kwargs: action.action == "press",
+        )
+
+        result = run_primitive_loop(
+            planner_provider=provider,
+            primitive_name="culture_decision_primitive",
+            screen_w=1440,
+            screen_h=900,
+            normalizing_range=1000,
+            x_offset=0,
+            y_offset=0,
+            strategy_string="문화 승리",
+            recent_actions_str="없음",
+            hitl_directive=None,
+            memory=memory,
+            ctx=self.ctx,
+            max_steps=3,
+            completion_condition="",
+            planner_img_config=None,
+            delay_before_action=0,
+        )
+
+        assert result.success is True
+        assert result.completed is True
+        assert "culture_entry_done" in memory.completed_substeps
 
     def test_policy_confirmed_tab_uses_semantic_gate_without_similarity_check(self, monkeypatch):
         process = PolicySemanticOnlyProcess()
@@ -1354,3 +1519,72 @@ class TestRunPrimitiveLoop:
             ("city_production_primitive", "initial city production"),
             ("popup_primitive", "follow-up popup after production"),
         ]
+
+    def test_run_one_turn_does_not_restart_completed_voting_on_same_primitive_reroute(self, monkeypatch):
+        provider = DummyProvider()
+        image = Image.new("RGB", (100, 100))
+        routed_primitives = iter(
+            [
+                RouterResult("voting_primitive", "initial voting"),
+                RouterResult("voting_primitive", "stale reroute still sees voting"),
+                RouterResult("popup_primitive", "follow-up popup after voting"),
+            ]
+        )
+        executed_actions: list[str] = []
+        loop_calls = {"count": 0}
+
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            lambda: (image, 1440, 900, 0, 0),
+        )
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.route_primitive",
+            lambda *args, **kwargs: next(routed_primitives),
+        )
+
+        def fake_run_primitive_loop(**kwargs):
+            loop_calls["count"] += 1
+            if loop_calls["count"] > 1:
+                raise AssertionError("completed voting primitive should not restart on same-primitive reroute")
+            return PrimitiveLoopResult(
+                success=True,
+                completed=True,
+                re_route=False,
+                steps_taken=3,
+                last_action=AgentAction(
+                    action="press",
+                    key="escape",
+                    reasoning="voting completed and exited",
+                    task_status="in_progress",
+                ),
+            )
+
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.run_primitive_loop", fake_run_primitive_loop)
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.plan_action",
+            lambda *args, **kwargs: AgentAction(
+                action="press",
+                key="enter",
+                reasoning="dismiss popup after voting",
+                task_status="complete",
+            ),
+        )
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.execute_action",
+            lambda action, *args: executed_actions.append(action.action),
+        )
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.time.sleep", lambda *_args: None)
+
+        summary = run_one_turn(
+            router_provider=provider,
+            planner_provider=provider,
+            context_manager=self.ctx,
+            turn_number=1,
+            delay_before_action=0,
+        )
+
+        assert summary is not None
+        assert summary.primitive == "popup_primitive"
+        assert summary.action_type == "press"
+        assert executed_actions == ["press"]
+        assert loop_calls["count"] == 1

@@ -72,10 +72,10 @@ PRIMITIVE_REGISTRY: dict[str, dict] = {
         "prompt": GOVERNOR_PROMPT,
         "priority": 2,
         "multi_step": True,
-        "process_kind": "scripted",
-        "max_steps": 10,
+        "process_kind": "observation_assisted",
+        "max_steps": 20,
         "completion_condition": (
-            "총독 능력 [확정] 클릭 완료 또는 도시 선택 후 [배정] 버튼 클릭 완료 시 task_status='complete'."
+            "총독 진급 [확정] 후 ESC 2회 완료, 또는 총독 임명 후 [배정] 버튼 클릭 완료 시 task_status='complete'."
         ),
     },
     "voting_primitive": {

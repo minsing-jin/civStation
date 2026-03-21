@@ -144,6 +144,27 @@ class TestShortTermMemoryChoiceCatalog:
         assert "캠퍼스" not in summary
         assert "곡창" not in summary
 
+    def test_city_production_merges_same_label_when_observer_id_changes(self):
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.begin_stage("observe_choices")
+
+        memory.remember_choices(
+            [{"id": "monument", "label": "기념비"}],
+            end_of_list=False,
+        )
+        memory.remember_choices(
+            [{"id": "city_project_monument", "label": "기념비", "note": "5턴"}],
+            end_of_list=False,
+        )
+
+        candidates = list(memory.choice_catalog.candidates.values())
+
+        assert len(candidates) == 1
+        assert candidates[0].id == "monument"
+        assert candidates[0].label == "기념비"
+        assert candidates[0].metadata["note"] == "5턴"
+
     def test_policy_state_rejects_negative_absolute_coordinates(self):
         memory = ShortTermMemory()
         memory.start_task("policy_primitive", normalizing_range=500, enable_policy_state=True)

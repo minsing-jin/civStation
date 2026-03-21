@@ -152,6 +152,26 @@ class TestObservationAssistedProcess:
         assert observation is not None
         assert "0-777 normalized coordinates" in provider.last_text
 
+    def test_city_production_observer_prompt_does_not_echo_full_choice_catalog(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.begin_stage("observe_choices")
+        memory.remember_choices(
+            [
+                {"id": "ghost_unit", "label": "유령전사"},
+                {"id": "ghost_building", "label": "유령기념비"},
+            ],
+            end_of_list=False,
+        )
+
+        prompt = process.observer.build_prompt("city_production_primitive", memory, normalizing_range=1000)
+
+        assert "현재 stage: observe_choices" in prompt
+        assert "[choice_catalog]" not in prompt
+        assert "유령전사" not in prompt
+        assert "유령기념비" not in prompt
+
     def test_decide_from_memory_prompt_includes_earliest_candidates(self):
         process = get_multi_step_process("religion_primitive", "")
         memory = ShortTermMemory()
@@ -370,6 +390,14 @@ class TestPromptUpdates:
         assert "다른 유닛이 서 있는 타일" in prompt
         assert "공격일 때만" in prompt
 
+    def test_unit_ops_prompt_handles_great_person_white_tile_activation(self):
+        prompt = get_primitive_prompt("unit_ops_primitive")
+        assert "위대한 위인" in prompt
+        assert "명령이 필요한" in prompt
+        assert "하얀색 타일" in prompt
+        assert "오른쪽 아래" in prompt
+        assert "사람 흉상" in prompt
+
     def test_governor_prompt_stage_note_driven(self):
         prompt = get_primitive_prompt("governor_primitive")
         assert "stage note" in prompt
@@ -403,6 +431,13 @@ class TestPromptUpdates:
     def test_popup_prompt_handles_policy_change_popup(self):
         prompt = get_primitive_prompt("popup_primitive")
         assert "정책변경" in prompt
+
+    def test_popup_prompt_handles_hero_discovery_continue_button(self):
+        prompt = get_primitive_prompt("popup_primitive")
+        assert "발견된 영웅" in prompt
+        assert "영웅을 보라" in prompt
+        assert "계속" in prompt
+        assert "클릭" in prompt
 
     def test_popup_prompt_does_not_own_lower_right_screen_entry_buttons(self):
         prompt = get_primitive_prompt("popup_primitive")
@@ -561,6 +596,351 @@ class TestEntryGatedProcesses:
         assert verify.handled is True
         assert verify.passed is True
 
+    def test_governor_promote_select_click_runs_semantic_verify_without_ui_change(self):
+        process = get_multi_step_process("governor_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("governor_primitive", enable_choice_catalog=True)
+        memory.mark_substep("governor_entry_done")
+        memory.set_branch("governor_promote")
+        memory.begin_stage("governor_promote_select")
+
+        should_verify = process.should_verify_action_without_ui_change(
+            memory,
+            AgentAction(action="click", x=500, y=500),
+        )
+
+        assert should_verify is True
+
+    def test_governor_promote_select_semantic_verify_accepts_green_confirm_button(self):
+        process = get_multi_step_process("governor_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("governor_primitive", enable_choice_catalog=True)
+        memory.mark_substep("governor_entry_done")
+        memory.set_branch("governor_promote")
+        memory.begin_stage("governor_promote_select")
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "confirm_enabled": True,
+                        "reasoning": "하단 버튼이 돌아가기에서 초록색 확정으로 바뀌어 누를 수 있음",
+                    }
+                )
+            ]
+        )
+
+        verify = process.verify_action_success(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            AgentAction(action="click", x=500, y=500),
+        )
+
+        assert verify.handled is True
+        assert verify.passed is True
+
+    def test_governor_appoint_city_click_runs_semantic_verify_without_ui_change(self):
+        process = get_multi_step_process("governor_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("governor_primitive", enable_choice_catalog=True)
+        memory.mark_substep("governor_entry_done")
+        memory.set_branch("governor_appoint")
+        memory.begin_stage("governor_appoint_city")
+
+        should_verify = process.should_verify_action_without_ui_change(
+            memory,
+            AgentAction(action="click", x=500, y=500),
+        )
+
+        assert should_verify is True
+
+    def test_governor_appoint_city_semantic_verify_rejects_city_with_governor_portrait(self):
+        process = get_multi_step_process("governor_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("governor_primitive", enable_choice_catalog=True)
+        memory.mark_substep("governor_entry_done")
+        memory.set_branch("governor_appoint")
+        memory.begin_stage("governor_appoint_city")
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "valid_unassigned_city_selected": False,
+                        "reasoning": "선택된 도시 왼쪽 동그라미에 총독 얼굴 아이콘이 보여 이미 배정된 도시임",
+                    }
+                )
+            ]
+        )
+
+        verify = process.verify_action_success(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            AgentAction(action="click", x=500, y=500),
+        )
+
+        assert verify.handled is True
+        assert verify.passed is False
+
+    def test_governor_appoint_city_observer_prompt_describes_empty_circle_rule(self):
+        process = get_multi_step_process("governor_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("governor_primitive", enable_choice_catalog=True)
+        memory.mark_substep("governor_entry_done")
+        memory.set_branch("governor_appoint")
+        memory.begin_stage("governor_appoint_city_observe")
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "visible_options": [
+                            {"id": "lugdunum", "label": "루구두눔", "disabled": False, "note": "미배정"}
+                        ],
+                        "end_of_list": True,
+                        "scroll_anchor": None,
+                        "reasoning": "왼쪽 도시 목록에서 미배정 도시를 확인함",
+                    }
+                )
+            ]
+        )
+
+        observation = process.observe(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+        )
+
+        assert observation is not None
+        assert "왼쪽 팝업창" in provider.last_text
+        assert "도시 이름 왼쪽 동그라미" in provider.last_text
+        assert "총독 얼굴" in provider.last_text
+        assert "비어 있으면" in provider.last_text
+
+    def test_governor_appoint_branch_observes_city_blocks_before_clicking_city(self):
+        process = get_multi_step_process("governor_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("governor_primitive", enable_choice_catalog=True)
+        memory.mark_substep("governor_entry_done")
+        memory.set_branch("governor_appoint")
+        memory.begin_stage("governor_appoint_click")
+
+        process.on_action_success(memory, AgentAction(action="click", x=500, y=500))
+
+        assert memory.current_stage == "governor_appoint_city_observe"
+
+        result = process.consume_observation(
+            memory,
+            ObservationBundle(
+                visible_options=[
+                    {"id": "paris", "label": "파리", "disabled": True, "note": "총독 얼굴 보임 / 이미 배정됨"},
+                    {"id": "lugdunum", "label": "루구두눔", "disabled": False, "note": "빈 동그라미 / 미배정"},
+                ],
+                end_of_list=True,
+            ),
+        )
+
+        assert result is None
+        assert memory.current_stage == "governor_appoint_city_decide"
+
+    def test_governor_appoint_city_observation_scrolls_when_popup_has_more_cities(self):
+        process = get_multi_step_process("governor_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("governor_primitive", enable_choice_catalog=True)
+        memory.mark_substep("governor_entry_done")
+        memory.set_branch("governor_appoint")
+        memory.begin_stage("governor_appoint_city_observe")
+
+        action = process.consume_observation(
+            memory,
+            ObservationBundle(
+                visible_options=[
+                    {"id": "paris", "label": "파리", "disabled": False, "note": "빈 동그라미 / 미배정"},
+                ],
+                end_of_list=False,
+                scroll_anchor={"x": 220, "y": 520, "left": 80, "top": 160, "right": 360, "bottom": 900},
+            ),
+        )
+
+        assert action is not None
+        assert action.action == "move"
+        assert memory.current_stage == "governor_appoint_city_hover_scroll_anchor"
+
+    def test_governor_appoint_city_decision_prompt_only_lists_unassigned_cities(self):
+        process = get_multi_step_process("governor_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("governor_primitive", enable_choice_catalog=True)
+        memory.mark_substep("governor_entry_done")
+        memory.set_branch("governor_appoint")
+        memory.begin_stage("governor_appoint_city_observe")
+        process.consume_observation(
+            memory,
+            ObservationBundle(
+                visible_options=[
+                    {"id": "paris", "label": "파리", "disabled": True, "note": "총독 얼굴 보임 / 이미 배정됨"},
+                    {"id": "lugdunum", "label": "루구두눔", "disabled": False, "note": "빈 동그라미 / 미배정"},
+                ],
+                end_of_list=True,
+            ),
+        )
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "best_option_id": "lugdunum",
+                        "reason": "미배정 도시 중 과학 전략과 가장 잘 맞음",
+                    }
+                )
+            ]
+        )
+
+        action = process.plan_action(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 산출이 높은 도시에 총독 배정",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert isinstance(action, StageTransition)
+        assert action.stage == "governor_appoint_city"
+        assert memory.current_stage == "governor_appoint_city"
+        assert memory.get_best_choice() is not None
+        assert memory.get_best_choice().id == "lugdunum"
+        assert "루구두눔" in provider.last_text
+        assert "파리" not in provider.last_text
+
+    def test_governor_appoint_city_scroll_semantic_verify_detects_city_list_progress(self):
+        process = get_multi_step_process("governor_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("governor_primitive", enable_choice_catalog=True)
+        memory.mark_substep("governor_entry_done")
+        memory.set_branch("governor_appoint")
+        memory.begin_stage("governor_appoint_city_scroll_down")
+        memory.remember_choices(
+            [{"id": "paris", "label": "파리", "note": "미배정"}],
+            end_of_list=False,
+            scroll_anchor={"x": 220, "y": 520, "left": 80, "top": 160, "right": 360, "bottom": 900},
+            scroll_direction="down",
+        )
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "visible_options": [{"id": "lugdunum", "label": "루구두눔", "note": "미배정"}],
+                        "end_of_list": False,
+                        "scroll_anchor": {
+                            "x": 220,
+                            "y": 520,
+                            "left": 80,
+                            "top": 160,
+                            "right": 360,
+                            "bottom": 900,
+                        },
+                        "reasoning": "왼쪽 도시 목록에서 새 도시가 보임",
+                    }
+                )
+            ]
+        )
+
+        verify = process.verify_action_success(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            AgentAction(action="scroll", x=220, y=520, scroll_amount=-120),
+        )
+
+        assert verify.handled is True
+        assert verify.passed is True
+
+    def test_governor_appoint_city_decision_restores_hidden_city_after_scroll_scan(self):
+        process = get_multi_step_process("governor_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("governor_primitive", enable_choice_catalog=True)
+        memory.mark_substep("governor_entry_done")
+        memory.set_branch("governor_appoint")
+        memory.begin_stage("governor_appoint_city_observe")
+
+        first = process.consume_observation(
+            memory,
+            ObservationBundle(
+                visible_options=[
+                    {"id": "paris", "label": "파리", "disabled": False, "note": "빈 동그라미 / 미배정"},
+                ],
+                end_of_list=False,
+                scroll_anchor={"x": 220, "y": 520, "left": 80, "top": 160, "right": 360, "bottom": 900},
+            ),
+        )
+        assert first is not None
+        process.on_action_success(memory, first)
+
+        scroll_action = process.plan_action(
+            FakeProvider([]),
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+        assert scroll_action is not None
+        assert scroll_action.action == "scroll"
+        process.on_action_success(memory, scroll_action)
+
+        second = process.consume_observation(
+            memory,
+            ObservationBundle(
+                visible_options=[
+                    {"id": "lugdunum", "label": "루구두눔", "disabled": False, "note": "빈 동그라미 / 미배정"},
+                ],
+                end_of_list=True,
+                scroll_anchor={"x": 220, "y": 520, "left": 80, "top": 160, "right": 360, "bottom": 900},
+            ),
+        )
+        assert second is None
+        assert memory.current_stage == "governor_appoint_city_decide"
+
+        provider = FakeProvider([json.dumps({"best_option_id": "paris", "reason": "과학 도시"})])
+        transition = process.plan_action(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert isinstance(transition, StageTransition)
+        assert transition.stage == "governor_appoint_city_restore_hover_scroll_anchor"
+        assert memory.current_stage == "governor_appoint_city_restore_hover_scroll_anchor"
+
+    def test_governor_appoint_city_no_progress_reobserves_without_generic_fallback(self):
+        process = get_multi_step_process("governor_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("governor_primitive", enable_choice_catalog=True)
+        memory.mark_substep("governor_entry_done")
+        memory.set_branch("governor_appoint")
+        memory.begin_stage("governor_appoint_city")
+
+        first = process.handle_no_progress(
+            FakeProvider([]),
+            Image.new("RGB", (100, 100)),
+            memory,
+            last_action=AgentAction(action="click", x=420, y=360, task_status="in_progress"),
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert first.handled is True
+        assert first.reroute is False
+        assert memory.current_stage == "governor_appoint_city_observe"
+        assert memory.fallback_return_stage == ""
+
     def test_governor_entry_press_success_transitions_directly_to_observe_choices(self):
         process = get_multi_step_process("governor_primitive", "")
         memory = ShortTermMemory()
@@ -628,11 +1008,12 @@ class TestEntryGatedProcesses:
         memory.set_branch("governor_appoint")
         memory.begin_stage("governor_appoint_click")
 
-        # appoint_click -> appoint_city
+        # appoint_click -> appoint_city_observe
         process.on_action_success(memory, AgentAction(action="click", x=500, y=500))
-        assert memory.current_stage == "governor_appoint_city"
+        assert memory.current_stage == "governor_appoint_city_observe"
 
         # appoint_city -> appoint_confirm
+        memory.begin_stage("governor_appoint_city")
         process.on_action_success(memory, AgentAction(action="click", x=500, y=500))
         assert memory.current_stage == "governor_appoint_confirm"
 
@@ -836,6 +1217,395 @@ class TestEntryGatedProcesses:
         assert PRIMITIVE_REGISTRY["governor_primitive"]["process_kind"] == "observation_assisted"
         assert PRIMITIVE_REGISTRY["governor_primitive"]["max_steps"] >= 20
 
+    def test_voting_process_factory_returns_voting_process(self):
+        process = get_multi_step_process("voting_primitive", "")
+
+        assert type(process).__name__ == "VotingProcess"
+
+    def test_voting_process_uses_vote_start_button_from_welcome_popup_entry(self):
+        process = get_multi_step_process("voting_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("voting_primitive", enable_choice_catalog=True, enable_voting_state=True)
+        process.initialize(memory)
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "voting_mode": "welcome_popup",
+                        "voting_screen_ready": False,
+                        "welcome_popup_visible": True,
+                        "globe_button_visible": False,
+                        "reasoning": "세계 의회에 오신 것을 환영합니다 팝업과 투표시작 버튼이 보임",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "action": "click",
+                        "x": 620,
+                        "y": 710,
+                        "reasoning": "투표시작 버튼 클릭",
+                        "task_status": "in_progress",
+                    }
+                ),
+            ]
+        )
+
+        action = process.plan_action(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert isinstance(action, AgentAction)
+        assert action.action == "click"
+        assert memory.current_stage == "vote_entry"
+
+    def test_voting_process_uses_lower_right_globe_button_for_entry(self):
+        process = get_multi_step_process("voting_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("voting_primitive", enable_choice_catalog=True, enable_voting_state=True)
+        process.initialize(memory)
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "voting_mode": "globe_button",
+                        "voting_screen_ready": False,
+                        "welcome_popup_visible": False,
+                        "globe_button_visible": True,
+                        "reasoning": "오른쪽 아래 세계의회 지구본 버튼만 보임",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "action": "click",
+                        "x": 930,
+                        "y": 885,
+                        "reasoning": "오른쪽 아래 지구본 버튼 클릭",
+                        "task_status": "in_progress",
+                    }
+                ),
+            ]
+        )
+
+        action = process.plan_action(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert isinstance(action, AgentAction)
+        assert action.action == "click"
+        assert memory.current_stage == "vote_entry"
+
+    def test_voting_entry_transitions_to_scan_when_world_congress_screen_is_ready(self):
+        process = get_multi_step_process("voting_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("voting_primitive", enable_choice_catalog=True, enable_voting_state=True)
+        process.initialize(memory)
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "voting_mode": "agenda_screen",
+                        "voting_screen_ready": True,
+                        "welcome_popup_visible": False,
+                        "globe_button_visible": False,
+                        "reasoning": "합의안 block이 보여 실제 투표 화면이 열림",
+                    }
+                )
+            ]
+        )
+
+        action = process.plan_action(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert isinstance(action, StageTransition)
+        assert action.stage == "vote_scan_agendas"
+        assert memory.current_stage == "vote_scan_agendas"
+
+    def test_voting_scan_end_transitions_to_select_agenda(self):
+        process = get_multi_step_process("voting_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("voting_primitive", enable_choice_catalog=True, enable_voting_state=True)
+        process.initialize(memory)
+        memory.mark_substep("voting_entry_done")
+        memory.begin_stage("vote_scan_agendas")
+
+        action = process.consume_observation(
+            memory,
+            ObservationBundle(
+                visible_options=[
+                    {"id": "luxury_ban", "label": "사치 자원 금지"},
+                    {"id": "trade_bonus", "label": "교역 보너스"},
+                ],
+                end_of_list=True,
+                scroll_anchor={"x": 520, "y": 510, "left": 280, "top": 120, "right": 760, "bottom": 920},
+            ),
+        )
+
+        assert action is None
+        assert memory.current_stage == "vote_select_agenda"
+        assert "full_scan_complete" in memory.completed_substeps
+
+    def test_voting_selects_visible_pending_agenda_before_resolution_stage(self):
+        process = get_multi_step_process("voting_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("voting_primitive", enable_choice_catalog=True, enable_voting_state=True)
+        process.initialize(memory)
+        memory.remember_choices(
+            [
+                {"id": "luxury_ban", "label": "사치 자원 금지"},
+                {"id": "trade_bonus", "label": "교역 보너스", "selected": True},
+            ],
+            end_of_list=True,
+            scroll_direction="down",
+        )
+        memory.init_voting_state()
+        memory.mark_substep("voting_entry_done")
+        memory.begin_stage("vote_select_agenda")
+
+        action = process.plan_action(
+            FakeProvider([]),
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert isinstance(action, StageTransition)
+        assert action.stage == "vote_choose_resolution"
+        assert memory.current_stage == "vote_choose_resolution"
+        assert memory.voting_state.current_agenda_id == "luxury_ban"
+        assert memory.voting_state.current_agenda_label == "사치 자원 금지"
+
+    def test_voting_direction_stage_emits_repeated_click_bundle_once(self):
+        process = get_multi_step_process("voting_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("voting_primitive", enable_choice_catalog=True, enable_voting_state=True)
+        memory.choice_catalog.candidates["luxury_ban"] = ChoiceCandidate(
+            id="luxury_ban",
+            label="사치 자원 금지",
+        )
+        memory.init_voting_state()
+        memory.mark_substep("voting_entry_done")
+        memory.set_current_voting_agenda(option_id="luxury_ban")
+        memory.begin_stage("vote_choose_direction")
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "x": 540,
+                        "y": 430,
+                        "repeat_count": 3,
+                        "selection": "upvote",
+                        "reason": "필요한 표만큼 같은 찬성 버튼을 여러 번 눌러야 함",
+                    }
+                )
+            ]
+        )
+
+        actions = process.plan_action(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert isinstance(actions, list)
+        assert len(actions) == 3
+        assert all(action.action == "click" for action in actions)
+        assert all(action.task_status == "in_progress" for action in actions)
+        process.on_actions_success(memory, actions)
+        assert memory.current_stage == "vote_hover_left_for_target"
+        assert memory.voting_state.selected_vote_direction == "upvote"
+
+    def test_voting_left_hover_runs_before_target_selection(self):
+        process = get_multi_step_process("voting_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("voting_primitive", enable_choice_catalog=True, enable_voting_state=True)
+        memory.init_voting_state()
+        memory.mark_substep("voting_entry_done")
+        memory.begin_stage("vote_hover_left_for_target")
+
+        action = process.plan_action(
+            FakeProvider([]),
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert isinstance(action, AgentAction)
+        assert action.action == "move"
+        assert action.x < 250
+        assert action.task_status == "in_progress"
+        process.on_action_success(memory, action)
+        assert memory.current_stage == "vote_choose_target"
+
+    def test_voting_target_stage_emits_repeated_click_bundle_before_resolve(self):
+        process = get_multi_step_process("voting_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("voting_primitive", enable_choice_catalog=True, enable_voting_state=True)
+        memory.choice_catalog.candidates["luxury_ban"] = ChoiceCandidate(
+            id="luxury_ban",
+            label="사치 자원 금지",
+        )
+        memory.init_voting_state()
+        memory.mark_substep("voting_entry_done")
+        memory.set_current_voting_agenda(option_id="luxury_ban")
+        memory.begin_stage("vote_choose_target")
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "x": 660,
+                        "y": 515,
+                        "repeat_count": 2,
+                        "selection": "말",
+                        "reason": "같은 대상에 표를 몰아주기 위해 반복 선택",
+                    }
+                )
+            ]
+        )
+
+        actions = process.plan_action(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert isinstance(actions, list)
+        assert len(actions) == 2
+        assert all(action.action == "click" for action in actions)
+        process.on_actions_success(memory, actions)
+        assert memory.current_stage == "vote_resolve_agenda"
+        assert memory.voting_state.selected_target_label == "말"
+
+    def test_voting_resolve_stage_marks_current_agenda_complete_and_returns_to_remaining_agenda(self):
+        process = get_multi_step_process("voting_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("voting_primitive", enable_choice_catalog=True, enable_voting_state=True)
+        memory.remember_choices(
+            [
+                {"id": "luxury_ban", "label": "사치 자원 금지"},
+                {"id": "trade_bonus", "label": "교역 보너스"},
+            ],
+            end_of_list=True,
+            scroll_direction="down",
+        )
+        memory.init_voting_state()
+        memory.mark_substep("voting_entry_done")
+        memory.set_current_voting_agenda(option_id="luxury_ban")
+        memory.begin_stage("vote_resolve_agenda")
+        provider = FakeProvider([json.dumps({"agenda_state": "complete", "reason": "현재 합의안 투표 완료"})])
+
+        action = process.plan_action(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert isinstance(action, StageTransition)
+        assert action.stage == "vote_select_agenda"
+        assert memory.current_stage == "vote_select_agenda"
+        assert memory.voting_state.completed_agenda_ids == ["luxury_ban"]
+        assert memory.choice_catalog.candidates["luxury_ban"].metadata["selected"] is True
+
+    def test_voting_exit_stage_finishes_in_terminal_state(self):
+        process = get_multi_step_process("voting_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("voting_primitive", enable_choice_catalog=True, enable_voting_state=True)
+        memory.init_voting_state()
+        memory.mark_substep("voting_entry_done")
+        memory.begin_stage("vote_exit")
+
+        action = process.plan_action(
+            FakeProvider([]),
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert isinstance(action, AgentAction)
+        assert action.action == "press"
+        assert action.key == "escape"
+        assert action.task_status == "in_progress"
+        process.on_action_success(memory, action)
+        assert memory.current_stage == "vote_complete"
+
+        verification = process.verify_completion(
+            FakeProvider([]),
+            Image.new("RGB", (100, 100)),
+            memory,
+        )
+
+        assert verification.complete is True
+
+    def test_voting_exit_semantic_verify_rejects_when_agenda_screen_still_visible(self):
+        process = get_multi_step_process("voting_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("voting_primitive", enable_choice_catalog=True, enable_voting_state=True)
+        memory.init_voting_state()
+        memory.mark_substep("voting_entry_done")
+        memory.begin_stage("vote_exit")
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "voting_mode": "agenda_screen",
+                        "voting_screen_ready": True,
+                        "welcome_popup_visible": False,
+                        "globe_button_visible": False,
+                        "reasoning": "ESC 이후에도 합의안 block이 그대로 보여 아직 세계의회 안에 있음",
+                    }
+                )
+            ]
+        )
+
+        verify = process.verify_action_success(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            AgentAction(action="press", key="escape"),
+        )
+
+        assert verify.handled is True
+        assert verify.passed is False
+
     def test_research_process_uses_entry_action_before_tree_is_ready(self):
         process = get_multi_step_process("research_select_primitive", "")
         memory = ShortTermMemory()
@@ -879,6 +1649,94 @@ class TestEntryGatedProcesses:
         assert action.action == "press"
         assert action.key == "enter"
         assert memory.current_stage == "culture_entry"
+
+    def test_culture_entry_press_runs_semantic_verify_without_ui_change(self):
+        process = get_multi_step_process("culture_decision_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("culture_decision_primitive")
+        process.initialize(memory)
+
+        should_verify = process.should_verify_action_without_ui_change(
+            memory,
+            AgentAction(action="press", key="enter"),
+        )
+
+        assert should_verify is True
+
+    def test_culture_entry_semantic_verify_promotes_to_direct_select(self):
+        process = get_multi_step_process("culture_decision_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("culture_decision_primitive")
+        process.initialize(memory)
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "culture_screen_ready": True,
+                        "notification_visible": False,
+                        "reasoning": "좌측 상단 선택 창이 열림",
+                    }
+                )
+            ]
+        )
+        action = AgentAction(action="press", key="enter")
+
+        verify = process.verify_action_success(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            action,
+        )
+
+        assert verify.handled is True
+        assert verify.passed is True
+        process.on_action_success(memory, action)
+        assert "culture_entry_done" in memory.completed_substeps
+        assert memory.current_stage == "direct_culture_select"
+
+    def test_research_entry_press_runs_semantic_verify_without_ui_change(self):
+        process = get_multi_step_process("research_select_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("research_select_primitive")
+        process.initialize(memory)
+
+        should_verify = process.should_verify_action_without_ui_change(
+            memory,
+            AgentAction(action="press", key="enter"),
+        )
+
+        assert should_verify is True
+
+    def test_research_entry_semantic_verify_promotes_to_direct_select(self):
+        process = get_multi_step_process("research_select_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("research_select_primitive")
+        process.initialize(memory)
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "research_screen_ready": True,
+                        "notification_visible": False,
+                        "reasoning": "좌측 상단 선택 창이 열림",
+                    }
+                )
+            ]
+        )
+        action = AgentAction(action="press", key="enter")
+
+        verify = process.verify_action_success(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            action,
+        )
+
+        assert verify.handled is True
+        assert verify.passed is True
+        process.on_action_success(memory, action)
+        assert "research_entry_done" in memory.completed_substeps
+        assert memory.current_stage == "direct_research_select"
 
     def test_city_production_process_requires_entry_before_observation(self):
         process = get_multi_step_process("city_production_primitive", "")
@@ -1236,6 +2094,26 @@ class TestEntryGatedProcesses:
         assert second_action.action == "move"
         assert memory.choice_catalog.end_reached is False
         assert memory.current_stage == "hover_scroll_anchor"
+
+    def test_city_production_trusts_initial_end_of_list_when_no_scroll_has_happened(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("choice_list")
+
+        action = process.consume_observation(
+            memory,
+            ObservationBundle(
+                visible_options=[{"label": "기념비"}, {"label": "건설자"}],
+                end_of_list=True,
+                scroll_anchor={"x": 760, "y": 520, "left": 620, "top": 100, "right": 900, "bottom": 920},
+            ),
+        )
+
+        assert action is None
+        assert memory.choice_catalog.end_reached is True
+        assert memory.current_stage == "choose_from_memory"
 
     def test_city_production_scan_completes_after_third_scrolled_observation_finds_no_new_choices(self):
         process = get_multi_step_process("city_production_primitive", "")
@@ -2973,6 +3851,48 @@ class TestPolicyProcess:
         assert action is not None
         assert action.task_status == "complete"
         assert "'예' 또는 확인 버튼" in provider.last_text
+
+    def test_confirm_policy_popup_prompt_includes_stage_specific_terminal_guidance(self):
+        process = get_multi_step_process("policy_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("policy_primitive", enable_policy_state=True)
+        memory.mark_policy_entry_done()
+        memory.init_policy_state(
+            tab_positions=[{"tab_name": "군사", "x": 700, "y": 100}],
+            eligible_tabs_queue=["군사"],
+            slot_inventory=[{"slot_id": "military_1", "slot_type": "군사", "is_empty": True}],
+            wild_slot_active=False,
+        )
+        memory.mark_policy_tab_completed("군사")
+        memory.advance_policy_tab()
+        memory.begin_stage("confirm_policy_popup")
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "action": "click",
+                        "x": 610,
+                        "y": 560,
+                        "reasoning": "확인 팝업의 예 버튼 클릭",
+                        "task_status": "in_progress",
+                    }
+                )
+            ]
+        )
+
+        process.plan_action(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert "=== 현재 프로세스 상태 ===" in provider.last_text
+        assert "현재 stage: confirm_policy_popup" in provider.last_text
+        assert "이 단계에서만 task_status='complete'로 마무리한다." in provider.last_text
 
     def test_first_tab_click_failure_relocalizes_current_tab_only(self):
         process = get_multi_step_process("policy_primitive", "")

@@ -37,7 +37,10 @@ from computer_use_test.agent.modules.hitl.turn_checkpoint import (
     TurnSummary,
 )
 from computer_use_test.agent.modules.memory.short_term_memory import ShortTermMemory
-from computer_use_test.agent.modules.primitive.multi_step_process import StageTransition, get_multi_step_process
+from computer_use_test.agent.modules.primitive.multi_step_process import (
+    StageTransition,
+    get_multi_step_process,
+)
 from computer_use_test.agent.modules.router.primitive_registry import (
     PRIMITIVE_NAMES,
     PRIMITIVE_REGISTRY,
@@ -80,6 +83,27 @@ def _get_turn_validator() -> TurnValidator:
     if _turn_validator is None:
         _turn_validator = TurnValidator()
     return _turn_validator
+
+
+def _save_policy_semantic_failure_artifacts(
+    *,
+    primitive_name: str,
+    stage: str,
+    semantic_reason: str,
+    semantic_details: dict[str, object] | None,
+    memory: ShortTermMemory,
+    pil_image,
+) -> None:
+    """Best-effort hook for capturing policy semantic-failure context."""
+    logger.warning(
+        "Policy semantic failure artifact | primitive=%s stage=%s reason=%s details=%s memory=%s image_size=%s",
+        primitive_name,
+        stage,
+        semantic_reason,
+        semantic_details or {},
+        memory.to_prompt_string()[:400],
+        getattr(pil_image, "size", None),
+    )
 
 
 def _primitive_trace_tag(primitive_name: str) -> str:
@@ -609,6 +633,37 @@ def run_primitive_loop(
             step_value = max_value
         return step_value, max_value
 
+    def _policy_semantic_recheck_once(
+        initial_result,
+        *,
+        action: AgentAction,
+    ):
+        if primitive_name != "policy_primitive":
+            return initial_result
+        if not initial_result.handled or initial_result.passed:
+            return initial_result
+        time.sleep(0.1)
+        recheck_image, *_ = capture_screen_pil()
+        recheck_result = process.verify_action_success(
+            planner_provider,
+            recheck_image,
+            memory,
+            action,
+            img_config=planner_img_config,
+        )
+        if recheck_result.handled:
+            memory.set_last_semantic_verify(
+                "pass" if recheck_result.passed else "fail",
+                recheck_result.reason,
+            )
+        if recheck_result.passed:
+            logger.info(
+                "Policy semantic verification recovered on delayed recheck | stage=%s reason=%s",
+                memory.current_stage or "-",
+                recheck_result.reason,
+            )
+        return recheck_result
+
     def _refresh_multi_step_debug() -> None:
         stm_str = _multi_step_stm_summary()
         visible_step, visible_max_steps = _visible_progress(result.steps_taken)
@@ -1038,6 +1093,10 @@ def run_primitive_loop(
                         "pass" if semantic_verify_result.passed else "fail",
                         semantic_verify_result.reason,
                     )
+                semantic_verify_result = _policy_semantic_recheck_once(
+                    semantic_verify_result,
+                    action=display_action,
+                )
                 verify_status = (
                     "pass"
                     if semantic_verify_result.handled and semantic_verify_result.passed
@@ -1058,6 +1117,14 @@ def run_primitive_loop(
                         primitive_name,
                         memory.current_stage,
                         semantic_verify_result.reason if semantic_verify_result else "unhandled",
+                    )
+                    _save_policy_semantic_failure_artifacts(
+                        primitive_name=primitive_name,
+                        stage=memory.current_stage or "-",
+                        semantic_reason=semantic_verify_result.reason if semantic_verify_result else "unhandled",
+                        semantic_details=getattr(semantic_verify_result, "details", {}),
+                        memory=memory,
+                        pil_image=post_image,
                     )
                     no_progress_resolution = process.handle_no_progress(
                         planner_provider,
@@ -1655,6 +1722,7 @@ def run_one_turn(
             normalizing_range=normalizing_range,
             enable_choice_catalog=registry_entry.get("process_kind") == "observation_assisted",
             enable_policy_state=primitive_name == "policy_primitive",
+            enable_voting_state=primitive_name == "voting_primitive",
         )
         if primitive_name == "policy_primitive":
             memory.set_policy_capture_geometry(screen_w, screen_h, x_offset, y_offset)
@@ -1725,6 +1793,16 @@ def run_one_turn(
                     reroute_macro_turn,
                     turn_number,
                 )
+                if (
+                    new_router.primitive == primitive_name
+                    and loop_result.completed
+                    and primitive_name == "voting_primitive"
+                ):
+                    logger.info(
+                        "Completed voting primitive rerouted back to voting "
+                        "-> retrying routing without restarting vote loop"
+                    )
+                    continue
                 if new_router.primitive == primitive_name and loop_result.re_route:
                     if primitive_name == "policy_primitive" and not same_primitive_restart_used:
                         same_primitive_restart_used = True
@@ -1831,6 +1909,7 @@ def run_one_turn(
                     normalizing_range=normalizing_range,
                     enable_choice_catalog=entry.get("process_kind") == "observation_assisted",
                     enable_policy_state=primitive_name == "policy_primitive",
+                    enable_voting_state=primitive_name == "voting_primitive",
                 )
                 if primitive_name == "policy_primitive":
                     memory.set_policy_capture_geometry(screen_w, screen_h, x_offset, y_offset)
