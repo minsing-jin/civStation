@@ -56,13 +56,19 @@ class RouterResult:
 PRIMITIVE_REGISTRY: dict[str, dict] = {
     # --- Router-included primitives (sorted by priority) ---
     "religion_primitive": {
-        "criteria": "종교관 선택 화면. 종교관 목록 또는 '종교관 세우기' 버튼 표시.",
+        "criteria": (
+            "종교관 선택 화면. 왼쪽 종교관 목록 또는 초록색 '종교관 세우기' 버튼 표시. "
+            "또는 우하단 천사 문양 원형 종교관 버튼 보임."
+        ),
         "prompt": RELIGION_PROMPT,
         "priority": 1,
         "multi_step": True,
         "process_kind": "observation_assisted",
-        "max_steps": 10,
-        "completion_condition": "초록색 '종교관 세우기' 버튼 클릭 완료 시 task_status='complete'.",
+        "max_steps": 20,
+        "completion_condition": (
+            "종교관 준비 팝업을 Esc로 닫은 뒤 prep_popup_visible=false 이고 "
+            "우하단 원형 버튼이 더 이상 천사 문양이 아니면 task_status='complete'."
+        ),
     },
     "governor_primitive": {
         "criteria": (
@@ -162,7 +168,8 @@ PRIMITIVE_REGISTRY: dict[str, dict] = {
         "process_kind": "scripted",
         "max_steps": 24,
         "completion_condition": (
-            "'모든 정책 배정' 후 확인 팝업의 '예' 또는 확인 버튼 클릭 완료 시 task_status='complete'."
+            "'모든 정책 배정' 후 확인 팝업의 '예' 또는 확인 버튼 클릭 완료, "
+            "또는 이번 정책 run에서 변경 없음이라 정책 화면에서 Esc 종료 완료 시 task_status='complete'."
         ),
         "img_config_preset": "planner_high_quality",
     },

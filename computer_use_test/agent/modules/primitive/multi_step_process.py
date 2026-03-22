@@ -37,12 +37,17 @@ logger = logging.getLogger(__name__)
 
 _POLICY_TAB_NAMES = ["군사", "경제", "외교", "와일드카드", "암흑"]
 _POLICY_TAB_BAR_ORDER = ["전체", "군사", "경제", "외교", "와일드카드", "암흑", "황금기"]
+_POLICY_EMPTY_OK_TABS = {"외교", "와일드카드", "암흑"}
 _POLICY_RIGHT_TAB_BAR_RATIOS = (0.57, 0.24, 0.97, 0.31)
 _POLICY_RIGHT_CARD_LIST_RATIOS = (0.57, 0.29, 0.97, 0.84)
 _PRODUCTION_LIST_DEFAULT_RATIOS = (0.68, 0.10, 0.94, 0.92)
 _PRODUCTION_LIST_HOVER_X_RATIO = 0.88
 _PRODUCTION_LIST_HOVER_RIGHT_INSET_RATIO = 0.02
 _PRODUCTION_LIST_HOVER_WIDTH_BIAS = 0.72
+_RELIGION_LIST_DEFAULT_RATIOS = (0.04, 0.14, 0.30, 0.92)
+_RELIGION_LIST_HOVER_X_RATIO = 0.20
+_RELIGION_LIST_HOVER_LEFT_INSET_RATIO = 0.02
+_RELIGION_LIST_HOVER_WIDTH_BIAS = 0.62
 
 
 def _normalized_coord_note(normalizing_range: int, *, fields: str) -> str:
@@ -251,6 +256,23 @@ class GovernorCityObserver(ScrollableChoiceObserver):
             "- 총독 카드 본체, 지도 타일, 우하단 HUD는 관찰 대상이 아니다.\n"
             "- 도시 목록이 스크롤 가능하면 scroll_anchor는 왼쪽 도시 목록 내부 중앙을 반환한다.\n"
             "- 스크롤이 불가능하거나 모호하면 scroll_anchor는 null 이어도 된다.\n"
+        )
+
+
+class ReligionObserver(ScrollableChoiceObserver):
+    """Observer specialized for the left-side pantheon belief list."""
+
+    def build_prompt(self, primitive_name: str, memory: ShortTermMemory, *, normalizing_range: int) -> str:
+        base_prompt = super().build_prompt(primitive_name, memory, normalizing_range=normalizing_range)
+        return (
+            f"{base_prompt}\n"
+            "- 왼쪽 종교관 팝업 안에 세로로 나열된 종교관 박스만 관찰해.\n"
+            "- 각 종교관은 visible_options 1개로 기록하고, label은 실제 보이는 종교관 이름이다.\n"
+            "- note에는 종교관 효과를 짧게 적어.\n"
+            "- 이미 선택되었거나 더 이상 고를 수 없는 항목은 selected=true 또는 disabled=true 로 표시해.\n"
+            "- scroll_anchor는 반드시 왼쪽 종교관 팝업 내부 중앙이어야 한다.\n"
+            "- 우하단 천사 문양 버튼, 상단 '종교관 선택' 제목바, 지도, 좌측 바깥 빈 영역은 scroll_anchor로 주지 마.\n"
+            "- 스크롤이 모호하면 scroll_anchor는 null 이어도 된다.\n"
         )
 
 
@@ -796,8 +818,9 @@ class PolicyProcess(ScriptedMultiStepProcess):
         if stage == "finalize_policy":
             return (
                 "현재 stage: finalize_policy\n"
-                "- 마지막으로 '모든 정책 배정' 버튼만 누른다.\n"
-                "- 이 단계에서는 task_status를 complete로 끝내지 말고, 다음 확인 팝업 단계로 넘겨라."
+                "- 하단 '모든 정책 배정' 버튼이 활성인지 먼저 판단한다.\n"
+                "- 이번 policy run에서 변경이 없고 버튼이 비활성이면 Esc로 종료한다.\n"
+                "- 변경이 있고 버튼이 활성이라면 그 버튼만 누르고 confirm popup 단계로 넘겨라."
             )
         if stage == "confirm_policy_popup":
             return (
@@ -1209,6 +1232,123 @@ class PolicyProcess(ScriptedMultiStepProcess):
     def _policy_tab_check_img_config(self, img_config=None):
         return PRESETS.get("planner_high_quality", img_config)
 
+    def _analyze_policy_finalize_state(
+        self,
+        provider: BaseVLMProvider,
+        pil_image,
+        *,
+        normalizing_range: int,
+        img_config=None,
+    ) -> dict | None:
+        prompt = (
+            "문명6 정책 종료 버튼 상태 확인기. JSON만 출력.\n"
+            '{"assign_enabled": true, "assign_x": 0, "assign_y": 0, "reason": "버튼 활성"}\n'
+            "현재 전체 화면에서 하단의 '모든 정책 배정' 버튼 상태만 판단해.\n"
+            "규칙:\n"
+            f"{_normalized_coord_note(normalizing_range, fields='assign_x/assign_y')}\n"
+            "- 버튼이 실제로 클릭 가능한 활성 상태면 assign_enabled=true.\n"
+            "- 버튼이 회색/비활성/누를 수 없으면 assign_enabled=false.\n"
+            "- assign_enabled=true일 때만 버튼 중심 좌표를 반환해.\n"
+            "- assign_enabled=false면 좌표는 0으로 둬도 된다.\n"
+        )
+        try:
+            return _analyze_structured_json(
+                provider,
+                pil_image,
+                prompt,
+                img_config=self._policy_tab_check_img_config(img_config),
+                max_tokens=128,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Policy finalize-state parse failed: %s", exc)
+            return None
+
+    def _plan_policy_finalize_action(
+        self,
+        provider: BaseVLMProvider,
+        pil_image,
+        memory: ShortTermMemory,
+        *,
+        normalizing_range: int,
+        high_level_strategy: str,
+        recent_actions: str,
+        hitl_directive: str | None,
+        img_config=None,
+    ) -> AgentAction | None:
+        memory.begin_stage("finalize_policy")
+        finalize_state = self._analyze_policy_finalize_state(
+            provider,
+            pil_image,
+            normalizing_range=normalizing_range,
+            img_config=img_config,
+        )
+        if finalize_state is None:
+            memory.set_fallback_return_stage(
+                "finalize_policy",
+                self.get_recovery_key(memory, stage_name="finalize_policy"),
+            )
+            memory.begin_stage("generic_fallback")
+            memory.set_policy_mode("generic_recovery")
+            return self._plan_generic_policy_action(
+                provider,
+                pil_image,
+                memory,
+                normalizing_range=normalizing_range,
+                high_level_strategy=high_level_strategy,
+                recent_actions=recent_actions,
+                hitl_directive=hitl_directive,
+                img_config=img_config,
+                extra_note=(
+                    "정책 종료 버튼 상태를 읽지 못했다. policy 화면을 복구하고 종료 판단을 다시 할 수 있게 "
+                    "가장 안전한 단일 action을 수행해."
+                ),
+            )
+
+        assign_enabled = bool(finalize_state.get("assign_enabled", False))
+        reason = str(finalize_state.get("reason", "")).strip()
+        assign_x = int(finalize_state.get("assign_x", 0))
+        assign_y = int(finalize_state.get("assign_y", 0))
+
+        if not memory.policy_state.changes_made_this_run and not assign_enabled:
+            memory.set_policy_event("finalize no changes -> escape")
+            return AgentAction(
+                action="press",
+                key="escape",
+                reasoning=reason or "이번 정책 run에서 변경된 카드가 없어 Esc로 종료",
+                task_status="complete",
+            )
+
+        if assign_enabled and 0 <= assign_x <= normalizing_range and 0 <= assign_y <= normalizing_range:
+            memory.set_policy_event("finalize assign enabled -> click")
+            return AgentAction(
+                action="click",
+                x=assign_x,
+                y=assign_y,
+                reasoning=reason or "'모든 정책 배정' 버튼 클릭",
+                task_status="in_progress",
+            )
+
+        memory.set_fallback_return_stage(
+            "finalize_policy",
+            self.get_recovery_key(memory, stage_name="finalize_policy"),
+        )
+        memory.begin_stage("generic_fallback")
+        memory.set_policy_mode("generic_recovery")
+        return self._plan_generic_policy_action(
+            provider,
+            pil_image,
+            memory,
+            normalizing_range=normalizing_range,
+            high_level_strategy=high_level_strategy,
+            recent_actions=recent_actions,
+            hitl_directive=hitl_directive,
+            img_config=img_config,
+            extra_note=(
+                "정책 종료 상태가 일관되지 않다. policy 화면을 복구하고 종료 판단을 다시 할 수 있게 "
+                "가장 안전한 단일 action을 수행해."
+            ),
+        )
+
     def _scan_policy_tab_bar_positions(
         self,
         provider: BaseVLMProvider,
@@ -1333,6 +1473,7 @@ class PolicyProcess(ScriptedMultiStepProcess):
             "- 와일드카드: 오른쪽 카드 목록이 주로 와일드카드 카드이며 "
             "보라색, 검은색, 황금색 카드가 섞여 보일 수 있다.\n"
             "- 암흑: 오른쪽 카드 목록이 주로 암흑 카드(검정 계열)다.\n"
+            "- 오른쪽 카드 목록에 카드가 전혀 보이지 않으면 observed_tab='empty' 로 반환해.\n"
             "- '전체'는 여러 색이 섞인 혼합 overview 목록이다. 와일드카드와 혼동하지 마.\n"
             "- 방금 클릭한 탭의 오른쪽 카드 목록이 보이면 match=true다.\n"
             "- 혼합 overview 목록이면 observed_tab='전체' 로 반환해.\n"
@@ -1352,8 +1493,7 @@ class PolicyProcess(ScriptedMultiStepProcess):
             return SemanticVerifyResult(handled=True, passed=False, reason="policy tab-check parse failed")
 
         observed_tab = str(data.get("observed_tab", "unknown")).strip() or "unknown"
-        is_overview_observation = observed_tab == "전체"
-        matched = bool(data.get("match", False)) and observed_tab == expected_tab and not is_overview_observation
+        matched = observed_tab == expected_tab or (observed_tab == "empty" and expected_tab in _POLICY_EMPTY_OK_TABS)
         reason = str(data.get("reason", "")).strip()
         details: dict[str, object] = {
             "expected_tab": expected_tab,
@@ -1365,61 +1505,8 @@ class PolicyProcess(ScriptedMultiStepProcess):
         result_note = f"{expected_tab}->{observed_tab}:{'ok' if matched else 'fail'}"
         if reason:
             result_note += f" ({reason})"
-        if observed_tab == "전체" and not memory.policy_state.overview_mode:
-            result_note += " [unexpected-overview]"
-        if matched:
-            memory.set_policy_last_tab_check_result(result_note)
-            return SemanticVerifyResult(handled=True, passed=True, reason=reason or result_note, details=details)
-
-        if observed_tab not in {"전체", "unknown"}:
-            memory.set_policy_last_tab_check_result(result_note)
-            return SemanticVerifyResult(handled=True, passed=False, reason=reason or result_note, details=details)
-
-        tab_bar_image, _ = self._crop_policy_region(pil_image, _POLICY_RIGHT_TAB_BAR_RATIOS)
-        tab_bar_prompt = (
-            "문명6 정책 탭바 활성 상태 확인기. JSON만 출력.\n"
-            '{"match": true, "observed_tab": "경제", "reason": "경제 탭이 활성 상태"}\n'
-            f"기대 탭: {expected_tab}\n"
-            "이 이미지는 정책 화면 오른쪽 상단 탭바만 crop한 이미지다.\n"
-            "판정 기준:\n"
-            "- 탭바에서 현재 활성/선택/강조되어 보이는 탭 하나만 observed_tab로 반환해.\n"
-            "- 기대 탭이 활성 상태면 match=true다.\n"
-            "- '전체'가 활성으로 보이면 observed_tab='전체' 로 반환해.\n"
-            "- 탭바만 보고 판단이 애매하면 match=false, observed_tab='unknown'.\n"
-            f"- 정책 탭 후보: {', '.join(_POLICY_TAB_BAR_ORDER)}\n"
-        )
-        try:
-            tab_bar_data = _analyze_structured_json(
-                provider,
-                tab_bar_image,
-                tab_bar_prompt,
-                img_config=self._policy_tab_check_img_config(img_config),
-                max_tokens=96,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Policy tab-bar check failed to parse for %s: %s", expected_tab, exc)
-            details["tab_bar_observed"] = "unknown"
-            details["tab_bar_status"] = "parse-fail"
-            result_note = f"{result_note} | tab_bar={expected_tab}->unknown:parse-fail"
-            memory.set_policy_last_tab_check_result(result_note)
-            return SemanticVerifyResult(handled=True, passed=False, reason=reason or result_note, details=details)
-
-        tab_bar_observed = str(tab_bar_data.get("observed_tab", "unknown")).strip() or "unknown"
-        tab_bar_reason = str(tab_bar_data.get("reason", "")).strip()
-        tab_bar_matched = bool(tab_bar_data.get("match", False)) and tab_bar_observed == expected_tab
-        details["tab_bar_observed"] = tab_bar_observed
-        details["tab_bar_status"] = "ok" if tab_bar_matched else "fail"
-        tab_bar_note = f"{expected_tab}->{tab_bar_observed}:{'ok' if tab_bar_matched else 'fail'}"
-        if tab_bar_reason:
-            tab_bar_note += f" ({tab_bar_reason})"
-        result_note = f"{result_note} | tab_bar={tab_bar_note}"
         memory.set_policy_last_tab_check_result(result_note)
-        return SemanticVerifyResult(
-            handled=True,
-            passed=tab_bar_matched,
-            reason=tab_bar_reason or reason or result_note,
-            details=details,
-        )
+        return SemanticVerifyResult(handled=True, passed=matched, reason=reason or result_note, details=details)
 
     def _policy_screen_ready(
         self,
@@ -1685,6 +1772,11 @@ class PolicyProcess(ScriptedMultiStepProcess):
                 ),
             )
 
+        if memory.get_policy_selected_tab() == current_tab:
+            memory.set_policy_event(f"click next skipped active tab={current_tab}")
+            memory.begin_stage("plan_current_tab")
+            return StageTransition(stage="plan_current_tab", reason=f"현재 탭 '{current_tab}'이 이미 활성 상태")
+
         memory.set_policy_event(f"click next tab={current_tab}")
         return self._build_next_policy_tab_click(memory)
 
@@ -1928,6 +2020,7 @@ class PolicyProcess(ScriptedMultiStepProcess):
                 f"현재 탭 '{current_tab}'의 보이는 카드만 기준으로 유지 또는 교체를 한 번에 판단해.\n"
                 "스크롤하지 말고 현재 화면에 보이는 카드만 사용해.\n"
                 "드래그 소스 카드는 오른쪽 카드 목록에서만 찾아. 왼쪽 슬롯에 꽂힌 카드는 소스 후보가 아니다.\n"
+                "현재 탭 오른쪽 카드 목록에 카드가 하나도 없으면 빈 배열 []을 반환해.\n"
                 "교체가 필요 없으면 빈 배열 []을 반환해.\n"
                 "교체가 필요하면 필요한 drag action들만 JSON 배열로 반환해.\n"
                 "- click, press, scroll, type은 반환하지 마.\n"
@@ -2105,22 +2198,17 @@ class PolicyProcess(ScriptedMultiStepProcess):
             )
 
         if memory.is_policy_complete():
-            memory.begin_stage("finalize_policy")
             memory.set_policy_event("queue complete -> finalize")
             logger.info("Policy queue complete -> finalize")
-            return self._force_task_status(
-                self._plan_generic_policy_action(
-                    provider,
-                    pil_image,
-                    memory,
-                    normalizing_range=normalizing_range,
-                    high_level_strategy=high_level_strategy,
-                    recent_actions=recent_actions,
-                    hitl_directive=hitl_directive,
-                    img_config=img_config,
-                    extra_note="'모든 정책 배정' 버튼만 클릭하고 아직 종료하지 마. 다음 확인 팝업 단계로 넘겨라.",
-                ),
-                "in_progress",
+            return self._plan_policy_finalize_action(
+                provider,
+                pil_image,
+                memory,
+                normalizing_range=normalizing_range,
+                high_level_strategy=high_level_strategy,
+                recent_actions=recent_actions,
+                hitl_directive=hitl_directive,
+                img_config=img_config,
             )
 
         if memory.current_stage == "calibrate_tabs" and memory.has_policy_calibration_pending():
@@ -2131,20 +2219,15 @@ class PolicyProcess(ScriptedMultiStepProcess):
 
         current_tab = memory.get_policy_current_tab_name()
         if not current_tab:
-            memory.begin_stage("finalize_policy")
-            return self._force_task_status(
-                self._plan_generic_policy_action(
-                    provider,
-                    pil_image,
-                    memory,
-                    normalizing_range=normalizing_range,
-                    high_level_strategy=high_level_strategy,
-                    recent_actions=recent_actions,
-                    hitl_directive=hitl_directive,
-                    img_config=img_config,
-                    extra_note="'모든 정책 배정' 버튼만 클릭하고 아직 종료하지 마. 다음 확인 팝업 단계로 넘겨라.",
-                ),
-                "in_progress",
+            return self._plan_policy_finalize_action(
+                provider,
+                pil_image,
+                memory,
+                normalizing_range=normalizing_range,
+                high_level_strategy=high_level_strategy,
+                recent_actions=recent_actions,
+                hitl_directive=hitl_directive,
+                img_config=img_config,
             )
 
         if memory.get_policy_current_tab_position() is None:
@@ -2179,6 +2262,10 @@ class PolicyProcess(ScriptedMultiStepProcess):
             )
 
         if memory.current_stage == "click_cached_tab":
+            if memory.get_policy_selected_tab() == current_tab:
+                memory.set_policy_event(f"click skipped active tab={current_tab}")
+                memory.begin_stage("plan_current_tab")
+                return StageTransition(stage="plan_current_tab", reason=f"현재 탭 '{current_tab}'이 이미 활성 상태")
             memory.set_policy_event(f"click tab={current_tab}")
             return self._build_current_tab_click(memory)
 
@@ -2195,8 +2282,8 @@ class PolicyProcess(ScriptedMultiStepProcess):
             )
             if not planned:
                 memory.set_fallback_return_stage(
-                    "click_cached_tab",
-                    self.get_recovery_key(memory, stage_name="click_cached_tab"),
+                    "plan_current_tab",
+                    self.get_recovery_key(memory, stage_name="plan_current_tab"),
                 )
                 memory.begin_stage("generic_fallback")
                 memory.set_policy_mode("generic_recovery")
@@ -2210,8 +2297,8 @@ class PolicyProcess(ScriptedMultiStepProcess):
                     hitl_directive=hitl_directive,
                     img_config=img_config,
                     extra_note=(
-                        "현재 탭 계획에 실패했다. policy 화면을 복구한 뒤 반드시 현재 queued tab을 다시 클릭해 "
-                        "semantic verification부터 재개할 수 있도록 가장 안전한 단일 action을 수행해."
+                        "현재 탭 계획에 실패했다. policy 화면을 복구한 뒤 현재 활성 탭을 유지한 채 "
+                        "현재 탭 계획을 다시 이어갈 수 있도록 가장 안전한 단일 action을 수행해."
                     ),
                 )
             if isinstance(planned, StageTransition):
@@ -2224,21 +2311,16 @@ class PolicyProcess(ScriptedMultiStepProcess):
             return planned
 
         if memory.current_stage == "finalize_policy" or memory.is_policy_complete():
-            memory.begin_stage("finalize_policy")
             memory.set_policy_event("queue complete -> finalize")
-            return self._force_task_status(
-                self._plan_generic_policy_action(
-                    provider,
-                    pil_image,
-                    memory,
-                    normalizing_range=normalizing_range,
-                    high_level_strategy=high_level_strategy,
-                    recent_actions=recent_actions,
-                    hitl_directive=hitl_directive,
-                    img_config=img_config,
-                    extra_note="'모든 정책 배정' 버튼만 클릭하고 아직 종료하지 마. 다음 확인 팝업 단계로 넘겨라.",
-                ),
-                "in_progress",
+            return self._plan_policy_finalize_action(
+                provider,
+                pil_image,
+                memory,
+                normalizing_range=normalizing_range,
+                high_level_strategy=high_level_strategy,
+                recent_actions=recent_actions,
+                hitl_directive=hitl_directive,
+                img_config=img_config,
             )
 
         return None
@@ -2338,6 +2420,11 @@ class PolicyProcess(ScriptedMultiStepProcess):
             logger.info("Policy finalize click success -> confirm popup")
             memory.begin_stage("confirm_policy_popup")
             memory.capture_checkpoint()
+            return
+
+        if memory.current_stage == "finalize_policy" and action.action == "press" and action.key == "escape":
+            memory.set_policy_event("finalize escape success")
+            logger.info("Policy finalize escape success")
             return
 
     def on_actions_success(self, memory: ShortTermMemory, actions: list[AgentAction]) -> None:
@@ -2801,6 +2888,29 @@ class CityProductionProcess(ObservationAssistedProcess):
         if state not in self._FOLLOWUP_STATES:
             state = "unknown"
         return state, str(data.get("reason", "")).strip()
+
+    def _apply_post_select_followup_state(
+        self,
+        memory: ShortTermMemory,
+        followup_state: str,
+        *,
+        debug_prefix: str,
+    ) -> bool:
+        """Advance city-production state from a classified post-select follow-up."""
+        if followup_state == "placement":
+            memory.set_branch(self._PLACEMENT_BRANCH)
+            memory.begin_stage(self._PLACEMENT_STAGE)
+            memory.set_last_planned_action_debug(f"{debug_prefix} -> production_place")
+            return True
+        if followup_state == "confirm":
+            memory.begin_stage(self._PLACEMENT_CONFIRM_STAGE)
+            memory.set_last_planned_action_debug(f"{debug_prefix} -> production_place_confirm")
+            return True
+        if followup_state == "done":
+            memory.begin_stage(self._COMPLETE_STAGE)
+            memory.set_last_planned_action_debug(f"{debug_prefix} -> production_complete")
+            return True
+        return False
 
     def _detect_placement_followup(
         self,
@@ -3515,27 +3625,14 @@ class CityProductionProcess(ObservationAssistedProcess):
                 pil_image,
                 img_config=img_config,
             )
-            if followup_state == "placement":
-                memory.set_branch(self._PLACEMENT_BRANCH)
-                memory.begin_stage(self._PLACEMENT_STAGE)
-                memory.set_last_planned_action_debug("post-select follow-up -> production_place")
+            if self._apply_post_select_followup_state(
+                memory,
+                followup_state,
+                debug_prefix="post-select follow-up",
+            ):
                 return StageTransition(
-                    stage=self._PLACEMENT_STAGE,
-                    reason=reason or "post-select follow-up: placement",
-                )
-            if followup_state == "confirm":
-                memory.begin_stage(self._PLACEMENT_CONFIRM_STAGE)
-                memory.set_last_planned_action_debug("post-select follow-up -> production_place_confirm")
-                return StageTransition(
-                    stage=self._PLACEMENT_CONFIRM_STAGE,
-                    reason=reason or "post-select follow-up: confirm",
-                )
-            if followup_state == "done":
-                memory.begin_stage(self._COMPLETE_STAGE)
-                memory.set_last_planned_action_debug("post-select follow-up -> production_complete")
-                return StageTransition(
-                    stage=self._COMPLETE_STAGE,
-                    reason=reason or "post-select follow-up: done",
+                    stage=memory.current_stage,
+                    reason=reason or f"post-select follow-up: {followup_state}",
                 )
             self._queue_generic_fallback(memory, reason="post-select follow-up unknown -> generic_fallback")
             return StageTransition(stage="generic_fallback", reason=reason or "post-select follow-up: unknown")
@@ -3622,6 +3719,23 @@ class CityProductionProcess(ObservationAssistedProcess):
                 memory,
                 img_config=img_config,
             )
+        if action.action in {"click", "double_click"} and memory.current_stage == "select_from_memory":
+            followup_state, reason = self._detect_post_select_followup(
+                provider,
+                pil_image,
+                img_config=img_config,
+            )
+            if self._apply_post_select_followup_state(
+                memory,
+                followup_state,
+                debug_prefix="post-select semantic verify",
+            ):
+                return SemanticVerifyResult(
+                    handled=True,
+                    passed=True,
+                    reason=reason or f"post-select semantic verify: {followup_state}",
+                    details={"post_select_state": followup_state, "fast_path": True},
+                )
         return super().verify_action_success(provider, pil_image, memory, action, img_config=img_config)
 
     def verify_completion(
@@ -6145,6 +6259,671 @@ class CultureDecisionProcess(ScriptedMultiStepProcess):
         return "culture decision reached explicit terminal state"
 
 
+class ReligionProcess(ObservationAssistedProcess):
+    """Religion flow with an explicit lower-right angel-icon entry stage."""
+
+    _ANCHOR_SCROLL_DELTA = 120
+    _ENTRY_SUBSTEP = "religion_entry_done"
+    _ENTRY_STAGE = "religion_entry"
+    _ENTRY_X_RATIO = 0.93
+    _ENTRY_Y_RATIO = 0.885
+    _HOVER_SCROLL_STAGE = "hover_scroll_anchor"
+    _SCROLL_DOWN_STAGE = "scroll_down_for_hidden_choices"
+    _RESTORE_HOVER_STAGE = "restore_hover_scroll_anchor"
+    _RESTORE_SCROLL_STAGE = "restore_best_choice_visibility"
+
+    def __init__(self, primitive_name: str, completion_condition: str = ""):
+        super().__init__(
+            primitive_name,
+            completion_condition,
+            target_description="왼쪽 종교관 팝업의 종교관 박스와 '종교관 세우기' 직전 리스트",
+        )
+        self.observer = ReligionObserver("왼쪽 종교관 팝업의 종교관 박스와 '종교관 세우기' 직전 리스트")
+
+    def initialize(self, memory: ShortTermMemory) -> None:
+        if not memory.current_stage:
+            memory.begin_stage(self._ENTRY_STAGE)
+
+    def should_observe(self, memory: ShortTermMemory) -> bool:
+        if self._ENTRY_SUBSTEP not in memory.completed_substeps:
+            return False
+        if memory.current_stage in {
+            "generic_fallback",
+            self._HOVER_SCROLL_STAGE,
+            self._SCROLL_DOWN_STAGE,
+            self._RESTORE_HOVER_STAGE,
+            self._RESTORE_SCROLL_STAGE,
+        }:
+            return False
+        if memory.current_stage == "observe_choices":
+            return True
+        return super().should_observe(memory)
+
+    @staticmethod
+    def _ratio_to_norm(value: float, normalizing_range: int) -> int:
+        return round(value * normalizing_range)
+
+    @staticmethod
+    def _anchor_components(
+        scroll_anchor: dict | ScrollAnchor | None,
+        *,
+        normalizing_range: int,
+    ) -> tuple[int, int, int, int, int, int] | None:
+        if isinstance(scroll_anchor, dict):
+            getter = scroll_anchor.get
+        elif isinstance(scroll_anchor, ScrollAnchor):
+
+            def getter(key: str, default: int = 0) -> int:
+                return getattr(scroll_anchor, key, default)
+
+        else:
+            return None
+        try:
+            x = int(getter("x", 0))
+            y = int(getter("y", 0))
+            left = int(getter("left", 0))
+            top = int(getter("top", 0))
+            right = int(getter("right", normalizing_range))
+            bottom = int(getter("bottom", normalizing_range))
+        except (TypeError, ValueError):
+            return None
+        if 0 <= left <= x <= right <= normalizing_range and 0 <= top <= y <= bottom <= normalizing_range:
+            return x, y, left, top, right, bottom
+        return None
+
+    @classmethod
+    def _is_plausible_list_anchor(
+        cls,
+        scroll_anchor: dict | ScrollAnchor | None,
+        *,
+        normalizing_range: int,
+    ) -> bool:
+        components = cls._anchor_components(scroll_anchor, normalizing_range=normalizing_range)
+        if components is None:
+            return False
+        x, _, left, top, right, bottom = components
+        width = right - left
+        height = bottom - top
+        return (
+            x <= round(normalizing_range * 0.40)
+            and left <= round(normalizing_range * 0.25)
+            and right <= round(normalizing_range * 0.45)
+            and width >= round(normalizing_range * 0.12)
+            and height >= round(normalizing_range * 0.45)
+            and height >= width
+        )
+
+    @classmethod
+    def _project_anchor_to_hover_lane(
+        cls,
+        scroll_anchor: dict | ScrollAnchor,
+        *,
+        normalizing_range: int,
+    ) -> ScrollAnchor:
+        components = cls._anchor_components(scroll_anchor, normalizing_range=normalizing_range)
+        if components is None:
+            raise ValueError("scroll_anchor must be validated before projection")
+        _, y, left, top, right, bottom = components
+        width = right - left
+        inset = max(round(normalizing_range * _RELIGION_LIST_HOVER_LEFT_INSET_RATIO), 12)
+        preferred_x = min(
+            round(normalizing_range * _RELIGION_LIST_HOVER_X_RATIO),
+            left + round(width * _RELIGION_LIST_HOVER_WIDTH_BIAS),
+        )
+        x = max(left + inset, min(right - inset, preferred_x))
+        y = max(top + inset, min(bottom - inset, y))
+        return ScrollAnchor(x=x, y=y, left=left, top=top, right=right, bottom=bottom)
+
+    def _default_list_scroll_anchor(self, normalizing_range: int) -> dict[str, int]:
+        left = self._ratio_to_norm(_RELIGION_LIST_DEFAULT_RATIOS[0], normalizing_range)
+        top = self._ratio_to_norm(_RELIGION_LIST_DEFAULT_RATIOS[1], normalizing_range)
+        right = self._ratio_to_norm(_RELIGION_LIST_DEFAULT_RATIOS[2], normalizing_range)
+        bottom = self._ratio_to_norm(_RELIGION_LIST_DEFAULT_RATIOS[3], normalizing_range)
+        hover_anchor = self._project_anchor_to_hover_lane(
+            {
+                "x": (left + right) // 2,
+                "y": (top + bottom) // 2,
+                "left": left,
+                "top": top,
+                "right": right,
+                "bottom": bottom,
+            },
+            normalizing_range=normalizing_range,
+        )
+        return {
+            "x": hover_anchor.x,
+            "y": hover_anchor.y,
+            "left": left,
+            "top": top,
+            "right": right,
+            "bottom": bottom,
+        }
+
+    def _build_entry_click_action(self, normalizing_range: int) -> AgentAction:
+        return AgentAction(
+            action="click",
+            x=self._ratio_to_norm(self._ENTRY_X_RATIO, normalizing_range),
+            y=self._ratio_to_norm(self._ENTRY_Y_RATIO, normalizing_range),
+            reasoning="우하단 천사 문양 원형 버튼을 클릭해 종교관 선택 화면으로 진입",
+            task_status="in_progress",
+        )
+
+    @staticmethod
+    def _build_entry_press_action() -> AgentAction:
+        return AgentAction(
+            action="press",
+            key="enter",
+            reasoning="우하단 '종교관 선택' 버튼이 보이므로 enter로 종교관 선택 화면에 진입",
+            task_status="in_progress",
+        )
+
+    def _get_runtime_scroll_anchor(self, memory: ShortTermMemory) -> ScrollAnchor:
+        anchor = memory.get_scroll_anchor()
+        if self._is_plausible_list_anchor(anchor, normalizing_range=memory.normalizing_range):
+            projected_anchor = self._project_anchor_to_hover_lane(anchor, normalizing_range=memory.normalizing_range)
+            memory.choice_catalog.scroll_anchor = projected_anchor
+            return projected_anchor
+        default_anchor = ScrollAnchor(**self._default_list_scroll_anchor(memory.normalizing_range))
+        memory.choice_catalog.scroll_anchor = default_anchor
+        return default_anchor
+
+    def _build_anchor_move_action(self, memory: ShortTermMemory, *, stage_name: str, reason: str) -> AgentAction:
+        anchor = self._get_runtime_scroll_anchor(memory)
+        memory.begin_stage(stage_name)
+        action = AgentAction(
+            action="move",
+            x=anchor.x,
+            y=anchor.y,
+            reasoning=reason,
+            task_status="in_progress",
+        )
+        memory.set_last_planned_action_debug(f"move | @ ({action.x}, {action.y}) | {reason}")
+        return action
+
+    def _build_anchor_scroll_action(self, memory: ShortTermMemory, *, direction: str, reason: str) -> AgentAction:
+        anchor = self._get_runtime_scroll_anchor(memory)
+        memory.choice_catalog.last_scroll_direction = direction
+        action = AgentAction(
+            action="scroll",
+            x=anchor.x,
+            y=anchor.y,
+            scroll_amount=-self._ANCHOR_SCROLL_DELTA if direction == "down" else self._ANCHOR_SCROLL_DELTA,
+            reasoning=reason,
+            task_status="in_progress",
+        )
+        memory.set_last_planned_action_debug(
+            f"scroll | @ ({action.x}, {action.y}) | amount={action.scroll_amount} | {reason}"
+        )
+        return action
+
+    def _build_restore_scroll_action(self, memory: ShortTermMemory) -> AgentAction | None:
+        best_choice = memory.get_best_choice()
+        if best_choice is None:
+            return None
+        if best_choice.position_hint == "above":
+            memory.begin_stage(self._RESTORE_SCROLL_STAGE)
+            return self._build_anchor_scroll_action(
+                memory,
+                direction="up",
+                reason=f"선택한 종교관 '{best_choice.label}' 이 다시 보이도록 위로 재복원 스크롤",
+            )
+        if best_choice.position_hint == "below":
+            memory.begin_stage(self._RESTORE_SCROLL_STAGE)
+            return self._build_anchor_scroll_action(
+                memory,
+                direction="down",
+                reason=f"선택한 종교관 '{best_choice.label}' 이 다시 보이도록 아래로 재복원 스크롤",
+            )
+        return None
+
+    @staticmethod
+    def _is_selectable_visible_option(raw: dict) -> bool:
+        selected = bool(raw.get("selected", False))
+        return not bool(raw.get("disabled", False)) and not selected and not bool(raw.get("built", selected))
+
+    @classmethod
+    def _observation_option_signature(cls, visible_options: list[dict]) -> tuple[str, ...]:
+        signature: list[str] = []
+        for raw in visible_options:
+            if not cls._is_selectable_visible_option(raw):
+                continue
+            label = str(raw.get("label", "")).strip()
+            if not label:
+                continue
+            signature.append(str(raw.get("id", "")).strip() or label)
+        return tuple(signature)
+
+    def _summarize_visible_options(self, observation: ObservationBundle) -> str:
+        labels = [
+            str(item.get("label", "")).strip()
+            for item in observation.visible_options
+            if (str(item.get("label", "")).strip() and self._is_selectable_visible_option(item))
+        ]
+        total_selectable = len(labels)
+        ignored_count = max(0, len(observation.visible_options) - len(labels))
+        labels = labels[:5]
+        prefix = ", ".join(labels) if labels else "보이는 활성 종교관 없음"
+        if total_selectable > len(labels):
+            prefix = f"{prefix} 외 {total_selectable - len(labels)}개"
+        if ignored_count:
+            prefix = f"{prefix} / 제외 {ignored_count}개"
+        return f"{total_selectable} selectable visible / end={observation.end_of_list} / {prefix}"
+
+    def _verify_scroll_progress(
+        self,
+        provider: BaseVLMProvider,
+        pil_image,
+        memory: ShortTermMemory,
+        *,
+        img_config=None,
+    ) -> SemanticVerifyResult:
+        prompt = self.observer.build_prompt(
+            self.primitive_name,
+            memory,
+            normalizing_range=memory.normalizing_range,
+        )
+        effective_img_config = (
+            PRESETS.get("observation_fast") if img_config is None else PRESETS.get("observation_fast", img_config)
+        )
+        observation = self.observer.observe(provider, pil_image, prompt, img_config=effective_img_config)
+        if observation is None:
+            return SemanticVerifyResult(handled=False)
+
+        previous_signature = tuple(memory.choice_catalog.last_visible_option_ids)
+        current_signature = self._observation_option_signature(observation.visible_options)
+        if observation.end_of_list or current_signature != previous_signature:
+            return SemanticVerifyResult(handled=True, passed=True, reason="religion scroll changed visible options")
+
+        return SemanticVerifyResult(
+            handled=True,
+            passed=False,
+            reason="스크롤 후에도 같은 선택지가 보여 실제 목록 이동을 확인하지 못함",
+        )
+
+    def consume_observation(self, memory: ShortTermMemory, observation: ObservationBundle) -> AgentAction | None:
+        effective_observation = observation
+        if observation.end_of_list and 0 < memory.choice_catalog.downward_scan_scrolls < 2:
+            logger.info(
+                "Ignoring early religion end_of_list after %s downward scroll(s)",
+                memory.choice_catalog.downward_scan_scrolls,
+            )
+            effective_observation = copy.copy(observation)
+            effective_observation.end_of_list = False
+
+        if not self._is_plausible_list_anchor(observation.scroll_anchor, normalizing_range=memory.normalizing_range):
+            effective_observation = copy.copy(effective_observation)
+            effective_observation.scroll_anchor = None
+
+        saved_anchor = memory.get_scroll_anchor()
+        if not self._is_plausible_list_anchor(saved_anchor, normalizing_range=memory.normalizing_range):
+            saved_anchor = None
+
+        debug_anchor = effective_observation.scroll_anchor or saved_anchor
+        if debug_anchor is None:
+            debug_anchor = self._default_list_scroll_anchor(memory.normalizing_range)
+        memory.set_last_observation_debug(
+            self._summarize_visible_options(effective_observation), scroll_anchor=debug_anchor
+        )
+
+        memory.begin_stage("observe_choices")
+        scroll_direction = memory.choice_catalog.last_scroll_direction or "down"
+        memory.remember_choices(
+            observation.visible_options,
+            end_of_list=effective_observation.end_of_list,
+            scroll_anchor=effective_observation.scroll_anchor or debug_anchor,
+            scroll_direction=scroll_direction,
+        )
+
+        best_choice = memory.get_best_choice()
+        if best_choice is not None:
+            if best_choice.visible_now:
+                memory.begin_stage("select_from_memory")
+                memory.set_last_planned_action_debug(
+                    f"best choice '{best_choice.label}' visible after religion scan -> select_from_memory"
+                )
+                return None
+            return self._build_anchor_move_action(
+                memory,
+                stage_name=self._RESTORE_HOVER_STAGE,
+                reason=f"선택한 종교관 '{best_choice.label}' 을 다시 찾기 전에 종교관 목록 hover를 고정",
+            )
+
+        if (
+            memory.choice_catalog.downward_scan_scrolls > 0
+            and memory.choice_catalog.downward_scan_scrolls < 2
+            and memory.choice_catalog.last_new_candidate_count == 0
+            and not effective_observation.end_of_list
+        ):
+            memory.choice_catalog.end_reached = False
+            memory.choice_catalog.scan_end_reason = ""
+            return self._build_anchor_move_action(
+                memory,
+                stage_name=self._HOVER_SCROLL_STAGE,
+                reason="첫 하향 스캔에서 새 종교관을 못 찾았으므로 같은 목록 hover를 고정하고 한 번 더 확인",
+            )
+
+        if (
+            memory.choice_catalog.downward_scan_scrolls >= 2
+            and memory.choice_catalog.last_new_candidate_count == 0
+            and not effective_observation.end_of_list
+        ):
+            memory.choice_catalog.end_reached = True
+            memory.choice_catalog.scan_end_reason = "religion_no_new_after_confirm_scroll"
+
+        if effective_observation.end_of_list or memory.choice_catalog.end_reached:
+            memory.mark_substep("full_scan_complete")
+            memory.begin_stage("choose_from_memory")
+            memory.set_last_planned_action_debug(
+                "religion scan complete "
+                f"({memory.choice_catalog.scan_end_reason or 'observer_end_of_list'})"
+                " -> choose_from_memory"
+            )
+            return None
+
+        return self._build_anchor_move_action(
+            memory,
+            stage_name=self._HOVER_SCROLL_STAGE,
+            reason="종교관 목록 중앙 hover를 먼저 고정한 뒤 아래로 스크롤해 숨은 종교관을 확인",
+        )
+
+    def build_stage_note(self, memory: ShortTermMemory) -> str:
+        if self._ENTRY_SUBSTEP not in memory.completed_substeps:
+            return (
+                "현재 stage: religion_entry\n"
+                "- 왼쪽 종교관 목록 팝업이 실제로 열렸는지 먼저 확인해.\n"
+                "- 우하단 '종교관 선택' 버튼이 보이면 press enter로 진입해.\n"
+                "- 라벨 없이 천사 문양 원형 버튼만 보이면 그 버튼을 클릭해 진입해.\n"
+                "- 아직 종교관 선택이나 스크롤을 하지 마."
+            )
+        if memory.current_stage == self._HOVER_SCROLL_STAGE:
+            return (
+                "현재 stage: hover_scroll_anchor\n"
+                "- 왼쪽 종교관 목록 내부 중앙으로 커서만 이동해 hover를 고정한다.\n"
+                "- 클릭하지 말고, 다음 단계에서만 스크롤한다."
+            )
+        if memory.current_stage == self._SCROLL_DOWN_STAGE:
+            return (
+                "현재 stage: scroll_down_for_hidden_choices\n"
+                "- 이미 hover된 왼쪽 종교관 목록 내부에서 아래로 스크롤해 숨은 종교관을 더 본다."
+            )
+        if memory.current_stage == self._RESTORE_HOVER_STAGE:
+            return (
+                "현재 stage: restore_hover_scroll_anchor\n"
+                "- 선택한 종교관이 현재 안 보인다. 종교관 목록 내부 중앙에 다시 hover를 고정한다."
+            )
+        if memory.current_stage == self._RESTORE_SCROLL_STAGE:
+            best_choice = memory.get_best_choice()
+            best_label = best_choice.label if best_choice is not None else "-"
+            return (
+                "현재 stage: restore_best_choice_visibility\n"
+                f"- 선택한 종교관 '{best_label}' 이 다시 보이도록 종교관 목록을 재복원 스크롤한다."
+            )
+        base_note = super().build_stage_note(memory)
+        return (
+            f"{base_note}\n"
+            "- 종교관 준비 팝업이 보이면 다른 클릭 없이 press escape로 닫아라.\n"
+            "- 초록색 '종교관 세우기' 클릭 자체는 complete가 아니다.\n"
+            "- 준비 팝업을 Esc로 닫는 action에서만 task_status='complete'를 사용해."
+        )
+
+    def _religion_screen_state(self, provider: BaseVLMProvider, pil_image, *, img_config=None) -> dict | None:
+        prompt = (
+            "너는 문명6 종교관 진입/완료 상태 판별기야. 현재 화면의 종교 상태만 판단해.\n"
+            'JSON만 출력: {"religion_screen_ready": true/false,'
+            ' "entry_button_visible": true/false, "prep_popup_visible": true/false,'
+            ' "angel_button_visible": true/false, "complete": true/false, "reasoning": "짧은 이유"}\n'
+            "- 왼쪽 종교관 목록 팝업이 실제로 열려 있으면 religion_screen_ready=true.\n"
+            "- 종교관 후보 목록이나 초록색 '종교관 세우기' 버튼이 보이면 religion_screen_ready=true.\n"
+            "- 우하단에 '종교관 선택' 라벨이 붙은 진입 버튼이 보이면 entry_button_visible=true.\n"
+            "- 우하단 천사 문양 원형 버튼이 보이면 angel_button_visible=true.\n"
+            "- 선택 후 뜨는 '종교관 준비' 팝업이 보이면 prep_popup_visible=true.\n"
+            "- complete=true 는 prep_popup_visible=false 이고 우하단 버튼이 더 이상 천사 문양이 아닐 때만 사용해.\n"
+        )
+        try:
+            return _analyze_structured_json(provider, pil_image, prompt, img_config=img_config, max_tokens=256)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Religion entry/completion check failed: %s", exc)
+            return None
+
+    def plan_action(
+        self,
+        provider: BaseVLMProvider,
+        pil_image,
+        memory: ShortTermMemory,
+        *,
+        normalizing_range: int,
+        high_level_strategy: str,
+        recent_actions: str,
+        hitl_directive: str | None,
+        img_config=None,
+    ) -> AgentAction | list[AgentAction] | StageTransition | None:
+        if self._ENTRY_SUBSTEP not in memory.completed_substeps:
+            state = self._religion_screen_state(provider, pil_image, img_config=img_config)
+            if state and bool(state.get("religion_screen_ready", False)):
+                memory.mark_substep(self._ENTRY_SUBSTEP)
+                memory.begin_stage("observe_choices")
+                return StageTransition(stage="observe_choices", reason="religion screen ready")
+            if state and bool(state.get("entry_button_visible", False)):
+                memory.begin_stage(self._ENTRY_STAGE)
+                return self._build_entry_press_action()
+            if state and bool(state.get("angel_button_visible", False)):
+                memory.begin_stage(self._ENTRY_STAGE)
+                return self._build_entry_click_action(normalizing_range)
+            memory.begin_stage(self._ENTRY_STAGE)
+        elif memory.current_stage == self._ENTRY_STAGE:
+            memory.begin_stage("observe_choices")
+
+        if memory.current_stage == self._HOVER_SCROLL_STAGE:
+            return self._build_anchor_move_action(
+                memory,
+                stage_name=self._HOVER_SCROLL_STAGE,
+                reason="종교관 목록 중앙으로 커서를 먼저 이동해 hover를 고정",
+            )
+
+        if memory.current_stage == self._SCROLL_DOWN_STAGE:
+            memory.begin_stage(self._SCROLL_DOWN_STAGE)
+            return self._build_anchor_scroll_action(
+                memory,
+                direction="down",
+                reason="hover된 종교관 목록 중앙에서 아래로 스크롤해 숨은 종교관을 확인",
+            )
+
+        best_choice = memory.get_best_choice()
+        if best_choice is not None and not best_choice.visible_now:
+            if memory.current_stage == self._RESTORE_HOVER_STAGE:
+                return self._build_anchor_move_action(
+                    memory,
+                    stage_name=self._RESTORE_HOVER_STAGE,
+                    reason=f"선택한 종교관 '{best_choice.label}' 을 다시 찾기 전에 종교관 목록 hover를 고정",
+                )
+            if memory.current_stage == self._RESTORE_SCROLL_STAGE:
+                restore = self._build_restore_scroll_action(memory)
+                if restore is not None:
+                    return restore
+            return self._build_anchor_move_action(
+                memory,
+                stage_name=self._RESTORE_HOVER_STAGE,
+                reason=f"선택한 종교관 '{best_choice.label}' 을 다시 찾기 전에 종교관 목록 hover를 고정",
+            )
+
+        return super().plan_action(
+            provider,
+            pil_image,
+            memory,
+            normalizing_range=normalizing_range,
+            high_level_strategy=high_level_strategy,
+            recent_actions=recent_actions,
+            hitl_directive=hitl_directive,
+            img_config=img_config,
+        )
+
+    def on_action_success(self, memory: ShortTermMemory, action: AgentAction) -> None:
+        if memory.current_stage == self._ENTRY_STAGE:
+            memory.mark_substep(self._ENTRY_SUBSTEP)
+            memory.begin_stage("observe_choices")
+            return
+        if action.action == "move":
+            if memory.current_stage == self._HOVER_SCROLL_STAGE:
+                memory.begin_stage(self._SCROLL_DOWN_STAGE)
+                return
+            if memory.current_stage == self._RESTORE_HOVER_STAGE:
+                memory.begin_stage(self._RESTORE_SCROLL_STAGE)
+                return
+        if action.action == "scroll":
+            if memory.current_stage == self._SCROLL_DOWN_STAGE:
+                memory.register_choice_scroll(direction="down")
+                memory.begin_stage("observe_choices")
+                return
+            if memory.current_stage == self._RESTORE_SCROLL_STAGE:
+                direction = "up" if (action.scroll_amount or 0) > 0 else "down"
+                memory.register_choice_scroll(direction=direction)
+                memory.begin_stage("observe_choices")
+                return
+        super().on_action_success(memory, action)
+
+    def verify_action_success(
+        self,
+        provider: BaseVLMProvider,
+        pil_image,
+        memory: ShortTermMemory,
+        action: AgentAction,
+        *,
+        img_config=None,
+    ) -> SemanticVerifyResult:
+        if memory.current_stage == self._ENTRY_STAGE:
+            state = self._religion_screen_state(provider, pil_image, img_config=img_config)
+            if state and bool(state.get("religion_screen_ready", False)):
+                return SemanticVerifyResult(
+                    handled=True,
+                    passed=True,
+                    reason="religion screen ready after entry action",
+                )
+            if state and (
+                bool(state.get("entry_button_visible", False)) or bool(state.get("angel_button_visible", False))
+            ):
+                return SemanticVerifyResult(
+                    handled=True,
+                    passed=False,
+                    reason="religion entry button still visible after entry action",
+                )
+            return SemanticVerifyResult(
+                handled=True,
+                passed=False,
+                reason="religion entry action did not open belief screen",
+            )
+        if action.action == "move":
+            return SemanticVerifyResult(handled=True, passed=True, reason="hover move is non-visual by design")
+        if action.action == "scroll" and memory.current_stage in {
+            self._SCROLL_DOWN_STAGE,
+            self._RESTORE_SCROLL_STAGE,
+        }:
+            return self._verify_scroll_progress(
+                provider,
+                pil_image,
+                memory,
+                img_config=img_config,
+            )
+        return super().verify_action_success(provider, pil_image, memory, action, img_config=img_config)
+
+    def resolve_action(self, action: AgentAction, memory: ShortTermMemory) -> AgentAction:
+        if action.action == "scroll":
+            anchor = self._get_runtime_scroll_anchor(memory)
+            if not anchor.contains(action.x, action.y) or (action.x == 0 and action.y == 0):
+                action.x = anchor.x
+                action.y = anchor.y
+            return action
+        return super().resolve_action(action, memory)
+
+    def should_verify_action_without_ui_change(self, memory: ShortTermMemory, action: AgentAction) -> bool:
+        if memory.current_stage == self._ENTRY_STAGE and action.action in {"click", "double_click", "press"}:
+            return True
+        if action.action == "move":
+            return True
+        if action.action == "scroll" and memory.current_stage in {
+            self._SCROLL_DOWN_STAGE,
+            self._RESTORE_SCROLL_STAGE,
+        }:
+            return True
+        return super().should_verify_action_without_ui_change(memory, action)
+
+    def handle_no_progress(
+        self,
+        provider: BaseVLMProvider,
+        pil_image,
+        memory: ShortTermMemory,
+        *,
+        last_action: AgentAction,
+        normalizing_range: int,
+        high_level_strategy: str,
+        recent_actions: str,
+        hitl_directive: str | None,
+        img_config=None,
+    ) -> NoProgressResolution:
+        if memory.current_stage in {
+            self._HOVER_SCROLL_STAGE,
+            self._SCROLL_DOWN_STAGE,
+            self._RESTORE_HOVER_STAGE,
+            self._RESTORE_SCROLL_STAGE,
+        }:
+            stage_key = self.get_recovery_key(memory)
+            failures = memory.increment_stage_failure(stage_key)
+            if failures <= 1:
+                memory.begin_stage("observe_choices")
+                memory.set_last_planned_action_debug("religion scroll no-progress -> reobserve belief list")
+                logger.info("Religion scroll no-progress -> reobserve belief list")
+                return NoProgressResolution(handled=True)
+            return NoProgressResolution(
+                handled=False,
+                reroute=True,
+                error_message="Religion scroll stalled after reobserve retry",
+            )
+        return super().handle_no_progress(
+            provider,
+            pil_image,
+            memory,
+            last_action=last_action,
+            normalizing_range=normalizing_range,
+            high_level_strategy=high_level_strategy,
+            recent_actions=recent_actions,
+            hitl_directive=hitl_directive,
+            img_config=img_config,
+        )
+
+    def verify_completion(
+        self,
+        provider: BaseVLMProvider,
+        pil_image,
+        memory: ShortTermMemory,
+        *,
+        img_config=None,
+    ) -> VerificationResult:
+        state = self._religion_screen_state(provider, pil_image, img_config=img_config)
+        if state is None:
+            return VerificationResult(False, "religion completion parse failed")
+
+        religion_screen_ready = bool(state.get("religion_screen_ready", False))
+        entry_button_visible = bool(state.get("entry_button_visible", False))
+        prep_popup_visible = bool(state.get("prep_popup_visible", False))
+        angel_button_visible = bool(state.get("angel_button_visible", False))
+        ui_signals_indicate_complete = (
+            not religion_screen_ready
+            and not entry_button_visible
+            and not prep_popup_visible
+            and not angel_button_visible
+        )
+        complete = ui_signals_indicate_complete or (
+            bool(state.get("complete", False)) and not prep_popup_visible and not angel_button_visible
+        )
+        reason = str(state.get("reason", state.get("reasoning", ""))).strip()
+        if not reason:
+            reason = (
+                "religion UI closed and lower-right entry button is no longer the angel icon"
+                if complete
+                else "religion completion criteria not satisfied"
+            )
+        return VerificationResult(complete, reason)
+
+
 class ResearchSelectProcess(ScriptedMultiStepProcess):
     """Research selection with an explicit lower-right notification entry stage."""
 
@@ -6292,11 +7071,7 @@ class ResearchSelectProcess(ScriptedMultiStepProcess):
 def get_multi_step_process(primitive_name: str, completion_condition: str = "") -> BaseMultiStepProcess:
     """Factory for class-based multi-step primitive processes."""
     if primitive_name == "religion_primitive":
-        return ObservationAssistedProcess(
-            primitive_name,
-            completion_condition,
-            target_description="왼쪽 종교관 팝업의 종교관 박스와 '종교관 세우기' 직전 리스트",
-        )
+        return ReligionProcess(primitive_name, completion_condition)
     if primitive_name == "city_production_primitive":
         return CityProductionProcess(primitive_name, completion_condition)
     if primitive_name == "voting_primitive":

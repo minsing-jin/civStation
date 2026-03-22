@@ -6,10 +6,10 @@ provider: gemini
 model: gemini-3-flash-preview
 
 # 개별 설정이 필요하면 주석 해제 후 사용
-# router-provider: gemini
-# router-model: gemini-3-flash-preview
-# planner-provider: claude
-# planner-model: claude-4-5-sonnet
+router-provider: gemini
+router-model: gemini-3-flash-preview
+planner-provider: gemini
+planner-model: gemini-3-flash-preview
 
 # --- 2. Execution Parameters ---
 turns: 100

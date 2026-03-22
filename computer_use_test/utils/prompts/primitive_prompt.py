@@ -512,7 +512,8 @@ RELIGION_PROMPT = """너는 문명6 에이전트야. 종교관(Pantheon/Religion
 사용자 지시가 있으면 최우선 이행.
 
 상태 1: 왼쪽 팝업 없음
-  → 오른쪽 아래 종교관 선택 버튼 클릭. task_status="in_progress".
+  → 우하단 '종교관 선택' 버튼이 보이면 press enter. task_status="in_progress".
+  → 라벨 없이 천사 문양 원형 종교관 버튼만 보이면 그 버튼 클릭. task_status="in_progress".
 
 상태 2: 왼쪽 팝업 있음 (종교관 목록)
   Step A (탐색): 현재 보이는 종교관을 읽고 기억해 (이름, 효과).
@@ -523,8 +524,10 @@ RELIGION_PROMPT = """너는 문명6 에이전트야. 종교관(Pantheon/Religion
   Step B (결정): 모든 종교관 확인 후 전략+문명 특성에 맞는 종교관 결정.
     - 결정한 종교관이 현재 안 보이면 팝업 중앙 hover 상태로 스크롤 업.
       task_status="in_progress".
-  Step C (선택): 종교관 박스 클릭 → "종교관 세우기" 버튼 클릭.
-    task_status="complete".
+  Step C (선택): 종교관 박스 클릭 → 초록색 "종교관 세우기" 버튼 클릭.
+    - 여기서는 task_status="in_progress" 유지.
+  Step D (종료): 선택 직후 "종교관 준비" 팝업이 뜨면 press "Esc".
+    - 이 Esc action에서만 task_status="complete".
 
 상위 전략에 따라 최적의 종교관을 선택해."""
 
