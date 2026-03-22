@@ -26,6 +26,8 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from computer_use_test.agent.modules.context import ContextManager
@@ -38,6 +40,8 @@ from computer_use_test.agent.modules.hitl.turn_checkpoint import (
 )
 from computer_use_test.agent.modules.memory.short_term_memory import ShortTermMemory
 from computer_use_test.agent.modules.primitive.multi_step_process import (
+    _POLICY_RIGHT_CARD_LIST_RATIOS,
+    _POLICY_RIGHT_TAB_BAR_RATIOS,
     StageTransition,
     get_multi_step_process,
 )
@@ -54,6 +58,7 @@ from computer_use_test.utils.image_pipeline import ImagePipelineConfig, process_
 from computer_use_test.utils.llm_provider.base import BaseVLMProvider
 from computer_use_test.utils.llm_provider.parser import AgentAction, strip_markdown
 from computer_use_test.utils.rich_logger import RichLogger
+from computer_use_test.utils.run_log_cache import get_run_log_cache_path
 from computer_use_test.utils.screen import capture_screen_pil, execute_action, move_cursor_to_center
 from computer_use_test.utils.ui_change_detector import screenshots_similar
 
@@ -75,6 +80,7 @@ _SCROLL_LIST_POST_ACTION_WAIT_SECONDS = 0.55
 
 # Module-level TurnValidator singleton (created on first use)
 _turn_validator: TurnValidator | None = None
+_policy_artifact_session_dir: Path | None = None
 
 
 def _get_turn_validator() -> TurnValidator:
@@ -95,15 +101,73 @@ def _save_policy_semantic_failure_artifacts(
     pil_image,
 ) -> None:
     """Best-effort hook for capturing policy semantic-failure context."""
-    logger.warning(
-        "Policy semantic failure artifact | primitive=%s stage=%s reason=%s details=%s memory=%s image_size=%s",
-        primitive_name,
-        stage,
-        semantic_reason,
-        semantic_details or {},
-        memory.to_prompt_string()[:400],
-        getattr(pil_image, "size", None),
-    )
+
+    def _crop_ratio_region(image, ratios: tuple[float, float, float, float]):
+        width, height = image.size
+        left = max(0, min(width, round(width * ratios[0])))
+        top = max(0, min(height, round(height * ratios[1])))
+        right = max(left + 1, min(width, round(width * ratios[2])))
+        bottom = max(top + 1, min(height, round(height * ratios[3])))
+        return image.crop((left, top, right, bottom))
+
+    def _get_policy_artifact_session_dir() -> Path:
+        global _policy_artifact_session_dir  # noqa: PLW0603
+        if _policy_artifact_session_dir is None:
+            run_log_path = get_run_log_cache_path()
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            _policy_artifact_session_dir = run_log_path.parent / "policy_artifacts" / stamp
+        _policy_artifact_session_dir.mkdir(parents=True, exist_ok=True)
+        return _policy_artifact_session_dir
+
+    try:
+        artifact_dir = _get_policy_artifact_session_dir()
+        full_path = artifact_dir / "full.png"
+        tab_bar_path = artifact_dir / "tab_bar.png"
+        card_list_path = artifact_dir / "card_list.png"
+        manifest_path = artifact_dir / "manifest.json"
+
+        pil_image.save(full_path)
+        _crop_ratio_region(pil_image, _POLICY_RIGHT_TAB_BAR_RATIOS).save(tab_bar_path)
+        _crop_ratio_region(pil_image, _POLICY_RIGHT_CARD_LIST_RATIOS).save(card_list_path)
+
+        details = dict(semantic_details or {})
+        manifest = {
+            "primitive": primitive_name,
+            "stage": stage,
+            "semantic_reason": semantic_reason,
+            "expected_tab": details.get("expected_tab", ""),
+            "observed_active_tab": details.get("observed_active_tab", details.get("tab_bar_observed", "")),
+            "policy_tab_outcome": details.get("policy_tab_outcome", ""),
+            "tab_content_state": details.get("tab_content_state", ""),
+            "selected_tab_name": memory.get_policy_selected_tab(),
+            "current_tab": memory.get_policy_current_tab_name(),
+            "current_tab_index": memory.policy_state.current_tab_index,
+            "overview_mode": memory.policy_state.overview_mode,
+            "last_event": memory.policy_state.last_event,
+            "last_tab_check_result": memory.policy_state.last_tab_check_result,
+            "image_size": getattr(pil_image, "size", None),
+        }
+        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        logger.warning(
+            "Policy semantic failure artifact | primitive=%s stage=%s "
+            "reason=%s path=%s details=%s memory=%s image_size=%s",
+            primitive_name,
+            stage,
+            semantic_reason,
+            artifact_dir,
+            details,
+            memory.to_prompt_string()[:400],
+            getattr(pil_image, "size", None),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Policy semantic failure artifact save failed | primitive=%s stage=%s reason=%s error=%s",
+            primitive_name,
+            stage,
+            semantic_reason,
+            exc,
+        )
 
 
 def _primitive_trace_tag(primitive_name: str) -> str:
@@ -157,6 +221,10 @@ def _post_action_wait_seconds(
     if primitive_name == "policy_primitive":
         return 0.5
     default_wait = min(delay_before_action, 0.3)
+    if primitive_name == "religion_primitive" and any(
+        action.action in {"click", "double_click", "press"} for action in actions
+    ):
+        return max(default_wait, 0.5)
     if primitive_name in {"city_production_primitive", "governor_primitive"} and any(
         action.action == "scroll" for action in actions
     ):
@@ -476,6 +544,9 @@ def run_primitive_loop(
     last_policy_event_emitted = ""
     active_strategy_string = strategy_string or ""
     active_hitl_directive = (hitl_directive or "").strip()
+    step_start = time.monotonic()
+    plan_end = step_start
+    exec_end = step_start
 
     def _strip_user_priority_prefix(text: str) -> str:
         prefix = "[사용자 최우선 지시] "
@@ -691,11 +762,17 @@ def run_primitive_loop(
                 stm_summary=stm_str,
             )
 
+    def _clear_current_action_debug() -> None:
+        rl.clear_current_action()
+        if state_bridge:
+            state_bridge.clear_current_action()
+
     def _complete_from_terminal_state() -> bool:
         if not process.is_terminal_state(memory):
             return False
         result.completed = True
         result.success = True
+        _refresh_multi_step_debug()
         reason = process.terminal_state_reason(memory)
         _emit_runtime_trace(
             rl=rl,
@@ -1462,6 +1539,8 @@ def run_primitive_loop(
         _publish_error_state(result.error_message)
 
     _sync_policy_cache_to_context()
+    if result.success or result.completed:
+        _clear_current_action_debug()
     rl.update_multi_step(active=False)
     if state_bridge:
         state_bridge.update_multi_step(active=False)

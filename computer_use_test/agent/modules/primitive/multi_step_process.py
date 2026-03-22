@@ -6271,6 +6271,10 @@ class ReligionProcess(ObservationAssistedProcess):
     _SCROLL_DOWN_STAGE = "scroll_down_for_hidden_choices"
     _RESTORE_HOVER_STAGE = "restore_hover_scroll_anchor"
     _RESTORE_SCROLL_STAGE = "restore_best_choice_visibility"
+    _CONFIRM_STAGE = "religion_confirm"
+    _EXIT_STAGE = "religion_exit"
+    _COMPLETE_STAGE = "religion_complete"
+    _FOLLOWUP_STATES = {"select", "confirm", "exit", "complete", "unknown"}
 
     def __init__(self, primitive_name: str, completion_condition: str = ""):
         super().__init__(
@@ -6293,6 +6297,9 @@ class ReligionProcess(ObservationAssistedProcess):
             self._SCROLL_DOWN_STAGE,
             self._RESTORE_HOVER_STAGE,
             self._RESTORE_SCROLL_STAGE,
+            self._CONFIRM_STAGE,
+            self._EXIT_STAGE,
+            self._COMPLETE_STAGE,
         }:
             return False
         if memory.current_stage == "observe_choices":
@@ -6417,6 +6424,15 @@ class ReligionProcess(ObservationAssistedProcess):
             task_status="in_progress",
         )
 
+    @staticmethod
+    def _build_exit_press_action() -> AgentAction:
+        return AgentAction(
+            action="press",
+            key="escape",
+            reasoning="종교창시중/종교관 준비 팝업을 Esc로 닫고 메인 화면으로 복귀",
+            task_status="complete",
+        )
+
     def _get_runtime_scroll_anchor(self, memory: ShortTermMemory) -> ScrollAnchor:
         anchor = memory.get_scroll_anchor()
         if self._is_plausible_list_anchor(anchor, normalizing_range=memory.normalizing_range):
@@ -6453,6 +6469,22 @@ class ReligionProcess(ObservationAssistedProcess):
         )
         memory.set_last_planned_action_debug(
             f"scroll | @ ({action.x}, {action.y}) | amount={action.scroll_amount} | {reason}"
+        )
+        return action
+
+    def _build_reveal_confirm_scroll_action(self, memory: ShortTermMemory) -> AgentAction:
+        anchor = self._get_runtime_scroll_anchor(memory)
+        action = AgentAction(
+            action="scroll",
+            x=anchor.x,
+            y=anchor.y,
+            scroll_amount=-self._ANCHOR_SCROLL_DELTA,
+            reasoning=("선택된 종교관 아래의 초록색 '종교관 세우기' 버튼이 보이도록 왼쪽 목록을 조금 더 아래로 스크롤"),
+            task_status="in_progress",
+        )
+        memory.set_last_planned_action_debug(
+            f"scroll | @ ({action.x}, {action.y}) | amount={action.scroll_amount} | "
+            "선택된 종교관 아래 confirm 버튼 노출"
         )
         return action
 
@@ -6658,10 +6690,23 @@ class ReligionProcess(ObservationAssistedProcess):
                 "현재 stage: restore_best_choice_visibility\n"
                 f"- 선택한 종교관 '{best_label}' 이 다시 보이도록 종교관 목록을 재복원 스크롤한다."
             )
+        if memory.current_stage == self._CONFIRM_STAGE:
+            return (
+                "현재 stage: religion_confirm\n"
+                "- 선택된 종교관이 확정 직전 상태다.\n"
+                "- 중앙 하단의 초록색 '종교관 세우기' 버튼만 눌러라.\n"
+                "- 다른 종교관 클릭, 목록 스크롤, Esc는 금지다."
+            )
+        if memory.current_stage == self._EXIT_STAGE:
+            return (
+                "현재 stage: religion_exit\n"
+                "- '종교창시중' 또는 '종교관 준비' 팝업/요약창을 닫는 단계다.\n"
+                "- 다른 클릭 없이 press escape만 수행하고 complete로 끝내라."
+            )
         base_note = super().build_stage_note(memory)
         return (
             f"{base_note}\n"
-            "- 종교관 준비 팝업이 보이면 다른 클릭 없이 press escape로 닫아라.\n"
+            "- '종교창시중' 또는 '종교관 준비' 팝업이 보이면 다른 클릭 없이 press escape로 닫아라.\n"
             "- 초록색 '종교관 세우기' 클릭 자체는 complete가 아니다.\n"
             "- 준비 팝업을 Esc로 닫는 action에서만 task_status='complete'를 사용해."
         )
@@ -6684,6 +6729,61 @@ class ReligionProcess(ObservationAssistedProcess):
         except Exception as exc:  # noqa: BLE001
             logger.warning("Religion entry/completion check failed: %s", exc)
             return None
+
+    def _religion_followup_state(self, provider: BaseVLMProvider, pil_image, *, img_config=None) -> dict | None:
+        prompt = (
+            "너는 문명6 종교관 선택 후속상태 분류기야. 현재 화면의 종교 후속상태만 판단해.\n"
+            'JSON만 출력: {"followup_state":"select|confirm|exit|complete|unknown",'
+            ' "belief_selected": true/false, "confirm_button_visible": true/false,'
+            ' "confirm_button_enabled": true/false, "prep_popup_visible": true/false,'
+            ' "angel_button_visible": true/false, "reason": "짧은 이유"}\n'
+            "- 왼쪽 종교관 목록 화면이 계속 열려 있고 아직 선택/확정 단계가 끝나지 않았으면 "
+            'followup_state="select".\n'
+            "- 종교관 하나가 이미 선택되어 있고 중앙 하단의 초록색 '종교관 세우기' 버튼이 "
+            '보이며 클릭 가능하면 followup_state="confirm".\n'
+            "- 선택 직후 뜨는 '종교창시중', '종교관 준비' 팝업 또는 종교 요약창처럼 "
+            'Esc로 닫아야 하는 화면이면 followup_state="exit" 이고 prep_popup_visible=true.\n'
+            "- 종교 관련 팝업이 사라졌고 우하단 버튼이 더 이상 천사 문양이 아니면 "
+            'followup_state="complete".\n'
+            "- belief_selected=true 는 종교관 카드 하나가 이미 강조/체크되어 선택된 상태를 뜻한다.\n"
+            "- confirm_button_visible=true 는 초록색 '종교관 세우기' 버튼이 실제로 보이는 경우다.\n"
+            "- confirm_button_enabled=true 는 그 버튼이 밝고 눌러 확정 가능한 상태다. "
+            "안 보이거나 흐리면 false.\n"
+            "- 우하단 천사 문양 원형 버튼이 보이면 angel_button_visible=true.\n"
+            '- 확실하지 않으면 followup_state="unknown".\n'
+        )
+        try:
+            return _analyze_structured_json(provider, pil_image, prompt, img_config=img_config, max_tokens=256)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Religion follow-up detection failed: %s", exc)
+            return None
+
+    def _normalize_religion_followup_state(self, state: dict | None) -> str:
+        if state is None:
+            return "unknown"
+        followup_state = str(state.get("followup_state", "")).strip().lower()
+        return followup_state if followup_state in self._FOLLOWUP_STATES else "unknown"
+
+    def _apply_religion_followup_state(
+        self,
+        memory: ShortTermMemory,
+        followup_state: str,
+        *,
+        debug_prefix: str,
+    ) -> bool:
+        if followup_state == "confirm":
+            memory.begin_stage(self._CONFIRM_STAGE)
+            memory.set_last_planned_action_debug(f"{debug_prefix} -> {self._CONFIRM_STAGE}")
+            return True
+        if followup_state == "exit":
+            memory.begin_stage(self._EXIT_STAGE)
+            memory.set_last_planned_action_debug(f"{debug_prefix} -> {self._EXIT_STAGE}")
+            return True
+        if followup_state == "complete":
+            memory.begin_stage(self._COMPLETE_STAGE)
+            memory.set_last_planned_action_debug(f"{debug_prefix} -> {self._COMPLETE_STAGE}")
+            return True
+        return False
 
     def plan_action(
         self,
@@ -6745,6 +6845,40 @@ class ReligionProcess(ObservationAssistedProcess):
                 stage_name=self._RESTORE_HOVER_STAGE,
                 reason=f"선택한 종교관 '{best_choice.label}' 을 다시 찾기 전에 종교관 목록 hover를 고정",
             )
+        if (
+            best_choice is not None
+            and best_choice.visible_now
+            and memory.current_stage
+            in {
+                "choose_from_memory",
+                "decide_best_choice",
+            }
+        ):
+            memory.begin_stage("select_from_memory")
+
+        if memory.current_stage in {"select_from_memory", self._CONFIRM_STAGE, self._EXIT_STAGE}:
+            state = self._religion_followup_state(provider, pil_image, img_config=img_config)
+            followup_state = self._normalize_religion_followup_state(state)
+            if self._apply_religion_followup_state(
+                memory,
+                followup_state,
+                debug_prefix="religion follow-up",
+            ):
+                if memory.current_stage == self._EXIT_STAGE:
+                    return self._build_exit_press_action()
+                if memory.current_stage == self._COMPLETE_STAGE:
+                    return StageTransition(stage=self._COMPLETE_STAGE, reason=str(state.get("reason", "")).strip())
+            elif memory.current_stage == self._CONFIRM_STAGE and followup_state == "select":
+                memory.begin_stage("select_from_memory")
+            if (
+                memory.current_stage == "select_from_memory"
+                and state is not None
+                and bool(state.get("belief_selected", False))
+                and not bool(state.get("confirm_button_visible", False))
+            ):
+                return self._build_reveal_confirm_scroll_action(memory)
+            if memory.current_stage == self._EXIT_STAGE:
+                return self._build_exit_press_action()
 
         return super().plan_action(
             provider,
@@ -6779,6 +6913,8 @@ class ReligionProcess(ObservationAssistedProcess):
                 memory.register_choice_scroll(direction=direction)
                 memory.begin_stage("observe_choices")
                 return
+        if memory.current_stage == self._COMPLETE_STAGE:
+            return
         super().on_action_success(memory, action)
 
     def verify_action_success(
@@ -6823,6 +6959,60 @@ class ReligionProcess(ObservationAssistedProcess):
                 memory,
                 img_config=img_config,
             )
+        if action.action in {"click", "double_click", "scroll", "press"} and memory.current_stage in {
+            "select_from_memory",
+            self._CONFIRM_STAGE,
+            self._EXIT_STAGE,
+        }:
+            stage_at_start = memory.current_stage
+            state = self._religion_followup_state(provider, pil_image, img_config=img_config)
+            if state is None:
+                return SemanticVerifyResult(handled=False)
+            followup_state = self._normalize_religion_followup_state(state)
+            reason = str(state.get("reason", "")).strip() or f"religion follow-up: {followup_state}"
+            if followup_state == "complete":
+                memory.begin_stage(self._COMPLETE_STAGE)
+                return SemanticVerifyResult(handled=True, passed=True, reason=reason)
+            if followup_state == "exit":
+                memory.begin_stage(self._EXIT_STAGE)
+                return SemanticVerifyResult(handled=True, passed=True, reason=reason)
+            if stage_at_start == "select_from_memory":
+                if followup_state == "confirm":
+                    memory.begin_stage(self._CONFIRM_STAGE)
+                    return SemanticVerifyResult(handled=True, passed=True, reason=reason)
+                if action.action == "scroll" and bool(state.get("belief_selected", False)):
+                    return SemanticVerifyResult(
+                        handled=True,
+                        passed=bool(state.get("confirm_button_visible", False)),
+                        reason=(
+                            reason
+                            if bool(state.get("confirm_button_visible", False))
+                            else "선택된 종교관은 보이지만 '종교관 세우기' 버튼이 아직 드러나지 않음"
+                        ),
+                    )
+                if action.action in {"click", "double_click"} and bool(state.get("belief_selected", False)):
+                    return SemanticVerifyResult(handled=True, passed=True, reason=reason)
+            if stage_at_start == self._CONFIRM_STAGE:
+                if followup_state == "confirm":
+                    return SemanticVerifyResult(
+                        handled=True,
+                        passed=False,
+                        reason="확정 클릭 후에도 초록색 '종교관 세우기' 버튼이 그대로 남아 있음",
+                    )
+                return SemanticVerifyResult(handled=True, passed=False, reason=reason)
+            if stage_at_start == self._EXIT_STAGE:
+                if followup_state == "exit":
+                    return SemanticVerifyResult(
+                        handled=True,
+                        passed=False,
+                        reason="Esc 후에도 종교창시중/종교관 준비 팝업이 계속 남아 있음",
+                    )
+                if followup_state == "confirm":
+                    memory.begin_stage(self._CONFIRM_STAGE)
+                    return SemanticVerifyResult(handled=True, passed=False, reason=reason)
+                if followup_state == "select":
+                    memory.begin_stage("select_from_memory")
+                    return SemanticVerifyResult(handled=True, passed=False, reason=reason)
         return super().verify_action_success(provider, pil_image, memory, action, img_config=img_config)
 
     def resolve_action(self, action: AgentAction, memory: ShortTermMemory) -> AgentAction:
@@ -6838,6 +7028,13 @@ class ReligionProcess(ObservationAssistedProcess):
         if memory.current_stage == self._ENTRY_STAGE and action.action in {"click", "double_click", "press"}:
             return True
         if action.action == "move":
+            return True
+        if memory.current_stage in {"select_from_memory", self._CONFIRM_STAGE, self._EXIT_STAGE} and action.action in {
+            "click",
+            "double_click",
+            "scroll",
+            "press",
+        }:
             return True
         if action.action == "scroll" and memory.current_stage in {
             self._SCROLL_DOWN_STAGE,
@@ -6876,6 +7073,47 @@ class ReligionProcess(ObservationAssistedProcess):
                 handled=False,
                 reroute=True,
                 error_message="Religion scroll stalled after reobserve retry",
+            )
+        if memory.current_stage == "select_from_memory" and last_action.action == "scroll":
+            stage_key = self.get_recovery_key(memory)
+            failures = memory.increment_stage_failure(stage_key)
+            if failures <= 1:
+                memory.begin_stage("select_from_memory")
+                memory.set_last_planned_action_debug(
+                    "religion confirm-reveal scroll no-progress -> retry select_from_memory"
+                )
+                logger.info("Religion confirm-reveal scroll no-progress -> retry select_from_memory")
+                return NoProgressResolution(handled=True)
+            return NoProgressResolution(
+                handled=False,
+                reroute=True,
+                error_message="Religion confirm button stayed hidden after reveal scroll retry",
+            )
+        if memory.current_stage == self._CONFIRM_STAGE:
+            stage_key = self.get_recovery_key(memory)
+            failures = memory.increment_stage_failure(stage_key)
+            if failures <= 1:
+                memory.begin_stage(self._CONFIRM_STAGE)
+                memory.set_last_planned_action_debug("religion confirm no-progress -> retry confirm click")
+                logger.info("Religion confirm no-progress -> retry confirm click")
+                return NoProgressResolution(handled=True)
+            return NoProgressResolution(
+                handled=False,
+                reroute=True,
+                error_message="Religion confirm click failed to open prep popup",
+            )
+        if memory.current_stage == self._EXIT_STAGE:
+            stage_key = self.get_recovery_key(memory)
+            failures = memory.increment_stage_failure(stage_key)
+            if failures <= 1:
+                memory.begin_stage(self._EXIT_STAGE)
+                memory.set_last_planned_action_debug("religion exit no-progress -> retry escape")
+                logger.info("Religion exit no-progress -> retry escape")
+                return NoProgressResolution(handled=True)
+            return NoProgressResolution(
+                handled=False,
+                reroute=True,
+                error_message="Religion exit escape failed to close prep popup",
             )
         return super().handle_no_progress(
             provider,
@@ -6922,6 +7160,12 @@ class ReligionProcess(ObservationAssistedProcess):
                 else "religion completion criteria not satisfied"
             )
         return VerificationResult(complete, reason)
+
+    def is_terminal_state(self, memory: ShortTermMemory) -> bool:
+        return memory.current_stage == self._COMPLETE_STAGE
+
+    def terminal_state_reason(self, memory: ShortTermMemory) -> str:
+        return "religion flow reached explicit terminal state"
 
 
 class ResearchSelectProcess(ScriptedMultiStepProcess):

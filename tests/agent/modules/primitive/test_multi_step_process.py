@@ -605,6 +605,155 @@ class TestEntryGatedProcesses:
         assert "religion_entry_done" in memory.completed_substeps
         assert memory.current_stage == "observe_choices"
 
+    def test_religion_select_stage_promotes_to_confirm_when_confirm_button_is_ready(self):
+        process = get_multi_step_process("religion_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("religion_primitive", enable_choice_catalog=True)
+        memory.mark_substep("religion_entry_done")
+        memory.begin_stage("select_from_memory")
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "followup_state": "confirm",
+                        "belief_selected": True,
+                        "confirm_button_visible": True,
+                        "confirm_button_enabled": True,
+                        "prep_popup_visible": False,
+                        "angel_button_visible": False,
+                        "reason": "선택된 종교관과 초록색 확정 버튼이 모두 보임",
+                    }
+                ),
+                (
+                    '{"action":"click","x":500,"y":790,"end_x":0,"end_y":0,"scroll_amount":0,'
+                    '"button":"left","key":"","text":"","reasoning":"초록색 종교관 세우기 버튼 클릭",'
+                    '"task_status":"in_progress"}'
+                ),
+            ]
+        )
+
+        action = process.plan_action(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert action is not None
+        assert action.action == "click"
+        assert memory.current_stage == "religion_confirm"
+
+    def test_religion_select_stage_returns_escape_when_prep_popup_is_visible(self):
+        process = get_multi_step_process("religion_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("religion_primitive", enable_choice_catalog=True)
+        memory.mark_substep("religion_entry_done")
+        memory.begin_stage("select_from_memory")
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "followup_state": "exit",
+                        "belief_selected": True,
+                        "confirm_button_visible": False,
+                        "confirm_button_enabled": False,
+                        "prep_popup_visible": True,
+                        "angel_button_visible": False,
+                        "reason": "종교창시중 팝업이 떠 있어 Esc로 닫아야 함",
+                    }
+                )
+            ]
+        )
+
+        action = process.plan_action(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert action is not None
+        assert action.action == "press"
+        assert action.key == "escape"
+        assert action.task_status == "complete"
+        assert memory.current_stage == "religion_exit"
+
+    def test_religion_select_stage_scrolls_to_reveal_hidden_confirm_button(self):
+        process = get_multi_step_process("religion_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("religion_primitive", enable_choice_catalog=True)
+        memory.mark_substep("religion_entry_done")
+        memory.begin_stage("select_from_memory")
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "followup_state": "select",
+                        "belief_selected": True,
+                        "confirm_button_visible": False,
+                        "confirm_button_enabled": False,
+                        "prep_popup_visible": False,
+                        "angel_button_visible": False,
+                        "reason": "선택된 종교관은 보이지만 확정 버튼이 아직 아래에 가려짐",
+                    }
+                )
+            ]
+        )
+
+        action = process.plan_action(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert action is not None
+        assert action.action == "scroll"
+        assert action.scroll_amount == -120
+        assert memory.current_stage == "select_from_memory"
+
+    def test_religion_confirm_click_semantic_verify_promotes_to_exit_stage(self):
+        process = get_multi_step_process("religion_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("religion_primitive", enable_choice_catalog=True)
+        memory.mark_substep("religion_entry_done")
+        memory.begin_stage("religion_confirm")
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "followup_state": "exit",
+                        "belief_selected": True,
+                        "confirm_button_visible": False,
+                        "confirm_button_enabled": False,
+                        "prep_popup_visible": True,
+                        "angel_button_visible": False,
+                        "reason": "확정 후 종교창시중 팝업이 뜸",
+                    }
+                )
+            ]
+        )
+
+        verify = process.verify_action_success(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            AgentAction(action="click", x=500, y=790),
+        )
+
+        assert verify.handled is True
+        assert verify.passed is True
+        assert memory.current_stage == "religion_exit"
+
     def test_religion_completion_verifier_accepts_closed_prep_popup_and_non_angel_button(self):
         process = get_multi_step_process("religion_primitive", "")
         memory = ShortTermMemory()

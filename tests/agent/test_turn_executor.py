@@ -15,7 +15,12 @@ from computer_use_test.agent.modules.primitive.multi_step_process import (
     VerificationResult,
 )
 from computer_use_test.agent.modules.router.primitive_registry import RouterResult
-from computer_use_test.agent.turn_executor import PrimitiveLoopResult, run_one_turn, run_primitive_loop
+from computer_use_test.agent.turn_executor import (
+    PrimitiveLoopResult,
+    _post_action_wait_seconds,
+    run_one_turn,
+    run_primitive_loop,
+)
 from computer_use_test.utils.llm_provider.base import BaseVLMProvider, VLMResponse
 from computer_use_test.utils.llm_provider.parser import AgentAction
 
@@ -869,11 +874,27 @@ class TestRunPrimitiveLoop:
                 '{"visible_options": [{"id": "divine_spark", "label": "신성한 불꽃"}], '
                 '"end_of_list": true, "scroll_anchor": null, "reasoning": "보이는 선택지는 하나"}',
                 '{"best_option_id": "divine_spark", "reason": "과학 승리에 가장 적합"}',
+                '{"followup_state": "confirm", "belief_selected": true, '
+                '"confirm_button_visible": true, "confirm_button_enabled": true, '
+                '"prep_popup_visible": false, "angel_button_visible": false, '
+                '"reason": "선택된 종교관과 초록색 확정 버튼이 모두 보임"}',
                 (
-                    '{"action":"press","x":0,"y":0,"end_x":0,"end_y":0,"scroll_amount":0,'
-                    '"button":"left","key":"escape","text":"","reasoning":"종교관 준비 팝업을 닫음",'
-                    '"task_status":"complete"}'
+                    '{"action":"click","x":500,"y":790,"end_x":0,"end_y":0,"scroll_amount":0,'
+                    '"button":"left","key":"","text":"","reasoning":"종교관 세우기 버튼 클릭",'
+                    '"task_status":"in_progress"}'
                 ),
+                '{"followup_state": "exit", "belief_selected": true, '
+                '"confirm_button_visible": false, "confirm_button_enabled": false, '
+                '"prep_popup_visible": true, "angel_button_visible": false, '
+                '"reason": "종교창시중 팝업이 떠 있어 Esc 필요"}',
+                '{"followup_state": "exit", "belief_selected": true, '
+                '"confirm_button_visible": false, "confirm_button_enabled": false, '
+                '"prep_popup_visible": true, "angel_button_visible": false, '
+                '"reason": "종교창시중 팝업이 아직 열려 있음"}',
+                '{"followup_state": "complete", "belief_selected": false, '
+                '"confirm_button_visible": false, "confirm_button_enabled": false, '
+                '"prep_popup_visible": false, "angel_button_visible": false, '
+                '"reason": "종교 팝업이 닫히고 메인 화면으로 돌아옴"}',
                 '{"prep_popup_visible": false, "angel_button_visible": false, '
                 '"complete": true, "reason": "준비 팝업이 닫혔고 천사 문양 버튼이 아님"}',
             ]
@@ -915,6 +936,15 @@ class TestRunPrimitiveLoop:
         assert result.success is True
         assert result.completed is True
         assert "religion_entry_done" in memory.completed_substeps
+
+    def test_post_action_wait_seconds_uses_half_second_for_religion_clicks(self):
+        wait_seconds = _post_action_wait_seconds(
+            "religion_primitive",
+            [AgentAction(action="click", x=500, y=790, task_status="in_progress")],
+            delay_before_action=0,
+        )
+
+        assert wait_seconds == 0.5
 
     def test_policy_confirmed_tab_uses_semantic_gate_without_similarity_check(self, monkeypatch):
         process = PolicySemanticOnlyProcess()
