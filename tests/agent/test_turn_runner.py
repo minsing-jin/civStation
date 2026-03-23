@@ -7,7 +7,7 @@ from computer_use_test.agent import turn_runner
 
 class _DummyRunLogSession:
     def __init__(self):
-        self.path = Path("/tmp/turn_runner_latest.log")
+        self.path = Path(".tmp/computer_use_test/turn_runner_latest.log")
         self.closed = False
 
     def close(self):
@@ -16,7 +16,7 @@ class _DummyRunLogSession:
 
 class _DummyScreenshotTrajectorySession:
     def __init__(self):
-        self.path = Path("/tmp/trajectory")
+        self.path = Path(".tmp/computer_use_test/screenshot_trajectories/test-run")
         self.closed = False
 
     def close(self):

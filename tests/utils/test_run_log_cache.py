@@ -1,10 +1,16 @@
 import io
 import logging
 import sys
+from pathlib import Path
 
 from rich.console import Console
 
-from computer_use_test.utils.run_log_cache import start_run_log_session
+from computer_use_test.utils.run_log_cache import get_run_log_cache_path, start_run_log_session
+
+
+def test_get_run_log_cache_path_defaults_to_project_tmp_root():
+    expected = Path(__file__).resolve().parents[2] / ".tmp" / "computer_use_test" / "turn_runner_latest.log"
+    assert get_run_log_cache_path() == expected
 
 
 def test_run_log_session_writes_root_logger_records(tmp_path):

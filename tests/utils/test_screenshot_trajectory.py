@@ -1,7 +1,17 @@
+from pathlib import Path
+
 from PIL import Image
 
 from computer_use_test.utils.screen import capture_screen_pil
-from computer_use_test.utils.screenshot_trajectory import start_screenshot_trajectory_session
+from computer_use_test.utils.screenshot_trajectory import (
+    get_screenshot_trajectory_root,
+    start_screenshot_trajectory_session,
+)
+
+
+def test_get_screenshot_trajectory_root_defaults_to_project_tmp_root():
+    expected = Path(__file__).resolve().parents[2] / ".tmp" / "computer_use_test" / "screenshot_trajectories"
+    assert get_screenshot_trajectory_root() == expected
 
 
 def test_screenshot_trajectory_session_keeps_latest_20_images(tmp_path):

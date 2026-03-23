@@ -1,17 +1,17 @@
-"""Utilities for caching the latest raw turn-runner log to a temp file."""
+"""Utilities for caching the latest raw turn-runner log inside the project."""
 
 from __future__ import annotations
 
 import logging
 import re
 import sys
-import tempfile
 import threading
 import traceback
 from pathlib import Path
 from types import TracebackType
 
-_CACHE_DIRNAME = "computer_use_test"
+from computer_use_test.utils.project_runtime import get_project_runtime_root
+
 _CACHE_FILENAME = "turn_runner_latest.log"
 _LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 _ANSI_ESCAPE_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
@@ -157,7 +157,7 @@ class _TeeTextStream:
 
 def get_run_log_cache_path(base_dir: Path | str | None = None) -> Path:
     """Return the deterministic cache path for the latest turn-runner log."""
-    root = Path(base_dir) if base_dir is not None else Path(tempfile.gettempdir()) / _CACHE_DIRNAME
+    root = get_project_runtime_root(base_dir=base_dir)
     return root / _CACHE_FILENAME
 
 
@@ -214,7 +214,7 @@ class RunLogSession:
 
 
 def start_run_log_session(base_dir: Path | str | None = None) -> RunLogSession:
-    """Start capturing the latest raw turn-runner log in a temp cache file."""
+    """Start capturing the latest raw turn-runner log in the project runtime cache."""
     path = get_run_log_cache_path(base_dir=base_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     return RunLogSession(path=path)

@@ -206,3 +206,10 @@ __marimo__/
 
 # Local git worktrees
 .worktrees/
+.omx/
+.tmp/
+.agents/
+.claude/mcp.json
+.codex/
+.ouroboros/
+.project-tools/

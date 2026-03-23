@@ -1,16 +1,16 @@
-"""Utilities for saving a capped screenshot trajectory per run to temp storage."""
+"""Utilities for saving a capped screenshot trajectory per run inside the project."""
 
 from __future__ import annotations
 
 import json
 import re
-import tempfile
 import threading
 from collections import deque
 from datetime import datetime
 from pathlib import Path
 
-_CACHE_DIRNAME = "computer_use_test"
+from computer_use_test.utils.project_runtime import get_project_runtime_root
+
 _TRAJECTORY_DIRNAME = "screenshot_trajectories"
 _DEFAULT_MAX_IMAGES = 20
 _LABEL_SANITIZER_RE = re.compile(r"[^a-z0-9_-]+")
@@ -24,12 +24,12 @@ def _sanitize_label(label: str) -> str:
 
 
 def get_screenshot_trajectory_root(base_dir: Path | str | None = None) -> Path:
-    root = Path(base_dir) if base_dir is not None else Path(tempfile.gettempdir()) / _CACHE_DIRNAME
+    root = get_project_runtime_root(base_dir=base_dir)
     return root / _TRAJECTORY_DIRNAME
 
 
 class ScreenshotTrajectorySession:
-    """Own one temp directory containing the latest capped screenshot trajectory."""
+    """Own one project-local directory containing the latest capped screenshot trajectory."""
 
     def __init__(self, path: Path, max_images: int = _DEFAULT_MAX_IMAGES):
         self.path = path
