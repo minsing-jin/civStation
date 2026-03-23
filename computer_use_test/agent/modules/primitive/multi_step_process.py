@@ -4710,16 +4710,9 @@ class GovernorProcess(ObservationAssistedProcess):
         "governor_appoint_city_restore_hover_scroll_anchor",
         "governor_appoint_city_restore_visibility",
         "governor_appoint_city",
-        "governor_appoint_confirm",
-        "governor_exit_esc1",
-        "governor_exit_esc2",
     }
     _SECRET_STAGES = {
         "governor_secret_society_appoint_click",
-        "governor_secret_society_exit_esc1",
-        "governor_secret_society_exit_esc2",
-        "governor_secret_society_post_appoint_check",
-        "governor_secret_society_complete",
     }
 
     def __init__(self, primitive_name: str, completion_condition: str = ""):
@@ -4859,6 +4852,140 @@ class GovernorProcess(ObservationAssistedProcess):
         memory.set_best_choice(option_id=option_id, reason=reason)
         return memory.get_best_choice() is not None
 
+    def _plan_multi_action_bundle(
+        self,
+        provider: BaseVLMProvider,
+        pil_image,
+        memory: ShortTermMemory,
+        *,
+        normalizing_range: int,
+        high_level_strategy: str,
+        recent_actions: str,
+        hitl_directive: str | None,
+        extra_note: str,
+        img_config=None,
+    ) -> list[AgentAction] | None:
+        prompt = self.build_instruction(
+            memory,
+            normalizing_range=normalizing_range,
+            high_level_strategy=high_level_strategy,
+            recent_actions=recent_actions,
+            hitl_directive=hitl_directive,
+        )
+        prompt = prompt.replace(
+            JSON_FORMAT_INSTRUCTION.format(normalizing_range=normalizing_range),
+            MULTI_ACTION_SEQUENCE_JSON_FORMAT_INSTRUCTION.format(normalizing_range=normalizing_range),
+            1,
+        )
+        prompt = f"{prompt}\n\n[현재 추가 지시]\n{extra_note}"
+        return provider.analyze_multi(
+            pil_image=pil_image,
+            instruction=prompt,
+            normalizing_range=normalizing_range,
+            img_config=img_config,
+        )
+
+    @staticmethod
+    def _normalize_escape_key(action: AgentAction) -> None:
+        if action.action == "press" and action.key in {"esc", "ESC"}:
+            action.key = "escape"
+
+    def _plan_appoint_city_assign_bundle(
+        self,
+        provider: BaseVLMProvider,
+        pil_image,
+        memory: ShortTermMemory,
+        *,
+        normalizing_range: int,
+        high_level_strategy: str,
+        recent_actions: str,
+        hitl_directive: str | None,
+        img_config=None,
+    ) -> list[AgentAction] | None:
+        best = memory.get_best_choice()
+        label = best.label if best is not None else "선택된 미배정 도시"
+        actions = self._plan_multi_action_bundle(
+            provider,
+            pil_image,
+            memory,
+            normalizing_range=normalizing_range,
+            high_level_strategy=high_level_strategy,
+            recent_actions=recent_actions,
+            hitl_directive=hitl_directive,
+            img_config=img_config,
+            extra_note=(
+                "현재 stage: governor_appoint_city\n"
+                f"- memory가 고른 미배정 도시 '{label}' 블럭을 먼저 클릭한다.\n"
+                "- 바로 이어서 초록색 [배정] 버튼을 클릭한다.\n"
+                "- 정확히 action 2개만 반환해. 순서는 [도시 클릭, 배정 클릭] 이다.\n"
+                "- 도시 이름 옆 동그라미에 총독 얼굴이 보이는 블럭은 절대 클릭하지 마.\n"
+                "- 두 번째 action이 최종 action이다."
+            ),
+        )
+        if actions is None or len(actions) != 2:
+            count = 0 if actions is None else len(actions)
+            logger.warning("Governor appoint bundle rejected invalid action count: %s", count)
+            return None
+        if any(action.action != "click" for action in actions):
+            logger.warning("Governor appoint bundle rejected non-click action sequence")
+            return None
+        actions[0].task_status = "in_progress"
+        actions[1].task_status = "complete"
+        return actions
+
+    def _plan_secret_society_appoint_bundle(
+        self,
+        provider: BaseVLMProvider,
+        pil_image,
+        memory: ShortTermMemory,
+        *,
+        normalizing_range: int,
+        high_level_strategy: str,
+        recent_actions: str,
+        hitl_directive: str | None,
+        img_config=None,
+    ) -> list[AgentAction] | None:
+        best = memory.get_best_choice()
+        label = best.label if best is not None else "선택된 비밀결사 총독"
+        actions = self._plan_multi_action_bundle(
+            provider,
+            pil_image,
+            memory,
+            normalizing_range=normalizing_range,
+            high_level_strategy=high_level_strategy,
+            recent_actions=recent_actions,
+            hitl_directive=hitl_directive,
+            img_config=img_config,
+            extra_note=(
+                f"현재 stage: {self._SECRET_APPOINT_CLICK}\n"
+                f"- 비밀결사 총독 '{label}' 의 초록색 [임명] 버튼을 클릭한다.\n"
+                "- 바로 이어서 ESC를 2회 연속 누른다.\n"
+                "- 정확히 action 3개만 반환해. 순서는 [임명 클릭, ESC, ESC] 이다.\n"
+                "- 세 번째 action이 최종 action이다."
+            ),
+        )
+        if actions is None or len(actions) != 3:
+            logger.warning(
+                "Governor secret appoint bundle rejected invalid action count: %s",
+                0 if actions is None else len(actions),
+            )
+            return None
+        self._normalize_escape_key(actions[1])
+        self._normalize_escape_key(actions[2])
+        if actions[0].action != "click":
+            logger.warning("Governor secret appoint bundle rejected non-click first action")
+            return None
+        if actions[1].action != "press" or actions[1].key != "escape":
+            logger.warning("Governor secret appoint bundle rejected invalid second action")
+            return None
+        if actions[2].action != "press" or actions[2].key != "escape":
+            logger.warning("Governor secret appoint bundle rejected invalid third action")
+            return None
+        actions[0].task_status = "in_progress"
+        actions[1].task_status = "in_progress"
+        actions[2].task_status = "complete"
+        return actions
+
     def get_recovery_key(self, memory: ShortTermMemory, *, stage_name: str | None = None) -> str:
         stage = stage_name or memory.current_stage or self._ENTRY_STAGE
         if stage in {
@@ -4993,29 +5120,6 @@ class GovernorProcess(ObservationAssistedProcess):
         # Set branch based on action_type
         self._apply_decision_branch(memory, action_type=action_type)
         return True
-
-    def _secret_society_post_appoint_check(
-        self,
-        provider: BaseVLMProvider,
-        pil_image,
-        memory: ShortTermMemory,
-        *,
-        img_config=None,
-    ) -> dict | None:
-        best = memory.get_best_choice()
-        label = best.label if best is not None else "선택된 비밀결사 총독"
-        prompt = (
-            "너는 문명6 비밀결사 총독 임명 후속 상태 판별기야. JSON만 출력해.\n"
-            '{"promote_visible":true/false,"reasoning":"짧은 이유"}\n'
-            f"- 대상 총독은 '{label}' 이다.\n"
-            "- 이 총독 카드에 초록색/활성 [진급] 버튼이 보이면 promote_visible=true.\n"
-            "- 활성 [진급] 버튼이 안 보이면 promote_visible=false.\n"
-        )
-        try:
-            return _analyze_structured_json(provider, pil_image, prompt, img_config=img_config, max_tokens=256)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Governor secret-society post-appoint check failed: %s", exc)
-            return None
 
     def _governor_promote_select_check(self, provider: BaseVLMProvider, pil_image, *, img_config=None) -> dict | None:
         prompt = (
@@ -5174,6 +5278,27 @@ class GovernorProcess(ObservationAssistedProcess):
             logger.warning("Governor entry check failed: %s", exc)
             return None
 
+    def _governor_completion_check(self, provider: BaseVLMProvider, pil_image, *, img_config=None) -> dict | None:
+        prompt = (
+            "너는 문명6 총독 primitive 종료 검증기야. JSON만 출력해.\n"
+            '{"complete":true/false,'
+            '"governor_screen_ready":true/false,'
+            '"notification_visible":true/false,'
+            '"pen_icon_visible":true/false,'
+            '"reasoning":"짧은 이유"}\n'
+            "- 총독 카드 목록, 도시 배정 목록, [임명]/[진급]/[배정]/[확정] 버튼 등 실제 총독 UI가 보이면 "
+            "governor_screen_ready=true.\n"
+            "- 우하단 '총독 임명' 알림 버튼이 보이면 notification_visible=true.\n"
+            "- 우하단 펜을 잡은 손 동그라미 마크/아이콘이 보이면 pen_icon_visible=true.\n"
+            "- complete=true 는 governor_screen_ready=false 이고 notification_visible=false 이고 "
+            "pen_icon_visible=false 일 때만 사용해.\n"
+        )
+        try:
+            return _analyze_structured_json(provider, pil_image, prompt, img_config=img_config, max_tokens=256)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Governor completion check failed: %s", exc)
+            return None
+
     # ------------------------------------------------------------------
     # Stage notes
     # ------------------------------------------------------------------
@@ -5197,8 +5322,6 @@ class GovernorProcess(ObservationAssistedProcess):
             return "현재 stage: governor_promote_select\n- 활성화된(밝은) 진급 스킬 박스 1개만 클릭. [확정] 누르지 마."
         if stage == self._PROMOTE_CONFIRM:
             return "현재 stage: governor_promote_confirm\n- 초록색 [확정] 버튼만 클릭."
-        if stage == self._PROMOTE_POPUP:
-            return "현재 stage: governor_promote_popup\n- '정말입니까?' 팝업에서 '예' 버튼 클릭."
         if stage in {self._EXIT_ESC1, self._EXIT_ESC2}:
             return f"현재 stage: {stage}\n- ESC 키를 1회 눌러 총독 화면을 닫는다."
 
@@ -5250,25 +5373,20 @@ class GovernorProcess(ObservationAssistedProcess):
             label = best.label if best else "선택된 미배정 도시"
             return (
                 "현재 stage: governor_appoint_city\n"
-                f"- 왼쪽 도시 목록 블럭 중 memory가 고른 미배정 도시 '{label}' 블럭만 클릭.\n"
+                f"- 왼쪽 도시 목록 블럭 중 memory가 고른 미배정 도시 '{label}' 블럭을 먼저 클릭한다.\n"
+                "- 바로 이어서 초록색 [배정] 버튼을 클릭한다.\n"
+                "- 반드시 2-action bundle로 [도시 클릭, 배정 클릭] 순서만 수행한다.\n"
                 "- 도시 이름 옆 동그라미에 총독 얼굴이 보이는 블럭은 이미 배정된 도시이므로 절대 클릭하지 마.\n"
                 "- 동그라미가 비어 있는 블럭만 유효 후보다."
             )
-        if stage == self._APPOINT_CONFIRM:
-            return "현재 stage: governor_appoint_confirm\n- 초록색 [배정] 버튼 클릭."
         if stage == self._SECRET_APPOINT_CLICK:
             best = memory.get_best_choice()
             label = best.label if best else "선택된 비밀결사 총독"
             return (
                 f"현재 stage: {self._SECRET_APPOINT_CLICK}\n"
-                f"- memory의 best choice 비밀결사 총독 '{label}'의 초록색 [임명] 버튼 클릭."
-            )
-        if stage in {self._SECRET_EXIT_ESC1, self._SECRET_EXIT_ESC2}:
-            return f"현재 stage: {stage}\n- ESC 키를 1회 눌러 비밀결사 임명 후속 화면을 정리한다."
-        if stage == self._SECRET_POST_APPOINT_CHECK:
-            return (
-                f"현재 stage: {self._SECRET_POST_APPOINT_CHECK}\n"
-                "- 임명 정리 후 같은 비밀결사 총독 카드에 초록색 [진급] 버튼이 생겼는지 확인한다."
+                f"- memory의 best choice 비밀결사 총독 '{label}'의 초록색 [임명] 버튼을 클릭한다.\n"
+                "- 바로 이어서 ESC를 2회 연속 누른다.\n"
+                "- 반드시 3-action bundle로 [임명 클릭, ESC, ESC] 순서만 수행한다."
             )
 
         # Observation/scroll stages
@@ -5644,21 +5762,6 @@ class GovernorProcess(ObservationAssistedProcess):
     ) -> AgentAction | list[AgentAction] | StageTransition | None:
         stage = memory.current_stage
 
-        if stage == self._EXIT_ESC1:
-            return AgentAction(
-                action="press",
-                key="escape",
-                reasoning="총독 배정 완료 후 ESC 1회 — 총독 화면 닫기",
-                task_status="in_progress",
-            )
-        if stage == self._EXIT_ESC2:
-            return AgentAction(
-                action="press",
-                key="escape",
-                reasoning="ESC 2회 — 총독 화면 완전 종료",
-                task_status="complete",
-            )
-
         if stage == self._APPOINT_CITY_OBSERVE:
             return None
 
@@ -5723,6 +5826,19 @@ class GovernorProcess(ObservationAssistedProcess):
             restore = self._build_appoint_city_restore_scroll_action(memory)
             if restore is not None:
                 return restore
+        if stage == self._APPOINT_CITY:
+            bundle = self._plan_appoint_city_assign_bundle(
+                provider,
+                pil_image,
+                memory,
+                normalizing_range=normalizing_range,
+                high_level_strategy=high_level_strategy,
+                recent_actions=recent_actions,
+                hitl_directive=hitl_directive,
+                img_config=img_config,
+            )
+            if bundle is not None:
+                return bundle
 
         return self._force_task_status(
             self._plan_generic_fallback_action(
@@ -5753,34 +5869,19 @@ class GovernorProcess(ObservationAssistedProcess):
     ) -> AgentAction | list[AgentAction] | StageTransition | None:
         stage = memory.current_stage
 
-        if stage == self._SECRET_EXIT_ESC1:
-            return AgentAction(
-                action="press",
-                key="escape",
-                reasoning="비밀결사 총독 임명 후 ESC 1회 — 후속 화면 정리",
-                task_status="in_progress",
+        if stage == self._SECRET_APPOINT_CLICK:
+            bundle = self._plan_secret_society_appoint_bundle(
+                provider,
+                pil_image,
+                memory,
+                normalizing_range=normalizing_range,
+                high_level_strategy=high_level_strategy,
+                recent_actions=recent_actions,
+                hitl_directive=hitl_directive,
+                img_config=img_config,
             )
-        if stage == self._SECRET_EXIT_ESC2:
-            return AgentAction(
-                action="press",
-                key="escape",
-                reasoning="비밀결사 총독 임명 후 ESC 2회 — 총독 카드 화면 복귀",
-                task_status="in_progress",
-            )
-        if stage == self._SECRET_POST_APPOINT_CHECK:
-            state = self._secret_society_post_appoint_check(provider, pil_image, memory, img_config=img_config)
-            if state and bool(state.get("promote_visible", False)):
-                memory.set_branch(self._PROMOTE_BRANCH)
-                memory.begin_stage(self._PROMOTE_CLICK)
-                return StageTransition(
-                    stage=self._PROMOTE_CLICK,
-                    reason="secret society appointment unlocked green promote button",
-                )
-            memory.begin_stage(self._SECRET_COMPLETE)
-            return StageTransition(
-                stage=self._SECRET_COMPLETE,
-                reason="secret society appointment finished without immediate promotion",
-            )
+            if bundle is not None:
+                return bundle
 
         return self._force_task_status(
             self._plan_generic_fallback_action(
@@ -5846,9 +5947,6 @@ class GovernorProcess(ObservationAssistedProcess):
                 memory.begin_stage(self._PROMOTE_CONFIRM)
                 return
             if stage == self._PROMOTE_CONFIRM:
-                memory.begin_stage(self._PROMOTE_POPUP)
-                return
-            if stage == self._PROMOTE_POPUP:
                 memory.begin_stage(self._EXIT_ESC1)
                 return
 
@@ -5860,31 +5958,21 @@ class GovernorProcess(ObservationAssistedProcess):
             ):
                 memory.begin_stage("observe_choices")
                 return
-            if stage == self._SECRET_EXIT_ESC1:
-                memory.begin_stage(self._SECRET_EXIT_ESC2)
-                return
-            if stage == self._SECRET_EXIT_ESC2:
-                memory.begin_stage(self._SECRET_POST_APPOINT_CHECK)
-                return
             if stage == self._EXIT_ESC1:
                 memory.begin_stage(self._EXIT_ESC2)
                 return
 
         # Appoint branch transitions
         if action.action == "click":
-            if stage == self._SECRET_APPOINT_CLICK:
-                memory.begin_stage(self._SECRET_EXIT_ESC1)
-                return
             if stage == self._APPOINT_CLICK:
                 self._prepare_appoint_city_catalog(memory)
                 memory.begin_stage(self._APPOINT_CITY_OBSERVE)
                 return
-            if stage == self._APPOINT_CITY:
-                memory.begin_stage(self._APPOINT_CONFIRM)
-                return
-            if stage == self._APPOINT_CONFIRM:
-                memory.begin_stage(self._EXIT_ESC1)
-                return
+
+    def on_actions_success(self, memory: ShortTermMemory, actions: list[AgentAction]) -> None:
+        if len(actions) > 1 and memory.current_stage in {self._APPOINT_CITY, self._SECRET_APPOINT_CLICK}:
+            return
+        super().on_actions_success(memory, actions)
 
     # ------------------------------------------------------------------
     # should_verify_action_without_ui_change
@@ -5900,19 +5988,6 @@ class GovernorProcess(ObservationAssistedProcess):
     ) -> SemanticVerifyResult:
         if action.action == "move":
             return SemanticVerifyResult(handled=True, passed=True, reason="hover move is non-visual by design")
-        if action.action == "click" and memory.current_stage == self._APPOINT_CITY:
-            state = self._governor_appoint_city_check(provider, pil_image, img_config=img_config)
-            if state and bool(state.get("valid_unassigned_city_selected", False)):
-                return SemanticVerifyResult(
-                    handled=True,
-                    passed=True,
-                    reason="governor appoint city selected an unassigned city",
-                )
-            return SemanticVerifyResult(
-                handled=True,
-                passed=False,
-                reason="도시 왼쪽 동그라미에 총독 얼굴이 없는 미배정 도시 선택을 확인하지 못함",
-            )
         if action.action == "click" and memory.current_stage == self._PROMOTE_SELECT:
             state = self._governor_promote_select_check(provider, pil_image, img_config=img_config)
             if state and bool(state.get("confirm_enabled", False)):
@@ -5972,8 +6047,6 @@ class GovernorProcess(ObservationAssistedProcess):
         if action.action == "press" and action.key == "enter" and self._ENTRY_SUBSTEP not in memory.completed_substeps:
             return True
         if action.action == "move":
-            return True
-        if action.action == "click" and memory.current_stage == self._APPOINT_CITY:
             return True
         if action.action == "click" and memory.current_stage == self._PROMOTE_SELECT:
             return True
@@ -6058,13 +6131,12 @@ class GovernorProcess(ObservationAssistedProcess):
                 self._PROMOTE_CLICK,
                 self._PROMOTE_SELECT,
                 self._PROMOTE_CONFIRM,
-                self._PROMOTE_POPUP,
                 self._EXIT_ESC1,
                 self._EXIT_ESC2,
             ]
             if stage in promote_order:
-                return promote_order.index(stage) + 3, 8
-            return 3, 8
+                return promote_order.index(stage) + 3, 7
+            return 3, 7
 
         if memory.branch == self._APPOINT_BRANCH:
             appoint_order = [
@@ -6076,26 +6148,16 @@ class GovernorProcess(ObservationAssistedProcess):
                 self._APPOINT_CITY_RESTORE_HOVER,
                 self._APPOINT_CITY_RESTORE_SCROLL,
                 self._APPOINT_CITY,
-                self._APPOINT_CONFIRM,
-                self._EXIT_ESC1,
-                self._EXIT_ESC2,
             ]
             if stage in appoint_order:
-                return appoint_order.index(stage) + 3, 13
-            return 3, 13
+                return appoint_order.index(stage) + 3, 10
+            return 3, 10
 
         if memory.branch == self._SECRET_SOCIETY_BRANCH:
-            secret_order = [
-                self._SECRET_APPOINT_CLICK,
-                self._SECRET_EXIT_ESC1,
-                self._SECRET_EXIT_ESC2,
-                self._SECRET_POST_APPOINT_CHECK,
-            ]
+            secret_order = [self._SECRET_APPOINT_CLICK]
             if stage in secret_order:
-                return secret_order.index(stage) + 3, 6
-            if stage == self._SECRET_COMPLETE:
-                return 6, 6
-            return 3, 6
+                return secret_order.index(stage) + 3, 3
+            return 3, 3
 
         # Observation phase
         if stage in {self._HOVER_SCROLL_STAGE, self._SCROLL_DOWN_STAGE, "observe_choices"}:
@@ -6106,14 +6168,12 @@ class GovernorProcess(ObservationAssistedProcess):
         return super().get_visible_progress(memory, executed_steps=0, hard_max_steps=1)
 
     def is_terminal_state(self, memory: ShortTermMemory) -> bool:
-        return memory.current_stage in {self._EXIT_ESC2, self._SECRET_COMPLETE}
+        del memory
+        return False
 
     def terminal_state_reason(self, memory: ShortTermMemory) -> str:
-        if memory.current_stage == self._EXIT_ESC2:
-            if memory.branch == self._APPOINT_BRANCH:
-                return "governor appointment branch closed governor screen"
-            return "governor promote branch closed governor screen"
-        return "governor secret-society appointment branch finished"
+        del memory
+        return "governor completion is verified from lower-right UI state"
 
     def verify_completion(
         self,
@@ -6123,9 +6183,24 @@ class GovernorProcess(ObservationAssistedProcess):
         *,
         img_config=None,
     ) -> VerificationResult:
-        if self.is_terminal_state(memory):
-            return VerificationResult(True, self.terminal_state_reason(memory))
-        return super().verify_completion(provider, pil_image, memory, img_config=img_config)
+        state = self._governor_completion_check(provider, pil_image, img_config=img_config)
+        if state is None:
+            return VerificationResult(False, "governor completion parse failed")
+
+        governor_screen_ready = bool(state.get("governor_screen_ready", False))
+        notification_visible = bool(state.get("notification_visible", False))
+        pen_icon_visible = bool(state.get("pen_icon_visible", False))
+        complete = bool(state.get("complete", False)) or (
+            not governor_screen_ready and not notification_visible and not pen_icon_visible
+        )
+        reason = str(state.get("reason", state.get("reasoning", ""))).strip()
+        if not reason:
+            reason = (
+                "governor UI closed and lower-right governor signals are absent"
+                if complete
+                else "governor completion criteria not satisfied"
+            )
+        return VerificationResult(complete, reason)
 
 
 class CultureDecisionProcess(ScriptedMultiStepProcess):

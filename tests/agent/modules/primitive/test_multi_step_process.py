@@ -1199,48 +1199,48 @@ class TestEntryGatedProcesses:
         assert verify.handled is True
         assert verify.passed is True
 
-    def test_governor_appoint_city_click_runs_semantic_verify_without_ui_change(self):
+    def test_governor_appoint_city_stage_plans_city_then_assign_bundle(self):
         process = get_multi_step_process("governor_primitive", "")
         memory = ShortTermMemory()
         memory.start_task("governor_primitive", enable_choice_catalog=True)
         memory.mark_substep("governor_entry_done")
         memory.set_branch("governor_appoint")
-        memory.begin_stage("governor_appoint_city")
-
-        should_verify = process.should_verify_action_without_ui_change(
-            memory,
-            AgentAction(action="click", x=500, y=500),
+        memory.choice_catalog.candidates["lugdunum"] = ChoiceCandidate(
+            id="lugdunum",
+            label="루구두눔",
+            visible_now=True,
+            position_hint="visible",
+            metadata={"note": "빈 동그라미 / 미배정"},
         )
-
-        assert should_verify is True
-
-    def test_governor_appoint_city_semantic_verify_rejects_city_with_governor_portrait(self):
-        process = get_multi_step_process("governor_primitive", "")
-        memory = ShortTermMemory()
-        memory.start_task("governor_primitive", enable_choice_catalog=True)
-        memory.mark_substep("governor_entry_done")
-        memory.set_branch("governor_appoint")
+        memory.set_best_choice(option_id="lugdunum", reason="과학 도시")
         memory.begin_stage("governor_appoint_city")
         provider = FakeProvider(
             [
                 json.dumps(
-                    {
-                        "valid_unassigned_city_selected": False,
-                        "reasoning": "선택된 도시 왼쪽 동그라미에 총독 얼굴 아이콘이 보여 이미 배정된 도시임",
-                    }
+                    [
+                        {"action": "click", "x": 280, "y": 360, "reasoning": "루구두눔 선택"},
+                        {"action": "click", "x": 820, "y": 920, "reasoning": "배정 클릭"},
+                    ]
                 )
             ]
         )
 
-        verify = process.verify_action_success(
+        actions = process.plan_action(
             provider,
             Image.new("RGB", (100, 100)),
             memory,
-            AgentAction(action="click", x=500, y=500),
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
         )
 
-        assert verify.handled is True
-        assert verify.passed is False
+        assert isinstance(actions, list)
+        assert len(actions) == 2
+        assert actions[0].action == "click"
+        assert actions[0].task_status == "in_progress"
+        assert actions[1].action == "click"
+        assert actions[1].task_status == "complete"
 
     def test_governor_appoint_city_observer_prompt_describes_empty_circle_rule(self):
         process = get_multi_step_process("governor_primitive", "")
@@ -1558,11 +1558,7 @@ class TestEntryGatedProcesses:
         process.on_action_success(memory, AgentAction(action="click", x=500, y=500))
         assert memory.current_stage == "governor_promote_confirm"
 
-        # promote_confirm -> promote_popup
-        process.on_action_success(memory, AgentAction(action="click", x=500, y=500))
-        assert memory.current_stage == "governor_promote_popup"
-
-        # promote_popup -> exit_esc1
+        # promote_confirm -> exit_esc1
         process.on_action_success(memory, AgentAction(action="click", x=500, y=500))
         assert memory.current_stage == "governor_exit_esc1"
 
@@ -1582,15 +1578,23 @@ class TestEntryGatedProcesses:
         process.on_action_success(memory, AgentAction(action="click", x=500, y=500))
         assert memory.current_stage == "governor_appoint_city_observe"
 
-        # appoint_city -> appoint_confirm
+    def test_governor_appoint_bundle_keeps_stage_until_common_completion_verify(self):
+        process = get_multi_step_process("governor_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("governor_primitive", enable_choice_catalog=True)
+        memory.mark_substep("governor_entry_done")
+        memory.set_branch("governor_appoint")
         memory.begin_stage("governor_appoint_city")
-        process.on_action_success(memory, AgentAction(action="click", x=500, y=500))
-        assert memory.current_stage == "governor_appoint_confirm"
 
-        # appoint_confirm -> exit_esc1
-        memory.begin_stage("governor_appoint_confirm")
-        process.on_action_success(memory, AgentAction(action="click", x=500, y=500))
-        assert memory.current_stage == "governor_exit_esc1"
+        process.on_actions_success(
+            memory,
+            [
+                AgentAction(action="click", x=240, y=360, task_status="in_progress"),
+                AgentAction(action="click", x=820, y=920, task_status="complete"),
+            ],
+        )
+
+        assert memory.current_stage == "governor_appoint_city"
 
     def test_governor_promote_esc_stages_are_deterministic(self):
         process = get_multi_step_process("governor_primitive", "")
@@ -1616,31 +1620,15 @@ class TestEntryGatedProcesses:
         assert action.key == "escape"
         assert action.task_status == "in_progress"
 
-    def test_governor_appoint_exit_esc_stages_are_deterministic(self):
+    def test_governor_promote_final_escape_uses_common_completion_check(self):
         process = get_multi_step_process("governor_primitive", "")
         memory = ShortTermMemory()
         memory.start_task("governor_primitive", enable_choice_catalog=True)
         memory.mark_substep("governor_entry_done")
-        memory.set_branch("governor_appoint")
-        memory.begin_stage("governor_exit_esc1")
-
-        action1 = process.plan_action(
-            FakeProvider([]),
-            Image.new("RGB", (100, 100)),
-            memory,
-            normalizing_range=1000,
-            high_level_strategy="과학 승리",
-            recent_actions="없음",
-            hitl_directive=None,
-        )
-
-        assert action1 is not None
-        assert action1.action == "press"
-        assert action1.key == "escape"
-        assert action1.task_status == "in_progress"
-
+        memory.set_branch("governor_promote")
         memory.begin_stage("governor_exit_esc2")
-        action2 = process.plan_action(
+
+        action = process.plan_action(
             FakeProvider([]),
             Image.new("RGB", (100, 100)),
             memory,
@@ -1650,21 +1638,33 @@ class TestEntryGatedProcesses:
             hitl_directive=None,
         )
 
-        assert action2 is not None
-        assert action2.action == "press"
-        assert action2.key == "escape"
-        assert action2.task_status == "complete"
+        assert action is not None
+        assert action.action == "press"
+        assert action.key == "escape"
+        assert action.task_status == "complete"
 
-    def test_governor_appoint_exit_terminal_state_completes_without_vlm_verification(self):
+    def test_governor_completion_requires_lower_right_signals_to_be_absent(self):
         process = get_multi_step_process("governor_primitive", "")
         memory = ShortTermMemory()
         memory.start_task("governor_primitive", enable_choice_catalog=True)
         memory.mark_substep("governor_entry_done")
-        memory.set_branch("governor_appoint")
+        memory.set_branch("governor_promote")
         memory.begin_stage("governor_exit_esc2")
 
         verification = process.verify_completion(
-            FakeProvider([]),
+            FakeProvider(
+                [
+                    json.dumps(
+                        {
+                            "complete": True,
+                            "governor_screen_ready": False,
+                            "notification_visible": False,
+                            "pen_icon_visible": False,
+                            "reasoning": "우하단 총독 알림과 펜 손 마크가 모두 사라짐",
+                        }
+                    )
+                ]
+            ),
             Image.new("RGB", (100, 100)),
             memory,
         )
@@ -1804,7 +1804,7 @@ class TestEntryGatedProcesses:
         assert memory.branch == "governor_promote"
         assert memory.current_stage == "governor_promote_click"
 
-    def test_governor_secret_society_branch_merges_into_promote_when_green_promote_is_visible(self):
+    def test_governor_secret_society_appoint_stage_plans_click_then_double_escape_bundle(self):
         process = get_multi_step_process("governor_primitive", "")
         memory = ShortTermMemory()
         memory.start_task("governor_primitive", enable_choice_catalog=True)
@@ -1816,19 +1816,20 @@ class TestEntryGatedProcesses:
         )
         memory.set_best_choice(option_id="hermes_secret", reason="비밀결사 선택")
         memory.set_branch("governor_secret_society")
-        memory.begin_stage("governor_secret_society_post_appoint_check")
+        memory.begin_stage("governor_secret_society_appoint_click")
         provider = FakeProvider(
             [
                 json.dumps(
-                    {
-                        "promote_visible": True,
-                        "reasoning": "허미즈 카드에 초록색 진급 버튼이 활성화됨",
-                    }
+                    [
+                        {"action": "click", "x": 760, "y": 420, "reasoning": "허미즈 임명"},
+                        {"action": "press", "key": "escape", "reasoning": "첫 번째 ESC"},
+                        {"action": "press", "key": "escape", "reasoning": "두 번째 ESC"},
+                    ]
                 )
             ]
         )
 
-        action = process.plan_action(
+        actions = process.plan_action(
             provider,
             Image.new("RGB", (100, 100)),
             memory,
@@ -1838,10 +1839,16 @@ class TestEntryGatedProcesses:
             hitl_directive=None,
         )
 
-        assert isinstance(action, StageTransition)
-        assert action.stage == "governor_promote_click"
-        assert memory.branch == "governor_promote"
-        assert memory.current_stage == "governor_promote_click"
+        assert isinstance(actions, list)
+        assert len(actions) == 3
+        assert actions[0].action == "click"
+        assert actions[0].task_status == "in_progress"
+        assert actions[1].action == "press"
+        assert actions[1].key == "escape"
+        assert actions[1].task_status == "in_progress"
+        assert actions[2].action == "press"
+        assert actions[2].key == "escape"
+        assert actions[2].task_status == "complete"
 
     def test_governor_registry_uses_observation_assisted(self):
         assert PRIMITIVE_REGISTRY["governor_primitive"]["process_kind"] == "observation_assisted"
