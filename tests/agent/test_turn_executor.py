@@ -396,6 +396,46 @@ class ManualDecisionDuringPlanProcess(BaseMultiStepProcess):
         return VerificationResult(True, "ok")
 
 
+class GovernorDelayedCompletionProcess(BaseMultiStepProcess):
+    def __init__(self):
+        super().__init__("governor_primitive", "")
+        self.plan_calls = 0
+        self.verify_calls = 0
+
+    def initialize(self, memory: ShortTermMemory) -> None:
+        memory.begin_stage("governor_appoint_city")
+
+    def plan_action(self, provider, pil_image, memory, **kwargs):
+        self.plan_calls += 1
+        if self.plan_calls > 1:
+            raise AssertionError("governor completion should recover on delayed recheck before replanning")
+        return [
+            AgentAction(
+                action="click",
+                x=240,
+                y=360,
+                reasoning="select city",
+                task_status="in_progress",
+            ),
+            AgentAction(
+                action="click",
+                x=820,
+                y=920,
+                reasoning="assign governor",
+                task_status="complete",
+            ),
+        ]
+
+    def on_actions_success(self, memory: ShortTermMemory, actions: list[AgentAction]) -> None:
+        return None
+
+    def verify_completion(self, provider, pil_image, memory, **kwargs) -> VerificationResult:
+        self.verify_calls += 1
+        if self.verify_calls == 1:
+            return VerificationResult(False, "governor lower-right signals still fading")
+        return VerificationResult(True, "governor lower-right signals cleared")
+
+
 class CityProductionVisibleProgressProcess(BaseMultiStepProcess):
     def __init__(self):
         super().__init__("city_production_primitive", "")
@@ -1439,6 +1479,49 @@ class TestRunPrimitiveLoop:
         assert result.success is True
         assert process.decide_calls == 0
         assert process.plan_calls == 1
+
+    def test_governor_completion_rechecks_once_before_replanning_bundle(self, monkeypatch):
+        process = GovernorDelayedCompletionProcess()
+        provider = DummyProvider()
+        image = Image.new("RGB", (100, 100))
+        memory = ShortTermMemory()
+        memory.start_task("governor_primitive", enable_choice_catalog=True)
+        sleeps: list[float] = []
+
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            lambda: (image, 1440, 900, 0, 0),
+        )
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.time.sleep", lambda seconds: sleeps.append(seconds))
+
+        result = run_primitive_loop(
+            planner_provider=provider,
+            primitive_name="governor_primitive",
+            screen_w=1440,
+            screen_h=900,
+            normalizing_range=1000,
+            x_offset=0,
+            y_offset=0,
+            strategy_string="",
+            recent_actions_str="없음",
+            hitl_directive=None,
+            memory=memory,
+            ctx=self.ctx,
+            max_steps=2,
+            completion_condition="",
+            planner_img_config=None,
+            delay_before_action=0,
+        )
+
+        assert result.success is True
+        assert result.completed is True
+        assert process.plan_calls == 1
+        assert process.verify_calls == 2
+        assert 0.2 in sleeps
 
     def test_multistep_trace_events_are_published_to_state_bridge(self, monkeypatch):
         process = TransitionProcess()

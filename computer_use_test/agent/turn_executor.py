@@ -43,6 +43,7 @@ from computer_use_test.agent.modules.primitive.multi_step_process import (
     _POLICY_RIGHT_CARD_LIST_RATIOS,
     _POLICY_RIGHT_TAB_BAR_RATIOS,
     StageTransition,
+    VerificationResult,
     get_multi_step_process,
 )
 from computer_use_test.agent.modules.router.primitive_registry import (
@@ -745,6 +746,27 @@ def run_primitive_loop(
             )
         return recheck_result
 
+    def _governor_completion_recheck_once(initial_verification: VerificationResult) -> VerificationResult:
+        if primitive_name != "governor_primitive":
+            return initial_verification
+        if initial_verification.complete:
+            return initial_verification
+        time.sleep(0.2)
+        recheck_image, *_ = capture_screen_pil()
+        recheck_result = process.verify_completion(
+            planner_provider,
+            recheck_image,
+            memory,
+            img_config=planner_img_config,
+        )
+        if recheck_result.complete:
+            logger.info(
+                "Governor completion recovered on delayed recheck | stage=%s reason=%s",
+                memory.current_stage or "-",
+                recheck_result.reason,
+            )
+        return recheck_result
+
     def _refresh_multi_step_debug() -> None:
         stm_str = _multi_step_stm_summary()
         visible_step, visible_max_steps = _visible_progress(result.steps_taken)
@@ -1301,6 +1323,7 @@ def run_primitive_loop(
                     memory,
                     img_config=planner_img_config,
                 )
+                verification = _governor_completion_recheck_once(verification)
                 if verification.complete:
                     result.completed = True
                     result.success = True
@@ -1394,6 +1417,7 @@ def run_primitive_loop(
                 memory,
                 img_config=planner_img_config,
             )
+            verification = _governor_completion_recheck_once(verification)
             if verification.complete:
                 result.completed = True
                 result.success = True
