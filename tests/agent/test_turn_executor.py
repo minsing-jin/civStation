@@ -303,6 +303,49 @@ class ObservationPrepProcess(BaseMultiStepProcess):
         return VerificationResult(True, "ok")
 
 
+class ObservationBudgetSplitProcess(BaseMultiStepProcess):
+    supports_observation = True
+
+    def __init__(self):
+        super().__init__("religion_primitive", "")
+        self.observe_calls = 0
+        self.plan_calls = 0
+
+    def initialize(self, memory: ShortTermMemory) -> None:
+        memory.begin_stage("observe_choices")
+
+    def should_observe(self, memory: ShortTermMemory) -> bool:
+        return self.observe_calls < 3
+
+    def get_iteration_limit(
+        self,
+        memory: ShortTermMemory,
+        *,
+        action_limit: int,
+    ) -> int:
+        return action_limit + 3
+
+    def observe(self, provider, pil_image, memory, **kwargs) -> ObservationBundle | None:
+        self.observe_calls += 1
+        return ObservationBundle(visible_options=[{"label": f"후보{self.observe_calls}"}], end_of_list=False)
+
+    def consume_observation(self, memory: ShortTermMemory, observation: ObservationBundle) -> AgentAction | None:
+        return None
+
+    def plan_action(self, provider, pil_image, memory, **kwargs):
+        self.plan_calls += 1
+        return AgentAction(
+            action="click",
+            x=800,
+            y=400,
+            reasoning="complete after three observation-only iterations",
+            task_status="complete",
+        )
+
+    def verify_completion(self, provider, pil_image, memory, **kwargs) -> VerificationResult:
+        return VerificationResult(True, "ok")
+
+
 class MemoryDecisionFailureProcess(BaseMultiStepProcess):
     supports_observation = True
 
@@ -1260,6 +1303,47 @@ class TestRunPrimitiveLoop:
         assert result.success is True
         assert call_order[:3] == ["capture1", "center", "capture2"]
         assert process.observed_image is observation_image
+
+    def test_multistep_uses_iteration_budget_separate_from_action_budget(self, monkeypatch):
+        process = ObservationBudgetSplitProcess()
+        provider = DummyProvider()
+        image = Image.new("RGB", (100, 100))
+        memory = ShortTermMemory()
+        memory.start_task("religion_primitive", enable_choice_catalog=True)
+
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            lambda: (image, 1440, 900, 0, 0),
+        )
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
+
+        result = run_primitive_loop(
+            planner_provider=provider,
+            primitive_name="religion_primitive",
+            screen_w=1440,
+            screen_h=900,
+            normalizing_range=1000,
+            x_offset=0,
+            y_offset=0,
+            strategy_string="신앙 중점",
+            recent_actions_str="없음",
+            hitl_directive=None,
+            memory=memory,
+            ctx=self.ctx,
+            max_steps=1,
+            completion_condition="",
+            planner_img_config=None,
+            delay_before_action=0,
+        )
+
+        assert result.success is True
+        assert result.completed is True
+        assert process.observe_calls == 3
+        assert process.plan_calls == 1
+        assert result.steps_taken == 1
 
     def test_multistep_memory_decision_failure_updates_status_with_real_error(self, monkeypatch):
         process = MemoryDecisionFailureProcess()

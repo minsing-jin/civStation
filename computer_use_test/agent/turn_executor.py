@@ -547,6 +547,8 @@ def run_primitive_loop(
     step_start = time.monotonic()
     plan_end = step_start
     exec_end = step_start
+    step = 0
+    loop_iterations = 0
 
     def _strip_user_priority_prefix(text: str) -> str:
         prefix = "[사용자 최우선 지시] "
@@ -704,6 +706,14 @@ def run_primitive_loop(
             step_value = max_value
         return step_value, max_value
 
+    def _iteration_limit() -> int:
+        try:
+            requested_limit = int(process.get_iteration_limit(memory, action_limit=max_steps))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Iteration limit hook failed for %s: %s", primitive_name, exc)
+            requested_limit = max_steps
+        return max(max_steps, requested_limit)
+
     def _policy_semantic_recheck_once(
         initial_result,
         *,
@@ -785,7 +795,38 @@ def run_primitive_loop(
         logger.info("Primitive loop completed from terminal state: %s in %s steps", primitive_name, step + 1)
         return True
 
-    for step in range(max_steps):
+    while True:
+        if result.steps_taken >= max_steps:
+            result.error_message = f"Primitive loop reached safety action cap ({max_steps}) without completion"
+            _emit_runtime_trace(
+                rl=rl,
+                state_bridge=state_bridge,
+                primitive_name=primitive_name,
+                stage=memory.current_stage or "-",
+                phase="error",
+                summary=result.error_message,
+            )
+            logger.warning(result.error_message)
+            break
+
+        current_iteration_limit = _iteration_limit()
+        if loop_iterations >= current_iteration_limit:
+            result.error_message = (
+                f"Primitive loop reached safety iteration cap ({current_iteration_limit}) without completion"
+            )
+            _emit_runtime_trace(
+                rl=rl,
+                state_bridge=state_bridge,
+                primitive_name=primitive_name,
+                stage=memory.current_stage or "-",
+                phase="error",
+                summary=result.error_message,
+            )
+            logger.warning(result.error_message)
+            break
+
+        step = loop_iterations
+        loop_iterations += 1
         pre_image, screen_w, screen_h, x_offset, y_offset = capture_screen_pil()
         if primitive_name == "policy_primitive":
             memory.set_policy_capture_geometry(screen_w, screen_h, x_offset, y_offset)
@@ -859,7 +900,7 @@ def run_primitive_loop(
                     detail=memory.last_observation_anchor or "",
                 )
             stm_str = _multi_step_stm_summary()
-            visible_step, visible_max_steps = _visible_progress(step + 1)
+            visible_step, visible_max_steps = _visible_progress(result.steps_taken)
             rl.update_multi_step(
                 active=True,
                 step=visible_step,
@@ -1524,7 +1565,13 @@ def run_primitive_loop(
         break
 
     if not result.completed and not result.re_route and not result.error_message:
-        result.error_message = f"Primitive loop reached safety action cap ({max_steps}) without completion"
+        current_iteration_limit = _iteration_limit()
+        if result.steps_taken >= max_steps:
+            result.error_message = f"Primitive loop reached safety action cap ({max_steps}) without completion"
+        else:
+            result.error_message = (
+                f"Primitive loop reached safety iteration cap ({current_iteration_limit}) without completion"
+            )
         _emit_runtime_trace(
             rl=rl,
             state_bridge=state_bridge,

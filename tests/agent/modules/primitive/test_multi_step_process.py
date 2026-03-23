@@ -445,6 +445,16 @@ class TestPromptUpdates:
     def test_religion_registry_allows_hover_scroll_flow_budget(self):
         assert PRIMITIVE_REGISTRY["religion_primitive"]["max_steps"] >= 18
 
+    def test_religion_process_requests_extra_iteration_budget_for_scan_heavy_flow(self):
+        process = get_multi_step_process("religion_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("religion_primitive", enable_choice_catalog=True)
+        process.initialize(memory)
+
+        iteration_limit = process.get_iteration_limit(memory, action_limit=20)
+
+        assert iteration_limit > 20
+
     def test_popup_prompt_handles_policy_change_popup(self):
         prompt = get_primitive_prompt("popup_primitive")
         assert "정책변경" in prompt

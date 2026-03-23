@@ -474,6 +474,16 @@ class BaseMultiStepProcess:
         step = max(0, min(executed_steps, hard_max_steps))
         return step, hard_max_steps
 
+    def get_iteration_limit(
+        self,
+        memory: ShortTermMemory,
+        *,
+        action_limit: int,
+    ) -> int:
+        """Return the maximum planner loop iterations allowed for this process."""
+        del memory
+        return action_limit
+
     def on_action_success(self, memory: ShortTermMemory, action: AgentAction) -> None:
         """Hook called when the action produced a meaningful UI change."""
 
@@ -6275,6 +6285,7 @@ class ReligionProcess(ObservationAssistedProcess):
     _EXIT_STAGE = "religion_exit"
     _COMPLETE_STAGE = "religion_complete"
     _FOLLOWUP_STATES = {"select", "confirm", "exit", "complete", "unknown"}
+    _ITERATION_BUFFER = 12
 
     def __init__(self, primitive_name: str, completion_condition: str = ""):
         super().__init__(
@@ -6305,6 +6316,15 @@ class ReligionProcess(ObservationAssistedProcess):
         if memory.current_stage == "observe_choices":
             return True
         return super().should_observe(memory)
+
+    def get_iteration_limit(
+        self,
+        memory: ShortTermMemory,
+        *,
+        action_limit: int,
+    ) -> int:
+        del memory
+        return max(action_limit, action_limit + self._ITERATION_BUFFER)
 
     @staticmethod
     def _ratio_to_norm(value: float, normalizing_range: int) -> int:
