@@ -19,6 +19,7 @@ def test_anthropic_computer_provider_translates_left_click(monkeypatch):
     monkeypatch.setattr("anthropic.Anthropic", lambda *, api_key: SimpleNamespace())
     provider = AnthropicComputerVLMProvider(api_key="test-key", model="claude-sonnet-4-5")
 
+    calls = []
     response = SimpleNamespace(
         content=[
             SimpleNamespace(
@@ -30,7 +31,12 @@ def test_anthropic_computer_provider_translates_left_click(monkeypatch):
         usage=SimpleNamespace(input_tokens=12, output_tokens=14),
         stop_reason="tool_use",
     )
-    provider.client = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(create=lambda **kwargs: response)))
+
+    def fake_create(**kwargs):
+        calls.append(kwargs)
+        return response
+
+    provider.client = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(create=fake_create)))
 
     action = provider.analyze(
         pil_image=Image.new("RGB", (640, 320), "white"),
@@ -44,6 +50,8 @@ def test_anthropic_computer_provider_translates_left_click(monkeypatch):
     assert action.button == "left"
     assert action.x == 500
     assert action.y == 500
+    assert calls[0]["betas"] == ["computer-use-2025-01-24"]
+    assert calls[0]["tools"][0]["type"] == "computer_20250124"
 
 
 def test_anthropic_computer_provider_translates_key_action(monkeypatch):
@@ -73,3 +81,38 @@ def test_anthropic_computer_provider_translates_key_action(monkeypatch):
     assert action is not None
     assert action.action == "press"
     assert action.key == "cmd+shift+p"
+
+
+def test_anthropic_computer_provider_uses_latest_tool_version_for_claude_46(monkeypatch):
+    monkeypatch.setattr("anthropic.Anthropic", lambda *, api_key: SimpleNamespace())
+    provider = AnthropicComputerVLMProvider(api_key="test-key", model="claude-sonnet-4-6")
+
+    calls = []
+    response = SimpleNamespace(
+        content=[
+            SimpleNamespace(
+                type="tool_use",
+                name="computer",
+                input={"action": "left_click", "coordinate": [100, 50]},
+            )
+        ],
+        usage=SimpleNamespace(input_tokens=12, output_tokens=14),
+        stop_reason="tool_use",
+    )
+
+    def fake_create(**kwargs):
+        calls.append(kwargs)
+        return response
+
+    provider.client = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(create=fake_create)))
+
+    action = provider.analyze(
+        pil_image=Image.new("RGB", (200, 100), "white"),
+        instruction="클릭해",
+        normalizing_range=1000,
+        img_config=None,
+    )
+
+    assert action is not None
+    assert calls[0]["betas"] == ["computer-use-2025-11-24"]
+    assert calls[0]["tools"][0]["type"] == "computer_20251124"

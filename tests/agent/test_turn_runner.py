@@ -14,6 +14,15 @@ class _DummyRunLogSession:
         self.closed = True
 
 
+class _DummyScreenshotTrajectorySession:
+    def __init__(self):
+        self.path = Path("/tmp/trajectory")
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
 class _DummyWorker:
     def __init__(self):
         self.started = False
@@ -58,9 +67,11 @@ class _DummyAgentGate:
 
 def test_main_closes_run_log_session_when_configuration_fails(monkeypatch):
     session = _DummyRunLogSession()
+    trajectory_session = _DummyScreenshotTrajectorySession()
 
     monkeypatch.setattr(turn_runner, "parse_args", lambda: SimpleNamespace())
     monkeypatch.setattr(turn_runner, "start_run_log_session", lambda: session)
+    monkeypatch.setattr(turn_runner, "start_screenshot_trajectory_session", lambda **kwargs: trajectory_session)
     monkeypatch.setattr(
         turn_runner,
         "setup_providers",
@@ -70,10 +81,12 @@ def test_main_closes_run_log_session_when_configuration_fails(monkeypatch):
     turn_runner.main()
 
     assert session.closed is True
+    assert trajectory_session.closed is True
 
 
 def test_main_closes_run_log_session_after_one_turn(monkeypatch):
     session = _DummyRunLogSession()
+    trajectory_session = _DummyScreenshotTrajectorySession()
     context_updater = _DummyWorker()
     rich_logger = _DummyRichLoggerInstance()
     run_calls = []
@@ -113,6 +126,7 @@ def test_main_closes_run_log_session_after_one_turn(monkeypatch):
 
     monkeypatch.setattr(turn_runner, "parse_args", lambda: args)
     monkeypatch.setattr(turn_runner, "start_run_log_session", lambda: session)
+    monkeypatch.setattr(turn_runner, "start_screenshot_trajectory_session", lambda **kwargs: trajectory_session)
     monkeypatch.setattr(turn_runner, "setup_providers", lambda args: (object(), object()))
     monkeypatch.setattr(turn_runner.ContextManager, "get_instance", staticmethod(lambda: object()))
     monkeypatch.setattr(turn_runner, "setup_chat_app", lambda *args: (None, None, None))
@@ -149,3 +163,4 @@ def test_main_closes_run_log_session_after_one_turn(monkeypatch):
     assert rich_logger.started == 1
     assert rich_logger.stopped == 1
     assert session.closed is True
+    assert trajectory_session.closed is True

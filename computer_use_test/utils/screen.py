@@ -23,6 +23,7 @@ from types import SimpleNamespace
 from PIL import Image
 
 from computer_use_test.utils.llm_provider.base import AgentAction
+from computer_use_test.utils.screenshot_trajectory import record_screenshot_trajectory
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +141,11 @@ def capture_screen_pil(crop_to_game: bool = True):
             x_offset, y_offset = gx, gy
             region_w, region_h = gw, gh
             logger.debug(f"Cropped to game window: {gw}x{gh} at ({gx},{gy})")
+
+    try:
+        record_screenshot_trajectory(screenshot, label="capture")
+    except Exception as exc:
+        logger.debug("Screenshot trajectory capture skipped: %s", exc)
 
     return screenshot, region_w, region_h, x_offset, y_offset
 

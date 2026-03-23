@@ -124,6 +124,7 @@ def get_available_providers() -> dict[str, str]:
         "claude": ClaudeVLMProvider.DEFAULT_MODEL,
         "gemini": GeminiVLMProvider.DEFAULT_MODEL,
         "gpt": GPTVLMProvider.DEFAULT_MODEL,
+        "openai": GPTVLMProvider.DEFAULT_MODEL,
         "openai-computer": OpenAIComputerVLMProvider.DEFAULT_MODEL,
         "anthropic-computer": AnthropicComputerVLMProvider.DEFAULT_MODEL,
         "mock": "mock-vlm",
