@@ -217,6 +217,7 @@ def _post_action_wait_seconds(
     actions: list[AgentAction],
     *,
     delay_before_action: float,
+    stage_name: str = "",
 ) -> float:
     """Return a capture-settle delay tuned to the executed action bundle."""
     if primitive_name == "policy_primitive":
@@ -230,6 +231,12 @@ def _post_action_wait_seconds(
         action.action == "scroll" for action in actions
     ):
         return max(default_wait, _SCROLL_LIST_POST_ACTION_WAIT_SECONDS)
+    if (
+        primitive_name == "city_production_primitive"
+        and stage_name == "select_from_memory"
+        and any(action.action in {"click", "double_click"} for action in actions)
+    ):
+        return max(default_wait, 0.5)
     return default_wait
 
 
@@ -1212,6 +1219,7 @@ def run_primitive_loop(
             primitive_name,
             actions_list,
             delay_before_action=delay_before_action,
+            stage_name=memory.current_stage or "",
         )
         if post_action_wait > 0:
             time.sleep(post_action_wait)
@@ -1955,11 +1963,12 @@ def run_one_turn(
                 if (
                     new_router.primitive == primitive_name
                     and loop_result.completed
-                    and primitive_name == "voting_primitive"
+                    and primitive_name in {"voting_primitive", "city_production_primitive"}
                 ):
                     logger.info(
-                        "Completed voting primitive rerouted back to voting "
-                        "-> retrying routing without restarting vote loop"
+                        "Completed %s rerouted back to same primitive "
+                        "-> retrying routing without restarting completed loop",
+                        primitive_name,
                     )
                     continue
                 if new_router.primitive == primitive_name and loop_result.re_route:

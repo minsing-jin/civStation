@@ -2069,13 +2069,197 @@ class TestEntryGatedProcesses:
             hitl_directive=None,
         )
 
-        assert isinstance(actions, list)
-        assert len(actions) == 3
-        assert all(action.action == "click" for action in actions)
-        assert all(action.task_status == "in_progress" for action in actions)
-        process.on_actions_success(memory, actions)
-        assert memory.current_stage == "vote_hover_left_for_target"
+        assert isinstance(actions, AgentAction)
+        assert actions.action == "click"
+        assert actions.task_status == "in_progress"
         assert memory.voting_state.selected_vote_direction == "upvote"
+        assert memory.voting_state.direction_repeat_remaining == 2
+
+        verify = process.verify_action_success(
+            FakeProvider([json.dumps({"selected_direction_active": True, "reason": "밝은 파란색 활성 상태"})]),
+            Image.new("RGB", (100, 100)),
+            memory,
+            actions,
+        )
+
+        assert verify.handled is True
+        assert verify.passed is True
+
+        process.on_action_success(memory, actions)
+        assert memory.current_stage == "vote_choose_direction"
+
+        follow_up_actions = process.plan_action(
+            FakeProvider([]),
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert isinstance(follow_up_actions, list)
+        assert len(follow_up_actions) == 2
+        assert all(action.action == "click" for action in follow_up_actions)
+        assert all(action.task_status == "in_progress" for action in follow_up_actions)
+        process.on_actions_success(memory, follow_up_actions)
+        assert memory.current_stage == "vote_hover_left_for_target"
+        assert memory.voting_state.direction_repeat_remaining == 0
+
+    def test_voting_direction_stage_moves_to_target_when_button_is_not_active(self):
+        process = get_multi_step_process("voting_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("voting_primitive", enable_choice_catalog=True, enable_voting_state=True)
+        memory.choice_catalog.candidates["luxury_ban"] = ChoiceCandidate(
+            id="luxury_ban",
+            label="사치 자원 금지",
+        )
+        memory.init_voting_state()
+        memory.mark_substep("voting_entry_done")
+        memory.set_current_voting_agenda(option_id="luxury_ban")
+        memory.begin_stage("vote_choose_direction")
+        provider = FakeProvider(
+            [
+                json.dumps(
+                    {
+                        "x": 540,
+                        "y": 430,
+                        "repeat_count": 3,
+                        "selection": "upvote",
+                        "reason": "필요한 표만큼 같은 찬성 버튼을 여러 번 눌러야 함",
+                    }
+                )
+            ]
+        )
+
+        action = process.plan_action(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert isinstance(action, AgentAction)
+        assert memory.voting_state.direction_repeat_remaining == 2
+
+        verify = process.verify_action_success(
+            FakeProvider([json.dumps({"selected_direction_active": False, "reason": "검은색이라 아직 비활성"})]),
+            Image.new("RGB", (100, 100)),
+            memory,
+            action,
+        )
+
+        assert verify.handled is True
+        assert verify.passed is True
+
+        process.on_action_success(memory, action)
+
+        assert memory.current_stage == "vote_hover_left_for_target"
+        assert memory.voting_state.direction_repeat_remaining == 0
+
+    def test_voting_generic_fallback_entry_keeps_retrying_while_globe_button_persists(self):
+        process = get_multi_step_process("voting_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("voting_primitive", enable_choice_catalog=True, enable_voting_state=True)
+        process.initialize(memory)
+        memory.begin_stage("generic_fallback")
+        memory.set_fallback_return_stage("vote_entry", "vote_entry")
+        action = AgentAction(action="click", x=930, y=885, reasoning="오른쪽 아래 지구본 버튼 클릭")
+
+        verify = process.verify_action_success(
+            FakeProvider(
+                [
+                    json.dumps(
+                        {
+                            "voting_mode": "globe_button",
+                            "voting_screen_ready": False,
+                            "welcome_popup_visible": False,
+                            "globe_button_visible": True,
+                            "reasoning": "여전히 우하단 지구본 버튼만 보임",
+                        }
+                    )
+                ]
+            ),
+            Image.new("RGB", (100, 100)),
+            memory,
+            action,
+        )
+
+        assert verify.handled is True
+        assert verify.passed is False
+
+        resolution = process.handle_no_progress(
+            FakeProvider(
+                [
+                    json.dumps(
+                        {
+                            "voting_mode": "globe_button",
+                            "voting_screen_ready": False,
+                            "welcome_popup_visible": False,
+                            "globe_button_visible": True,
+                            "reasoning": "여전히 우하단 지구본 버튼만 보임",
+                        }
+                    )
+                ]
+            ),
+            Image.new("RGB", (100, 100)),
+            memory,
+            last_action=action,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert resolution.handled is True
+        assert resolution.reroute is False
+        assert memory.current_stage == "vote_entry"
+        assert memory.fallback_return_stage == "vote_entry"
+
+    def test_voting_no_progress_retries_same_stage_until_success(self):
+        process = get_multi_step_process("voting_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("voting_primitive", enable_choice_catalog=True, enable_voting_state=True)
+        memory.choice_catalog.candidates["luxury_ban"] = ChoiceCandidate(
+            id="luxury_ban",
+            label="사치 자원 금지",
+        )
+        memory.init_voting_state()
+        memory.mark_substep("voting_entry_done")
+        memory.set_current_voting_agenda(option_id="luxury_ban")
+        memory.begin_stage("vote_choose_resolution")
+        action = AgentAction(action="click", x=540, y=430, reasoning="A안 선택 재시도")
+
+        first = process.handle_no_progress(
+            FakeProvider([]),
+            Image.new("RGB", (100, 100)),
+            memory,
+            last_action=action,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+        second = process.handle_no_progress(
+            FakeProvider([]),
+            Image.new("RGB", (100, 100)),
+            memory,
+            last_action=action,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert first.handled is True
+        assert first.reroute is False
+        assert second.handled is True
+        assert second.reroute is False
+        assert memory.current_stage == "vote_choose_resolution"
+        assert memory.fallback_return_stage == ""
 
     def test_voting_left_hover_runs_before_target_selection(self):
         process = get_multi_step_process("voting_primitive", "")
@@ -2160,6 +2344,9 @@ class TestEntryGatedProcesses:
         memory.init_voting_state()
         memory.mark_substep("voting_entry_done")
         memory.set_current_voting_agenda(option_id="luxury_ban")
+        memory.mark_current_voting_resolution("a")
+        memory.mark_current_voting_direction("upvote")
+        memory.mark_current_voting_target("말")
         memory.begin_stage("vote_resolve_agenda")
         provider = FakeProvider([json.dumps({"agenda_state": "complete", "reason": "현재 합의안 투표 완료"})])
 
@@ -2178,6 +2365,41 @@ class TestEntryGatedProcesses:
         assert memory.current_stage == "vote_select_agenda"
         assert memory.voting_state.completed_agenda_ids == ["luxury_ban"]
         assert memory.choice_catalog.candidates["luxury_ban"].metadata["selected"] is True
+
+    def test_voting_resolve_stage_does_not_complete_when_target_was_not_selected(self):
+        process = get_multi_step_process("voting_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("voting_primitive", enable_choice_catalog=True, enable_voting_state=True)
+        memory.remember_choices(
+            [
+                {"id": "luxury_ban", "label": "사치 자원 금지"},
+                {"id": "trade_bonus", "label": "교역 보너스"},
+            ],
+            end_of_list=True,
+            scroll_direction="down",
+        )
+        memory.init_voting_state()
+        memory.mark_substep("voting_entry_done")
+        memory.set_current_voting_agenda(option_id="luxury_ban")
+        memory.mark_current_voting_resolution("a")
+        memory.mark_current_voting_direction("upvote")
+        memory.begin_stage("vote_resolve_agenda")
+        provider = FakeProvider([json.dumps({"agenda_state": "complete", "reason": "현재 합의안 투표 완료"})])
+
+        action = process.plan_action(
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert isinstance(action, StageTransition)
+        assert action.stage == "vote_choose_target"
+        assert memory.current_stage == "vote_choose_target"
+        assert memory.voting_state.completed_agenda_ids == []
 
     def test_voting_exit_stage_finishes_in_terminal_state(self):
         process = get_multi_step_process("voting_primitive", "")
@@ -3465,6 +3687,21 @@ class TestEntryGatedProcesses:
 
         assert memory.current_stage == "resolve_post_select_followup"
 
+    def test_city_production_select_click_runs_semantic_verify_without_raw_ui_change(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("choice_list")
+        memory.begin_stage("select_from_memory")
+
+        should_verify = process.should_verify_action_without_ui_change(
+            memory,
+            AgentAction(action="click", x=640, y=420, reasoning="개척자 선택"),
+        )
+
+        assert should_verify is True
+
     def test_city_production_select_click_can_finish_immediately_when_initial_list_has_no_hidden_choices(self):
         process = get_multi_step_process("city_production_primitive", "")
         memory = ShortTermMemory()
@@ -3609,6 +3846,86 @@ class TestEntryGatedProcesses:
 
         assert result.handled is False
         assert memory.current_stage == "select_from_memory"
+
+    def test_city_production_select_click_no_progress_moves_to_post_select_resolve_without_reclick(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("choice_list")
+        memory.begin_stage("select_from_memory")
+        memory.choice_catalog.end_reached = True
+        memory.choice_catalog.scan_end_reason = "observer_end_of_list"
+        memory.choice_catalog.candidates["개척자"] = ChoiceCandidate(
+            id="개척자",
+            label="개척자",
+            visible_now=True,
+            position_hint="visible",
+        )
+        memory.set_best_choice(option_id="개척자", reason="확장 우선")
+
+        resolution = process.handle_no_progress(
+            FakeProvider([]),
+            Image.new("RGB", (100, 100)),
+            memory,
+            last_action=AgentAction(action="click", x=640, y=420, task_status="in_progress"),
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert resolution.handled is True
+        assert resolution.reroute is False
+        assert memory.current_stage == "resolve_post_select_followup"
+        assert memory.fallback_return_stage == ""
+
+    def test_city_production_select_click_finishes_when_followup_is_unknown_but_production_ui_is_gone(self):
+        process = get_multi_step_process("city_production_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.mark_substep("production_entry_done")
+        memory.set_branch("choice_list")
+        memory.begin_stage("select_from_memory")
+        memory.choice_catalog.end_reached = True
+        memory.choice_catalog.scan_end_reason = "observer_end_of_list"
+        memory.choice_catalog.candidates["개척자"] = ChoiceCandidate(
+            id="개척자",
+            label="개척자",
+            visible_now=True,
+            position_hint="visible",
+        )
+        memory.set_best_choice(option_id="개척자", reason="확장 우선")
+        provider = FakeProvider(
+            [
+                json.dumps({"post_select_state": "unknown", "reason": "판별 불가"}),
+                json.dumps(
+                    {
+                        "production_mode": "other",
+                        "production_screen_ready": False,
+                        "notification_visible": False,
+                        "reasoning": "우하단 톱니 생산 버튼도 없고 생산 목록/배치 화면도 닫힘",
+                    }
+                ),
+            ]
+        )
+
+        result = process.verify_action_success(
+            provider,
+            Image.new("RGB", (1600, 900)),
+            memory,
+            AgentAction(
+                action="click",
+                x=640,
+                y=420,
+                reasoning="개척자 선택",
+                task_status="in_progress",
+            ),
+        )
+
+        assert result.handled is True
+        assert result.passed is True
+        assert memory.current_stage == "production_complete"
 
     def test_city_production_post_select_resolve_routes_to_placement_followup(self):
         process = get_multi_step_process("city_production_primitive", "")
@@ -4241,21 +4558,24 @@ class TestPolicyProcess:
         assert action.x == expected_military[0]
         assert action.y == expected_military[1]
 
-    def test_click_cached_tab_verification_uses_card_list_as_primary_signal(self):
+    def test_click_cached_tab_verification_uses_card_list_as_primary_signal_for_first_military_tab(self):
         process = get_multi_step_process("policy_primitive", "")
         memory = ShortTermMemory()
         memory.start_task("policy_primitive", enable_policy_state=True)
         memory.init_policy_state(
-            tab_positions=[{"tab_name": "경제", "x": 760, "y": 100}],
-            eligible_tabs_queue=["경제"],
-            slot_inventory=[{"slot_id": "economic_1", "slot_type": "경제", "is_empty": True}],
+            tab_positions=[
+                {"tab_name": "군사", "x": 700, "y": 100},
+                {"tab_name": "경제", "x": 760, "y": 100},
+            ],
+            eligible_tabs_queue=["군사", "경제"],
+            slot_inventory=[{"slot_id": "military_1", "slot_type": "군사", "is_empty": True}],
             wild_slot_active=False,
-            provisional_tabs=["경제"],
+            provisional_tabs=["군사", "경제"],
         )
         memory.begin_stage("click_cached_tab")
         provider = FakeProvider(
             [
-                json.dumps({"match": True, "observed_tab": "경제", "reason": "노란 카드"}),
+                json.dumps({"match": True, "observed_tab": "군사", "reason": "빨간 카드"}),
             ]
         )
 
@@ -4268,69 +4588,31 @@ class TestPolicyProcess:
 
         assert verified.handled is True
         assert verified.passed is True
-        assert "기대 탭: 경제" in provider.last_text
-        assert verified.details["card_list_observed"] == "경제"
+        assert "기대 탭: 군사" in provider.last_text
+        assert verified.details["card_list_observed"] == "군사"
         assert verified.details["tab_bar_observed"] == "skipped"
         assert provider.last_pil_size == _policy_crop_size(
             process, Image.new("RGB", (100, 100)), _POLICY_RIGHT_CARD_LIST_RATIOS
         )
 
-    def test_click_cached_tab_verification_accepts_empty_diplomatic_panel(self):
-        process = get_multi_step_process("policy_primitive", "")
+    def test_non_military_tab_click_skips_semantic_verification_when_bootstrap_row_aligned(self):
         memory = ShortTermMemory()
         memory.start_task("policy_primitive", enable_policy_state=True)
         memory.init_policy_state(
-            tab_positions=[{"tab_name": "외교", "x": 820, "y": 100}],
-            eligible_tabs_queue=["외교"],
-            slot_inventory=[{"slot_id": "diplomatic_1", "slot_type": "외교", "is_empty": True}],
+            tab_positions=[
+                {"tab_name": "군사", "x": 700, "y": 100, "confirmed": True},
+                {"tab_name": "경제", "x": 760, "y": 100},
+                {"tab_name": "외교", "x": 820, "y": 100},
+            ],
+            eligible_tabs_queue=["경제", "외교"],
+            slot_inventory=[{"slot_id": "economic_1", "slot_type": "경제", "is_empty": True}],
             wild_slot_active=False,
-            provisional_tabs=["외교"],
+            selected_tab_name="경제",
         )
         memory.begin_stage("click_cached_tab")
-        provider = FakeProvider(
-            [
-                json.dumps({"match": True, "observed_tab": "empty", "reason": "오른쪽 카드 없음"}),
-            ]
-        )
+        memory.set_policy_verified_active_tab("경제")
 
-        verified = process.verify_action_success(
-            provider,
-            Image.new("RGB", (100, 100)),
-            memory,
-            type("A", (), {"action": "click"})(),
-        )
-
-        assert verified.handled is True
-        assert verified.passed is True
-        assert verified.details["card_list_observed"] == "empty"
-        assert provider.last_pil_size == _policy_crop_size(
-            process, Image.new("RGB", (100, 100)), _POLICY_RIGHT_CARD_LIST_RATIOS
-        )
-
-    def test_click_cached_tab_verification_fails_for_wrong_color_panel(self):
-        process = get_multi_step_process("policy_primitive", "")
-        memory = ShortTermMemory()
-        memory.start_task("policy_primitive", enable_policy_state=True)
-        memory.init_policy_state(
-            tab_positions=[{"tab_name": "군사", "x": 700, "y": 100}],
-            eligible_tabs_queue=["군사"],
-            slot_inventory=[{"slot_id": "military_1", "slot_type": "군사", "is_empty": True}],
-            wild_slot_active=False,
-            provisional_tabs=["군사"],
-        )
-        memory.begin_stage("click_cached_tab")
-        provider = FakeProvider([json.dumps({"match": False, "observed_tab": "경제", "reason": "노란 카드"})])
-
-        verified = process.verify_action_success(
-            provider,
-            Image.new("RGB", (100, 100)),
-            memory,
-            type("A", (), {"action": "click"})(),
-        )
-
-        assert verified.handled is True
-        assert verified.passed is False
-        assert verified.details["card_list_observed"] == "경제"
+        assert memory.should_verify_policy_tab_click() is False
 
     def test_bootstrap_fails_when_any_visible_policy_tab_coord_is_missing(self):
         process = get_multi_step_process("policy_primitive", "")
@@ -4387,6 +4669,7 @@ class TestPolicyProcess:
             selected_tab_name="군사",
         )
         memory.mark_policy_tab_confirmed("군사")
+        memory.set_policy_verified_active_tab("군사")
         memory.begin_stage("plan_current_tab")
         provider = FakeProvider(
             [
@@ -4450,6 +4733,7 @@ class TestPolicyProcess:
             selected_tab_name="경제",
         )
         memory.mark_policy_tab_confirmed("경제")
+        memory.set_policy_verified_active_tab("경제")
         memory.begin_stage("plan_current_tab")
         provider = FakeProvider(
             [
@@ -4511,6 +4795,7 @@ class TestPolicyProcess:
             selected_tab_name="경제",
         )
         memory.mark_policy_tab_confirmed("경제")
+        memory.set_policy_verified_active_tab("경제")
         memory.begin_stage("plan_current_tab")
         provider = FakeProvider([json.dumps([])])
 
@@ -4548,6 +4833,7 @@ class TestPolicyProcess:
             selected_tab_name="군사",
         )
         memory.mark_policy_tab_confirmed("군사")
+        memory.set_policy_verified_active_tab("군사")
         memory.begin_stage("plan_current_tab")
         provider = FakeProvider([json.dumps([])])
 
@@ -4582,6 +4868,7 @@ class TestPolicyProcess:
             selected_tab_name="경제",
         )
         memory.mark_policy_tab_confirmed("경제")
+        memory.set_policy_verified_active_tab("경제")
         memory.begin_stage("plan_current_tab")
         provider = FakeProvider(
             [
@@ -4693,7 +4980,73 @@ class TestPolicyProcess:
         assert memory.get_policy_current_tab_name() == "경제"
         assert memory.policy_state.completed_tabs == ["군사"]
 
+    def test_policy_click_next_tab_reverifies_when_selected_tab_is_stale(self):
+        process = get_multi_step_process("policy_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("policy_primitive", enable_policy_state=True)
+        memory.mark_policy_entry_done()
+        memory.init_policy_state(
+            tab_positions=[
+                {"tab_name": "군사", "x": 700, "y": 100},
+                {"tab_name": "경제", "x": 760, "y": 100},
+            ],
+            eligible_tabs_queue=["군사", "경제"],
+            slot_inventory=[{"slot_id": "military_1", "slot_type": "군사", "is_empty": True}],
+            wild_slot_active=False,
+            overview_mode=False,
+            selected_tab_name="경제",
+        )
+        memory.mark_policy_tab_confirmed("군사")
+        memory.mark_policy_tab_completed("군사")
+        memory.advance_policy_tab()
+        memory.begin_stage("click_next_tab")
+
+        action = process.plan_action(
+            FakeProvider([]),
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert action is not None
+        assert action.action == "click"
+        assert action.x == 760
+        assert memory.current_stage == "click_next_tab"
+
     def test_click_cached_tab_stage_skips_reclick_when_selected_tab_already_matches_current_tab(self):
+        process = get_multi_step_process("policy_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("policy_primitive", enable_policy_state=True)
+        memory.mark_policy_entry_done()
+        memory.init_policy_state(
+            tab_positions=[{"tab_name": "군사", "x": 700, "y": 100, "confirmed": True}],
+            eligible_tabs_queue=["군사"],
+            slot_inventory=[{"slot_id": "military_1", "slot_type": "군사", "is_empty": True}],
+            wild_slot_active=False,
+            overview_mode=False,
+            selected_tab_name="군사",
+        )
+        memory.set_policy_verified_active_tab("군사")
+        memory.begin_stage("click_cached_tab")
+
+        action = process.plan_action(
+            FakeProvider([]),
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert isinstance(action, StageTransition)
+        assert action.stage == "plan_current_tab"
+        assert memory.current_stage == "plan_current_tab"
+
+    def test_click_cached_tab_reverifies_when_selected_tab_matches_without_verified_active_tab(self):
         process = get_multi_step_process("policy_primitive", "")
         memory = ShortTermMemory()
         memory.start_task("policy_primitive", enable_policy_state=True)
@@ -4718,9 +5071,41 @@ class TestPolicyProcess:
             hitl_directive=None,
         )
 
+        assert action is not None
+        assert action.action == "click"
+        assert action.x == 700
+        assert memory.current_stage == "click_cached_tab"
+
+    def test_plan_current_tab_requires_verified_active_tab_before_noop_advance(self):
+        process = get_multi_step_process("policy_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("policy_primitive", enable_policy_state=True)
+        memory.mark_policy_entry_done()
+        memory.init_policy_state(
+            tab_positions=[{"tab_name": "군사", "x": 700, "y": 100, "confirmed": True}],
+            eligible_tabs_queue=["군사"],
+            slot_inventory=[{"slot_id": "military_1", "slot_type": "군사", "is_empty": True}],
+            wild_slot_active=False,
+            overview_mode=False,
+            selected_tab_name="군사",
+        )
+        memory.mark_policy_tab_confirmed("군사")
+        memory.begin_stage("plan_current_tab")
+
+        action = process.plan_action(
+            FakeProvider([json.dumps([])]),
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
         assert isinstance(action, StageTransition)
-        assert action.stage == "plan_current_tab"
-        assert memory.current_stage == "plan_current_tab"
+        assert action.stage == "click_cached_tab"
+        assert memory.current_stage == "click_cached_tab"
+        assert memory.get_policy_current_tab_name() == "군사"
 
     def test_finalize_policy_without_changes_returns_escape_complete_when_assign_disabled(self):
         process = get_multi_step_process("policy_primitive", "")

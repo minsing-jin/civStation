@@ -9,6 +9,7 @@ from computer_use_test.agent.modules.hitl.status_ui.state_bridge import AgentSta
 from computer_use_test.agent.modules.memory.short_term_memory import ShortTermMemory
 from computer_use_test.agent.modules.primitive.multi_step_process import (
     BaseMultiStepProcess,
+    CityProductionProcess,
     ObservationBundle,
     SemanticVerifyResult,
     StageTransition,
@@ -624,6 +625,30 @@ class TerminalFromSemanticVerifyProcess(BaseMultiStepProcess):
         return "city production reached explicit terminal state"
 
 
+class CityProductionNoDiffSelectProcess(CityProductionProcess):
+    def __init__(self):
+        super().__init__("city_production_primitive", "")
+
+    def initialize(self, memory: ShortTermMemory) -> None:
+        memory.mark_substep("production_entry_done")
+        memory.set_branch(self._LIST_BRANCH)
+        memory.begin_stage("select_from_memory")
+
+    def should_observe(self, memory: ShortTermMemory) -> bool:
+        return False
+
+    def plan_action(self, provider, pil_image, memory, **kwargs):
+        if memory.current_stage == "select_from_memory":
+            return AgentAction(
+                action="click",
+                x=500,
+                y=500,
+                reasoning="select visible unit even if raw diff misses panel close",
+                task_status="in_progress",
+            )
+        return super().plan_action(provider, pil_image, memory, **kwargs)
+
+
 class CityProductionSelectiveScrollVerifyProcess(BaseMultiStepProcess):
     def __init__(self):
         super().__init__("city_production_primitive", "")
@@ -1025,6 +1050,25 @@ class TestRunPrimitiveLoop:
             "religion_primitive",
             [AgentAction(action="click", x=500, y=790, task_status="in_progress")],
             delay_before_action=0,
+        )
+
+        assert wait_seconds == 0.5
+
+    def test_post_action_wait_seconds_uses_half_second_for_policy_tab_clicks(self):
+        wait_seconds = _post_action_wait_seconds(
+            "policy_primitive",
+            [AgentAction(action="click", x=760, y=100, task_status="in_progress")],
+            delay_before_action=0,
+        )
+
+        assert wait_seconds == 0.5
+
+    def test_post_action_wait_seconds_uses_half_second_for_city_production_select_clicks(self):
+        wait_seconds = _post_action_wait_seconds(
+            "city_production_primitive",
+            [AgentAction(action="click", x=640, y=420, task_status="in_progress")],
+            delay_before_action=0,
+            stage_name="select_from_memory",
         )
 
         assert wait_seconds == 0.5
@@ -1982,6 +2026,109 @@ class TestRunPrimitiveLoop:
         assert result.success is True
         assert process.scroll_verify_calls == 1
 
+    def test_city_production_select_click_semantically_completes_when_raw_ui_unchanged(self, monkeypatch):
+        process = CityProductionNoDiffSelectProcess()
+        provider = QueuedProvider([json.dumps({"post_select_state": "done", "reason": "추가 단계 없음"})])
+        image = Image.new("RGB", (100, 100))
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        executed_actions: list[str] = []
+
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            lambda: (image, 1440, 900, 0, 0),
+        )
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.execute_action",
+            lambda action, *args: executed_actions.append(action.action),
+        )
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: True)
+
+        result = run_primitive_loop(
+            planner_provider=provider,
+            primitive_name="city_production_primitive",
+            screen_w=1440,
+            screen_h=900,
+            normalizing_range=1000,
+            x_offset=0,
+            y_offset=0,
+            strategy_string="",
+            recent_actions_str="없음",
+            hitl_directive=None,
+            memory=memory,
+            ctx=self.ctx,
+            max_steps=2,
+            completion_condition="",
+            planner_img_config=None,
+            delay_before_action=0,
+        )
+
+        assert result.success is True
+        assert result.completed is True
+        assert result.steps_taken == 1
+        assert memory.current_stage == "production_complete"
+        assert executed_actions == ["click"]
+
+    def test_city_production_select_click_stale_first_capture_rechecks_without_reclick(self, monkeypatch):
+        process = CityProductionNoDiffSelectProcess()
+        provider = QueuedProvider(
+            [
+                json.dumps({"post_select_state": "unknown", "reason": "stale first capture"}),
+                json.dumps(
+                    {
+                        "production_mode": "list",
+                        "production_screen_ready": True,
+                        "notification_visible": False,
+                        "reasoning": "old production list still visible in first post-capture",
+                    }
+                ),
+                json.dumps({"post_select_state": "done", "reason": "추가 단계 없음"}),
+            ]
+        )
+        image = Image.new("RGB", (100, 100))
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        executed_actions: list[str] = []
+
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            lambda: (image, 1440, 900, 0, 0),
+        )
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.execute_action",
+            lambda action, *args: executed_actions.append(action.action),
+        )
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: True)
+
+        result = run_primitive_loop(
+            planner_provider=provider,
+            primitive_name="city_production_primitive",
+            screen_w=1440,
+            screen_h=900,
+            normalizing_range=1000,
+            x_offset=0,
+            y_offset=0,
+            strategy_string="",
+            recent_actions_str="없음",
+            hitl_directive=None,
+            memory=memory,
+            ctx=self.ctx,
+            max_steps=3,
+            completion_condition="",
+            planner_img_config=None,
+            delay_before_action=0,
+        )
+
+        assert result.success is True
+        assert result.completed is True
+        assert result.steps_taken == 1
+        assert memory.current_stage == "production_complete"
+        assert executed_actions == ["click"]
+
     def test_run_one_turn_reroutes_after_completed_city_production(self, monkeypatch):
         provider = DummyProvider()
         image = Image.new("RGB", (100, 100))
@@ -2207,6 +2354,75 @@ class TestRunPrimitiveLoop:
                 action="press",
                 key="enter",
                 reasoning="dismiss popup after voting",
+                task_status="complete",
+            ),
+        )
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.execute_action",
+            lambda action, *args: executed_actions.append(action.action),
+        )
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.time.sleep", lambda *_args: None)
+
+        summary = run_one_turn(
+            router_provider=provider,
+            planner_provider=provider,
+            context_manager=self.ctx,
+            turn_number=1,
+            delay_before_action=0,
+        )
+
+        assert summary is not None
+        assert summary.primitive == "popup_primitive"
+        assert summary.action_type == "press"
+        assert executed_actions == ["press"]
+
+    def test_run_one_turn_does_not_restart_completed_city_production_on_same_primitive_reroute(self, monkeypatch):
+        provider = DummyProvider()
+        image = Image.new("RGB", (100, 100))
+        routed_primitives = iter(
+            [
+                RouterResult("city_production_primitive", "initial city production"),
+                RouterResult("city_production_primitive", "stale reroute still sees city production"),
+                RouterResult("popup_primitive", "follow-up popup after production"),
+            ]
+        )
+        executed_actions: list[str] = []
+        loop_calls = {"count": 0}
+
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            lambda: (image, 1440, 900, 0, 0),
+        )
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.route_primitive",
+            lambda *args, **kwargs: next(routed_primitives),
+        )
+
+        def fake_run_primitive_loop(**kwargs):
+            loop_calls["count"] += 1
+            if loop_calls["count"] > 1:
+                raise AssertionError("completed city production should not restart on same-primitive reroute")
+            return PrimitiveLoopResult(
+                success=True,
+                completed=True,
+                re_route=False,
+                steps_taken=1,
+                last_action=AgentAction(
+                    action="click",
+                    x=640,
+                    y=420,
+                    reasoning="city production completed",
+                    task_status="in_progress",
+                ),
+            )
+
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.run_primitive_loop", fake_run_primitive_loop)
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.plan_action",
+            lambda *args, **kwargs: AgentAction(
+                action="press",
+                key="enter",
+                reasoning="dismiss popup after production",
                 task_status="complete",
             ),
         )

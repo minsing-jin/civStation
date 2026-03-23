@@ -1144,6 +1144,7 @@ class PolicyProcess(ScriptedMultiStepProcess):
 
         tab_position = memory.policy_state.tab_positions.get(tab_name)
         memory.set_policy_selected_tab(tab_name)
+        memory.set_policy_verified_active_tab(tab_name)
         if memory.policy_state.capture_geometry is not None:
             memory.policy_state.cache_geometry = copy.deepcopy(memory.policy_state.capture_geometry)
         memory.mark_policy_tab_confirmed(tab_name)
@@ -1783,9 +1784,12 @@ class PolicyProcess(ScriptedMultiStepProcess):
             )
 
         if memory.get_policy_selected_tab() == current_tab:
-            memory.set_policy_event(f"click next skipped active tab={current_tab}")
-            memory.begin_stage("plan_current_tab")
-            return StageTransition(stage="plan_current_tab", reason=f"현재 탭 '{current_tab}'이 이미 활성 상태")
+            if memory.get_policy_verified_active_tab() != current_tab:
+                memory.set_policy_event(f"click next requires reverify tab={current_tab}")
+            else:
+                memory.set_policy_event(f"click next skipped active tab={current_tab}")
+                memory.begin_stage("plan_current_tab")
+                return StageTransition(stage="plan_current_tab", reason=f"현재 탭 '{current_tab}'이 이미 활성 상태")
 
         memory.set_policy_event(f"click next tab={current_tab}")
         return self._build_next_policy_tab_click(memory)
@@ -2008,6 +2012,11 @@ class PolicyProcess(ScriptedMultiStepProcess):
         current_tab = memory.get_policy_current_tab_name()
         if not current_tab:
             return None
+
+        if memory.get_policy_verified_active_tab() != current_tab:
+            memory.set_policy_event(f"plan blocked pending verified-active-tab={current_tab}")
+            memory.begin_stage("click_cached_tab")
+            return StageTransition(stage="click_cached_tab", reason=f"현재 탭 '{current_tab}' 활성 검증 후 계획 재개")
 
         slot_lines = []
         for slot in memory.policy_state.slot_inventory.values():
@@ -2273,9 +2282,11 @@ class PolicyProcess(ScriptedMultiStepProcess):
 
         if memory.current_stage == "click_cached_tab":
             if memory.get_policy_selected_tab() == current_tab:
-                memory.set_policy_event(f"click skipped active tab={current_tab}")
-                memory.begin_stage("plan_current_tab")
-                return StageTransition(stage="plan_current_tab", reason=f"현재 탭 '{current_tab}'이 이미 활성 상태")
+                if memory.get_policy_verified_active_tab() == current_tab:
+                    memory.set_policy_event(f"click skipped active tab={current_tab}")
+                    memory.begin_stage("plan_current_tab")
+                    return StageTransition(stage="plan_current_tab", reason=f"현재 탭 '{current_tab}'이 이미 활성 상태")
+                memory.set_policy_event(f"click requires reverify active tab={current_tab}")
             memory.set_policy_event(f"click tab={current_tab}")
             return self._build_current_tab_click(memory)
 
@@ -2420,6 +2431,7 @@ class PolicyProcess(ScriptedMultiStepProcess):
             return
 
         if memory.current_stage == "generic_fallback":
+            memory.clear_policy_verified_active_tab()
             memory.set_policy_mode("structured")
             memory.set_policy_event("generic fallback success -> resume structured flow")
             logger.info("Policy generic fallback success -> resume structured flow")
@@ -2880,9 +2892,12 @@ class CityProductionProcess(ObservationAssistedProcess):
             "- 방금 생산품목 선택 직후 화면이다.\n"
             "- 지도 위 초록/파랑 타일 배치 화면이면 placement.\n"
             "- '이곳에 ... 을 건설하겠습니까?' 같은 확인 팝업이면 confirm.\n"
+            "- 우하단 톱니 '생산 품목' 버튼만 남았거나, 그 버튼까지 사라지고 일반 지도/HUD로 돌아왔으면 done.\n"
             "- 추가 단계 없이 생산 선택이 끝났으면 done.\n"
             "- 확실하지 않으면 unknown.\n"
         )
+        state = "unknown"
+        reason = ""
         try:
             data = _analyze_structured_json(
                 provider,
@@ -2893,11 +2908,35 @@ class CityProductionProcess(ObservationAssistedProcess):
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("Production post-select follow-up detection failed: %s", exc)
-            return "unknown", "post-select detection failed"
-        state = str(data.get("post_select_state", "")).strip().lower()
-        if state not in self._FOLLOWUP_STATES:
-            state = "unknown"
-        return state, str(data.get("reason", "")).strip()
+            reason = "post-select detection failed"
+        else:
+            state = str(data.get("post_select_state", "")).strip().lower()
+            if state not in self._FOLLOWUP_STATES:
+                state = "unknown"
+            reason = str(data.get("reason", "")).strip()
+
+        if state != "unknown":
+            return state, reason
+
+        screen_state = self._production_screen_state(
+            provider,
+            pil_image,
+            img_config=self._followup_img_config(img_config),
+        )
+        if screen_state:
+            production_mode = str(screen_state.get("production_mode", "")).strip().lower()
+            production_ready = bool(screen_state.get("production_screen_ready", False))
+            notification_visible = bool(screen_state.get("notification_visible", False))
+            screen_reason = str(screen_state.get("reasoning", "")).strip()
+
+            if production_mode == "placement" and production_ready:
+                return "placement", screen_reason or "production screen fallback: placement map still open"
+            if not production_ready and production_mode == "notification":
+                return "done", screen_reason or "production screen fallback: list closed to lower-right notification"
+            if not production_ready and production_mode == "other" and not notification_visible:
+                return "done", screen_reason or "production screen fallback: no production UI remains"
+
+        return "unknown", reason
 
     def _apply_post_select_followup_state(
         self,
@@ -3700,6 +3739,8 @@ class CityProductionProcess(ObservationAssistedProcess):
         """Treat hover-only cursor moves as successful even when screenshots do not change."""
         if action.action == "move":
             return True
+        if memory.current_stage == "select_from_memory" and action.action in {"click", "double_click"}:
+            return True
         if action.action == "scroll" and memory.branch == self._LIST_BRANCH:
             return True
         return super().should_verify_action_without_ui_change(memory, action)
@@ -3780,6 +3821,11 @@ class CityProductionProcess(ObservationAssistedProcess):
         hitl_directive: str | None,
         img_config=None,
     ) -> NoProgressResolution:
+        if memory.current_stage == "select_from_memory" and last_action.action in {"click", "double_click"}:
+            memory.begin_stage(self._POST_SELECT_RESOLVE_STAGE)
+            memory.set_last_planned_action_debug("select no-progress -> resolve_post_select_followup")
+            logger.info("City production select no-progress -> defer to post-select follow-up resolution")
+            return NoProgressResolution(handled=True)
         if memory.branch == self._PLACEMENT_BRANCH:
             retry_stage = memory.current_stage or self._PLACEMENT_STAGE
             if retry_stage not in self._PLACEMENT_RECOVERY_STAGES:
@@ -3935,7 +3981,13 @@ class VotingProcess(ObservationAssistedProcess):
         if stage == self._RESOLUTION_STAGE:
             return f"현재 stage: vote_choose_resolution\n- agenda '{agenda}' 내부에서 A/B 분기 선택을 끝낸다."
         if stage == self._DIRECTION_STAGE:
-            return f"현재 stage: vote_choose_direction\n- agenda '{agenda}' 의 찬성/반대 방향을 필요한 횟수만큼 누른다."
+            return (
+                f"현재 stage: vote_choose_direction\n"
+                f"- agenda '{agenda}' 의 찬성/반대 방향을 먼저 1번 누른다.\n"
+                "- 방금 누른 손가락 버튼이 검은색이 아니라 밝은 파란색 활성 상태인지 "
+                "확인한 뒤에만 추가 반복 클릭을 한다.\n"
+                "- 활성 상태가 아니면 추가 중복 클릭을 멈추고 대상 라디오버튼 best choice 단계로 넘어간다."
+            )
         if stage == self._LEFT_HOVER_FOR_TARGET_STAGE:
             return (
                 "현재 stage: vote_hover_left_for_target\n"
@@ -3955,6 +4007,13 @@ class VotingProcess(ObservationAssistedProcess):
 
     def build_generic_fallback_note(self, memory: ShortTermMemory) -> str:
         stage = memory.fallback_return_stage or memory.current_stage or self._SCAN_STAGE
+        if stage == self._ENTRY_STAGE:
+            return (
+                "현재 멀티스텝 stage 'vote_entry' 에서 세계의회 진입이 막혔다. "
+                "우하단 버튼이 여전히 지구본 마크면 그 지구본 버튼만 다시 클릭해. "
+                "오른쪽 아래 버튼이 지구본이 아닌 다른 버튼/환영 팝업/agenda 화면으로 바뀔 때까지 반복하고, "
+                "다른 HUD 버튼은 누르지 마."
+            )
         return (
             f"현재 멀티스텝 stage '{stage}' 에서 세계의회 진행이 막혔다. "
             "같은 voting primitive 안에서 화면을 복구하거나 다음 정상 단계로 돌아가기 위한 "
@@ -4030,6 +4089,9 @@ class VotingProcess(ObservationAssistedProcess):
                 reason=f"선택한 agenda '{candidate.label}' 이 다시 보이도록 아래로 스크롤",
             )
         return None
+
+    def _has_pending_entry_recovery(self, memory: ShortTermMemory) -> bool:
+        return memory.fallback_return_stage == self._ENTRY_STAGE
 
     def _parse_repeat_click_plan(
         self,
@@ -4125,7 +4187,20 @@ class VotingProcess(ObservationAssistedProcess):
         normalizing_range: int,
         high_level_strategy: str,
         img_config=None,
-    ) -> list[AgentAction] | None:
+    ) -> AgentAction | list[AgentAction] | None:
+        if (
+            memory.voting_state.direction_repeat_remaining > 0
+            and memory.voting_state.direction_repeat_unlocked
+            and memory.voting_state.direction_click_x > 0
+            and memory.voting_state.direction_click_y > 0
+        ):
+            return self._build_repeated_click_actions(
+                x=memory.voting_state.direction_click_x,
+                y=memory.voting_state.direction_click_y,
+                repeat_count=memory.voting_state.direction_repeat_remaining,
+                reason=memory.voting_state.direction_click_reason or "활성화된 찬성/반대 버튼 추가 클릭",
+            )
+
         agenda = memory.voting_state.current_agenda_label or "현재 agenda"
         prompt = (
             "너는 문명6 세계의회 찬성/반대 투표 클릭 계획기야. JSON만 출력해.\n"
@@ -4148,11 +4223,19 @@ class VotingProcess(ObservationAssistedProcess):
             return None
         x, y, repeat_count, selection, reason = parsed
         memory.mark_current_voting_direction(selection or "upvote")
-        return self._build_repeated_click_actions(
+        click_reason = reason or "agenda 찬성/반대 방향 선택"
+        memory.set_current_voting_direction_plan(
             x=x,
             y=y,
-            repeat_count=repeat_count,
-            reason=reason or "agenda 찬성/반대 방향 선택",
+            reason=click_reason,
+            repeat_remaining=max(0, repeat_count - 1),
+        )
+        return AgentAction(
+            action="click",
+            x=x,
+            y=y,
+            reasoning=click_reason,
+            task_status="in_progress",
         )
 
     def _plan_target_actions(
@@ -4202,14 +4285,18 @@ class VotingProcess(ObservationAssistedProcess):
         img_config=None,
     ) -> tuple[str, str]:
         agenda = memory.voting_state.current_agenda_label or "현재 agenda"
+        resolution = memory.voting_state.selected_resolution or "-"
+        direction = memory.voting_state.selected_vote_direction or "-"
+        target = memory.voting_state.selected_target_label or "-"
         prompt = (
             "너는 문명6 세계의회 합의안 후속상태 판별기야. JSON만 출력해.\n"
             '{"agenda_state":"complete|needs_resolution|needs_direction|needs_target","reason":"짧게"}\n'
             f"- 현재 처리 중인 agenda: '{agenda}'.\n"
+            f"- memory상 현재 선택 상태: A/B='{resolution}', direction='{direction}', target='{target}'.\n"
             "- A/B 분기 선택이 아직 안 끝났으면 needs_resolution.\n"
             "- A/B는 정했지만 찬성/반대 표 배분이 아직 더 필요하면 needs_direction.\n"
             "- 표 방향은 정했지만 대상 선택이 아직 더 필요하면 needs_target.\n"
-            "- 이 agenda를 더 누를 필요가 없으면 complete.\n"
+            "- memory와 화면 기준으로 A/B, 찬성/반대, 대상 선택이 모두 끝났고 더 누를 UI가 없을 때만 complete.\n"
         )
         try:
             data = _analyze_structured_json(provider, pil_image, prompt, img_config=img_config, max_tokens=128)
@@ -4242,6 +4329,40 @@ class VotingProcess(ObservationAssistedProcess):
         except Exception as exc:  # noqa: BLE001
             logger.warning("Voting entry check failed: %s", exc)
             return None
+
+    def _detect_direction_followup_state(
+        self,
+        provider: BaseVLMProvider,
+        pil_image,
+        memory: ShortTermMemory,
+        *,
+        img_config=None,
+    ) -> dict | None:
+        agenda = memory.voting_state.current_agenda_label or "현재 agenda"
+        selection = memory.voting_state.selected_vote_direction or "upvote"
+        prompt = (
+            "너는 문명6 세계의회 찬성/반대 후속상태 판별기야. JSON만 출력해.\n"
+            '{"selected_direction_active":true/false,"reason":"짧게"}\n'
+            f"- 현재 처리 중인 agenda: '{agenda}'.\n"
+            f"- 방금 클릭한 방향은 '{selection}' 이다.\n"
+            f"- '{selection}' 손가락 버튼이 검은색이 아니라 밝은 파란색 활성 상태면 selected_direction_active=true.\n"
+            "- 손가락 버튼이 여전히 검은색/비활성이거나 이제 대상 라디오버튼을 골라야 하는 상태면 "
+            "selected_direction_active=false.\n"
+        )
+        try:
+            return _analyze_structured_json(provider, pil_image, prompt, img_config=img_config, max_tokens=128)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Voting direction follow-up detection failed: %s", exc)
+            return None
+
+    def _required_voting_stage_from_memory(self, memory: ShortTermMemory) -> str:
+        if not memory.voting_state.selected_resolution:
+            return self._RESOLUTION_STAGE
+        if not memory.voting_state.selected_vote_direction:
+            return self._DIRECTION_STAGE
+        if not memory.voting_state.selected_target_label:
+            return self._TARGET_STAGE
+        return ""
 
     def _verify_scroll_progress(
         self,
@@ -4327,6 +4448,8 @@ class VotingProcess(ObservationAssistedProcess):
         if self._ENTRY_SUBSTEP not in memory.completed_substeps:
             state = self._voting_entry_check(provider, pil_image, img_config=img_config)
             if state and bool(state.get("voting_screen_ready", False)):
+                if self._has_pending_entry_recovery(memory):
+                    memory.clear_fallback_return_stage()
                 memory.mark_substep(self._ENTRY_SUBSTEP)
                 memory.begin_stage(self._SCAN_STAGE)
                 return StageTransition(stage=self._SCAN_STAGE, reason="world congress agenda screen ready")
@@ -4362,7 +4485,8 @@ class VotingProcess(ObservationAssistedProcess):
                         img_config=img_config,
                         extra_note=(
                             "지금은 vote entry 단계다. 우하단 동그란 지구본 세계의회 버튼만 클릭해. "
-                            "다른 HUD 버튼이나 agenda 내부 버튼은 누르지 마."
+                            "오른쪽 아래 버튼이 지구본 마크가 아닌 다른 버튼/환영 팝업/agenda 화면으로 바뀔 때까지 "
+                            "같은 지구본 버튼 클릭을 반복해. 다른 HUD 버튼이나 agenda 내부 버튼은 누르지 마."
                         ),
                     ),
                     "in_progress",
@@ -4447,6 +4571,13 @@ class VotingProcess(ObservationAssistedProcess):
                 return actions
 
         if stage == self._RESOLVE_STAGE:
+            required_stage = self._required_voting_stage_from_memory(memory)
+            if required_stage:
+                memory.begin_stage(required_stage)
+                return StageTransition(
+                    stage=required_stage,
+                    reason=f"agenda incomplete in memory -> return to {required_stage}",
+                )
             agenda_state, reason = self._detect_agenda_state(provider, pil_image, memory, img_config=img_config)
             if agenda_state == "complete":
                 memory.mark_current_voting_agenda_complete()
@@ -4525,6 +4656,10 @@ class VotingProcess(ObservationAssistedProcess):
                 memory.begin_stage(self._DIRECTION_STAGE)
                 return
             if stage == self._DIRECTION_STAGE:
+                if memory.voting_state.direction_repeat_remaining > 0 and memory.voting_state.direction_repeat_unlocked:
+                    memory.begin_stage(self._DIRECTION_STAGE)
+                    return
+                memory.clear_current_voting_direction_plan()
                 memory.begin_stage(self._LEFT_HOVER_FOR_TARGET_STAGE)
                 return
             if stage == self._TARGET_STAGE:
@@ -4545,6 +4680,7 @@ class VotingProcess(ObservationAssistedProcess):
             memory.begin_stage(self._DIRECTION_STAGE)
             return
         if stage == self._DIRECTION_STAGE:
+            memory.clear_current_voting_direction_plan()
             memory.begin_stage(self._LEFT_HOVER_FOR_TARGET_STAGE)
             return
         if stage == self._TARGET_STAGE:
@@ -4555,7 +4691,11 @@ class VotingProcess(ObservationAssistedProcess):
     def should_verify_action_without_ui_change(self, memory: ShortTermMemory, action: AgentAction) -> bool:
         if action.action == "move":
             return True
-        if action.action in {"click", "double_click"} and memory.current_stage == self._ENTRY_STAGE:
+        if action.action in {"click", "double_click"} and (
+            memory.current_stage == self._ENTRY_STAGE
+            or memory.current_stage == self._DIRECTION_STAGE
+            or self._has_pending_entry_recovery(memory)
+        ):
             return True
         if action.action == "scroll":
             return True
@@ -4574,14 +4714,37 @@ class VotingProcess(ObservationAssistedProcess):
     ) -> SemanticVerifyResult:
         if action.action == "move":
             return SemanticVerifyResult(handled=True, passed=True, reason="left safe hover is non-visual by design")
-        if action.action in {"click", "double_click"} and memory.current_stage == self._ENTRY_STAGE:
+        if action.action in {"click", "double_click"} and (
+            memory.current_stage == self._ENTRY_STAGE or self._has_pending_entry_recovery(memory)
+        ):
             state = self._voting_entry_check(provider, pil_image, img_config=img_config)
             if state and bool(state.get("voting_screen_ready", False)):
+                if self._has_pending_entry_recovery(memory):
+                    memory.clear_fallback_return_stage()
                 memory.mark_substep(self._ENTRY_SUBSTEP)
                 return SemanticVerifyResult(
                     handled=True,
                     passed=True,
                     reason="world congress agenda screen ready after entry click",
+                )
+            if self._has_pending_entry_recovery(memory):
+                if state and not bool(state.get("globe_button_visible", False)):
+                    memory.clear_fallback_return_stage()
+                    return SemanticVerifyResult(
+                        handled=True,
+                        passed=True,
+                        reason="entry recovery left the lower-right globe-button state",
+                    )
+                if state and bool(state.get("globe_button_visible", False)):
+                    return SemanticVerifyResult(
+                        handled=True,
+                        passed=False,
+                        reason="lower-right globe button still visible during entry recovery",
+                    )
+                return SemanticVerifyResult(
+                    handled=True,
+                    passed=False,
+                    reason="world congress entry recovery did not leave globe-button state",
                 )
             if state and bool(state.get("welcome_popup_visible", False)):
                 return SemanticVerifyResult(
@@ -4599,6 +4762,32 @@ class VotingProcess(ObservationAssistedProcess):
                 handled=True,
                 passed=False,
                 reason="world congress entry screen not detected after click",
+            )
+        if action.action in {"click", "double_click"} and memory.current_stage == self._DIRECTION_STAGE:
+            state = self._detect_direction_followup_state(provider, pil_image, memory, img_config=img_config)
+            if state is None:
+                return SemanticVerifyResult(handled=False)
+            active = bool(state.get("selected_direction_active", False))
+            reason = str(state.get("reason", "")).strip()
+            if active and memory.voting_state.direction_repeat_remaining > 0:
+                memory.voting_state.direction_repeat_unlocked = True
+                return SemanticVerifyResult(
+                    handled=True,
+                    passed=True,
+                    reason=reason or "selected vote direction is active and can be repeated",
+                )
+            if not active:
+                memory.clear_current_voting_direction_plan()
+                return SemanticVerifyResult(
+                    handled=True,
+                    passed=True,
+                    reason=reason or "selected vote direction stayed inactive -> move to target selection",
+                )
+            memory.voting_state.direction_repeat_unlocked = False
+            return SemanticVerifyResult(
+                handled=True,
+                passed=True,
+                reason=reason or "vote direction click accepted",
             )
         if action.action == "scroll":
             return self._verify_scroll_progress(
@@ -4627,6 +4816,39 @@ class VotingProcess(ObservationAssistedProcess):
                 reason="world congress exit no longer shows agenda screen",
             )
         return super().verify_action_success(provider, pil_image, memory, action, img_config=img_config)
+
+    def handle_no_progress(
+        self,
+        provider: BaseVLMProvider,
+        pil_image,
+        memory: ShortTermMemory,
+        *,
+        last_action: AgentAction,
+        normalizing_range: int,
+        high_level_strategy: str,
+        recent_actions: str,
+        hitl_directive: str | None,
+        img_config=None,
+    ) -> NoProgressResolution:
+        if self._has_pending_entry_recovery(memory):
+            state = self._voting_entry_check(provider, pil_image, img_config=img_config)
+            if state and bool(state.get("globe_button_visible", False)):
+                memory.begin_stage(self._ENTRY_STAGE)
+                memory.set_last_planned_action_debug(
+                    "vote entry recovery: globe still visible -> retry same lower-right click"
+                )
+                logger.info("Voting entry recovery -> retry while lower-right globe button persists")
+                return NoProgressResolution(handled=True)
+
+        retry_stage = memory.current_stage or self._ENTRY_STAGE
+        if retry_stage == "generic_fallback" and memory.fallback_return_stage:
+            retry_stage = memory.fallback_return_stage
+            memory.clear_fallback_return_stage()
+
+        memory.begin_stage(retry_stage)
+        memory.set_last_planned_action_debug(f"voting no-progress -> retry same stage '{retry_stage}'")
+        logger.info("Voting no-progress -> retry same stage '%s' until success", retry_stage)
+        return NoProgressResolution(handled=True)
 
     def verify_completion(
         self,
@@ -4671,7 +4893,6 @@ class GovernorProcess(ObservationAssistedProcess):
     _PROMOTE_CLICK = "governor_promote_click"
     _PROMOTE_SELECT = "governor_promote_select"
     _PROMOTE_CONFIRM = "governor_promote_confirm"
-    _PROMOTE_POPUP = "governor_promote_popup"
     _EXIT_ESC1 = "governor_exit_esc1"
     _EXIT_ESC2 = "governor_exit_esc2"
 
@@ -4684,20 +4905,14 @@ class GovernorProcess(ObservationAssistedProcess):
     _APPOINT_CITY_RESTORE_HOVER = "governor_appoint_city_restore_hover_scroll_anchor"
     _APPOINT_CITY_RESTORE_SCROLL = "governor_appoint_city_restore_visibility"
     _APPOINT_CITY = "governor_appoint_city"
-    _APPOINT_CONFIRM = "governor_appoint_confirm"
 
-    # Secret society branch (appoint -> cleanup -> optional promote merge)
+    # Secret society branch (appoint -> esc -> esc)
     _SECRET_APPOINT_CLICK = "governor_secret_society_appoint_click"
-    _SECRET_EXIT_ESC1 = "governor_secret_society_exit_esc1"
-    _SECRET_EXIT_ESC2 = "governor_secret_society_exit_esc2"
-    _SECRET_POST_APPOINT_CHECK = "governor_secret_society_post_appoint_check"
-    _SECRET_COMPLETE = "governor_secret_society_complete"
 
     _PROMOTE_STAGES = {
         "governor_promote_click",
         "governor_promote_select",
         "governor_promote_confirm",
-        "governor_promote_popup",
         "governor_exit_esc1",
         "governor_exit_esc2",
     }

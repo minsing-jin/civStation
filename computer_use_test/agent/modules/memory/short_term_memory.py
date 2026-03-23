@@ -165,6 +165,8 @@ class PolicyState:
     overview_mode: bool = False
     wild_slot_active: bool = False
     selected_tab_name: str = ""
+    verified_active_tab_name: str = ""
+    changes_made_this_run: bool = False
     visible_tabs: list[str] = field(default_factory=list)
     tab_positions: dict[str, PolicyTabPosition] = field(default_factory=dict)
     capture_geometry: PolicyCaptureGeometry | None = None
@@ -180,6 +182,7 @@ class PolicyState:
     generic_fallback_used: set[str] = field(default_factory=set)
     restart_current_tab_index: int = 0
     restart_completed_tabs: list[str] = field(default_factory=list)
+    restart_changes_made_this_run: bool = False
     cache_source: str = ""
     last_similarity_result: str = ""
     last_tab_check_result: str = ""
@@ -197,6 +200,11 @@ class VotingState:
     selected_resolution: str = ""
     selected_vote_direction: str = ""
     selected_target_label: str = ""
+    direction_click_x: int = 0
+    direction_click_y: int = 0
+    direction_click_reason: str = ""
+    direction_repeat_remaining: int = 0
+    direction_repeat_unlocked: bool = False
     completed_agenda_ids: list[str] = field(default_factory=list)
 
 
@@ -740,6 +748,7 @@ class ShortTermMemory:
         self.voting_state.selected_resolution = ""
         self.voting_state.selected_vote_direction = ""
         self.voting_state.selected_target_label = ""
+        self.clear_current_voting_direction_plan()
         self.voting_state.completed_agenda_ids = []
 
     def set_current_voting_agenda(self, *, option_id: str, label: str | None = None) -> None:
@@ -751,6 +760,7 @@ class ShortTermMemory:
         self.voting_state.selected_resolution = ""
         self.voting_state.selected_vote_direction = ""
         self.voting_state.selected_target_label = ""
+        self.clear_current_voting_direction_plan()
 
     def clear_current_voting_agenda(self) -> None:
         """Clear the active world-congress agenda while keeping completion history."""
@@ -759,6 +769,7 @@ class ShortTermMemory:
         self.voting_state.selected_resolution = ""
         self.voting_state.selected_vote_direction = ""
         self.voting_state.selected_target_label = ""
+        self.clear_current_voting_direction_plan()
 
     def mark_current_voting_resolution(self, selection: str) -> None:
         """Persist the chosen A/B resolution branch."""
@@ -771,6 +782,22 @@ class ShortTermMemory:
     def mark_current_voting_target(self, label: str) -> None:
         """Persist the chosen target label for the active agenda."""
         self.voting_state.selected_target_label = label.strip()
+
+    def set_current_voting_direction_plan(self, *, x: int, y: int, reason: str, repeat_remaining: int) -> None:
+        """Persist the current direction-click plan until activation is verified."""
+        self.voting_state.direction_click_x = x
+        self.voting_state.direction_click_y = y
+        self.voting_state.direction_click_reason = reason.strip()
+        self.voting_state.direction_repeat_remaining = max(0, repeat_remaining)
+        self.voting_state.direction_repeat_unlocked = False
+
+    def clear_current_voting_direction_plan(self) -> None:
+        """Reset any pending repeated direction-click plan."""
+        self.voting_state.direction_click_x = 0
+        self.voting_state.direction_click_y = 0
+        self.voting_state.direction_click_reason = ""
+        self.voting_state.direction_repeat_remaining = 0
+        self.voting_state.direction_repeat_unlocked = False
 
     def mark_current_voting_agenda_complete(self) -> None:
         """Mark the active agenda as complete and exclude it from future picks."""
@@ -886,6 +913,7 @@ class ShortTermMemory:
         """Initialize policy tab cache, slot inventory, and execution queue."""
         resume_index = self.policy_state.restart_current_tab_index
         resume_completed = list(self.policy_state.restart_completed_tabs)
+        resume_changes_made = bool(self.policy_state.restart_changes_made_this_run)
         self.policy_state.enabled = True
         self.policy_state.mode = "structured"
         self.policy_state.bootstrap_complete = True
@@ -896,6 +924,8 @@ class ShortTermMemory:
         self.policy_state.overview_mode = overview_mode
         self.policy_state.wild_slot_active = wild_slot_active
         self.policy_state.selected_tab_name = selected_tab_name
+        self.policy_state.verified_active_tab_name = ""
+        self.policy_state.changes_made_this_run = resume_changes_made
         self.policy_state.visible_tabs = list(visible_tabs or [])
         self.policy_state.provisional_tabs = {str(tab) for tab in (provisional_tabs or [])}
         self.policy_state.calibration_pending_tabs = list(calibration_pending_tabs or [])
@@ -906,6 +936,7 @@ class ShortTermMemory:
         self.policy_state.generic_fallback_used = set()
         self.policy_state.restart_current_tab_index = 0
         self.policy_state.restart_completed_tabs = []
+        self.policy_state.restart_changes_made_this_run = False
         self.policy_state.cache_source = cache_source.strip()
         self.policy_state.last_similarity_result = ""
         self.policy_state.last_tab_check_result = ""
@@ -1158,6 +1189,18 @@ class ShortTermMemory:
             tab.confirmed = True
             self.policy_state.provisional_tabs.discard(tab_name)
 
+    def set_policy_verified_active_tab(self, tab_name: str) -> None:
+        """Persist the tab semantically verified as active in this run."""
+        self.policy_state.verified_active_tab_name = tab_name.strip()
+
+    def get_policy_verified_active_tab(self) -> str:
+        """Return the tab semantically verified as active in this run."""
+        return self.policy_state.verified_active_tab_name
+
+    def clear_policy_verified_active_tab(self) -> None:
+        """Clear the semantically verified active-tab marker."""
+        self.policy_state.verified_active_tab_name = ""
+
     def start_policy_calibration(self, tabs: list[str] | None = None) -> None:
         """Start a deterministic calibration pass for provisional policy tabs."""
         calibration_tabs = tabs or list(_PROMPT_POLICY_TAB_ORDER)
@@ -1192,6 +1235,15 @@ class ShortTermMemory:
             return self.get_policy_current_tab_name()
         return ""
 
+    def has_policy_aligned_tab_row(self) -> bool:
+        """Whether cached policy tabs form one horizontal row with distinct x positions."""
+        positions = list(self.policy_state.tab_positions.values())
+        if len(positions) < 2:
+            return False
+        y_values = {pos.screen_y for pos in positions}
+        x_values = {pos.screen_x for pos in positions}
+        return len(y_values) == 1 and len(x_values) == len(positions)
+
     def should_verify_policy_tab_click(self) -> bool:
         """Whether the current policy tab click still needs explicit verification."""
         if self.current_stage not in {"calibrate_tabs", "click_cached_tab", "click_next_tab"}:
@@ -1200,7 +1252,13 @@ class ShortTermMemory:
         if not tab_name:
             return False
         if self.current_stage == "calibrate_tabs":
-            return True
+            if tab_name == "군사":
+                return True
+            return not self.has_policy_aligned_tab_row()
+        if tab_name == "군사":
+            return not self.is_policy_tab_confirmed(tab_name)
+        if self.has_policy_aligned_tab_row():
+            return False
         return not self.is_policy_tab_confirmed(tab_name)
 
     def record_policy_failed_tab(self, tab_name: str) -> None:
@@ -1382,6 +1440,7 @@ class ShortTermMemory:
             slot.is_empty = False
             slot.selected_from_tab = source_tab
             slot.selection_reason = reasoning
+            self.policy_state.changes_made_this_run = True
 
     def mark_policy_tab_completed(self, tab_name: str) -> None:
         """Mark a tab as fully processed."""
@@ -1448,6 +1507,7 @@ class ShortTermMemory:
         entry_done = self.policy_state.entry_done if preserve_entry_done else False
         restart_index = self.policy_state.current_tab_index if preserve_progress else 0
         restart_completed = list(self.policy_state.completed_tabs) if preserve_progress else []
+        restart_changes_made = self.policy_state.changes_made_this_run if preserve_progress else False
         restart_tabs = copy.deepcopy(self.policy_state.tab_positions) if preserve_tab_positions else {}
         restart_provisional = set(self.policy_state.provisional_tabs) if preserve_tab_positions else set()
         restart_cache_geometry = copy.deepcopy(self.policy_state.cache_geometry) if preserve_tab_positions else None
@@ -1462,6 +1522,8 @@ class ShortTermMemory:
         self.policy_state.overview_mode = False
         self.policy_state.wild_slot_active = False
         self.policy_state.selected_tab_name = ""
+        self.policy_state.verified_active_tab_name = ""
+        self.policy_state.changes_made_this_run = restart_changes_made
         self.policy_state.visible_tabs = []
         self.policy_state.tab_positions = restart_tabs
         self.policy_state.cache_geometry = restart_cache_geometry
@@ -1475,6 +1537,7 @@ class ShortTermMemory:
         self.policy_state.tab_failure_counts = {}
         self.policy_state.restart_current_tab_index = restart_index
         self.policy_state.restart_completed_tabs = restart_completed
+        self.policy_state.restart_changes_made_this_run = restart_changes_made
         self.policy_state.cache_source = self.policy_state.cache_source if preserve_tab_positions else ""
         self.policy_state.last_similarity_result = ""
         self.policy_state.last_tab_check_result = ""
@@ -1553,6 +1616,7 @@ class ShortTermMemory:
                 f"current={current_tab} wild={self.policy_state.wild_slot_active}"
             )
             lines.append(f"overview_mode={self.policy_state.overview_mode}")
+            lines.append(f"changes_made_this_run={self.policy_state.changes_made_this_run}")
             lines.append(f"bootstrap_failures={self.policy_state.bootstrap_failures}")
             if self.policy_state.entry_done:
                 lines.append("entry_done=true")
@@ -1566,6 +1630,8 @@ class ShortTermMemory:
                 lines.append(f"visible_tabs: {', '.join(self.policy_state.visible_tabs)}")
             if self.policy_state.selected_tab_name:
                 lines.append(f"selected_tab={self.policy_state.selected_tab_name}")
+            if self.policy_state.verified_active_tab_name:
+                lines.append(f"verified_active_tab={self.policy_state.verified_active_tab_name}")
             lines.append(f"current_tab={current_tab}")
             lines.append(f"remaining_queue: {', '.join(remaining_queue) if remaining_queue else '<empty>'}")
             if self.policy_state.completed_tabs:
