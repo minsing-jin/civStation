@@ -1656,7 +1656,7 @@ def run_one_turn(
     turn_detector: TurnDetector | None = None,
     router_img_config: ImagePipelineConfig | None = None,
     planner_img_config: ImagePipelineConfig | None = None,
-    reroute_retry_budget: int = 1,
+    reroute_retry_budget: int = 3,
 ) -> TurnSummary | None:
     """
     Execute one full game turn.

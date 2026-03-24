@@ -2339,17 +2339,21 @@ class TestRunPrimitiveLoop:
         assert executed_actions == ["press"]
         assert loop_calls["count"] == 2
 
-    def test_run_one_turn_retries_full_reroute_after_single_step_plan_failure(self, monkeypatch):
+    def test_run_one_turn_retries_full_reroute_up_to_default_budget_after_single_step_plan_failure(self, monkeypatch):
         provider = DummyProvider()
         image = Image.new("RGB", (100, 100))
         routed_primitives = iter(
             [
                 RouterResult("popup_primitive", "initial popup route"),
-                RouterResult("popup_primitive", "retry popup route"),
+                RouterResult("popup_primitive", "retry popup route 1"),
+                RouterResult("popup_primitive", "retry popup route 2"),
+                RouterResult("popup_primitive", "retry popup route 3"),
             ]
         )
         planned_actions = iter(
             [
+                None,
+                None,
                 None,
                 AgentAction(
                     action="press",
