@@ -2192,6 +2192,207 @@ class TestRunPrimitiveLoop:
         assert summary.action_type == "press"
         assert executed_actions == ["press"]
 
+    def test_run_one_turn_reroutes_after_failed_city_production_loop(self, monkeypatch):
+        provider = DummyProvider()
+        image = Image.new("RGB", (100, 100))
+        routed_primitives = iter(
+            [
+                RouterResult("city_production_primitive", "initial city production"),
+                RouterResult("popup_primitive", "recover via popup after stalled production"),
+            ]
+        )
+        executed_actions: list[str] = []
+
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            lambda: (image, 1440, 900, 0, 0),
+        )
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.route_primitive",
+            lambda *args, **kwargs: next(routed_primitives),
+        )
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.run_primitive_loop",
+            lambda **kwargs: PrimitiveLoopResult(
+                success=False,
+                completed=False,
+                re_route=False,
+                steps_taken=2,
+                error_message="Primitive loop reached safety action cap (18) without completion",
+                last_action=AgentAction(
+                    action="click",
+                    x=500,
+                    y=500,
+                    reasoning="city production stalled",
+                    task_status="in_progress",
+                ),
+            ),
+        )
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.plan_action",
+            lambda *args, **kwargs: AgentAction(
+                action="press",
+                key="enter",
+                reasoning="dismiss popup after stalled production",
+                task_status="complete",
+            ),
+        )
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.execute_action",
+            lambda action, *args: executed_actions.append(action.action),
+        )
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.time.sleep", lambda *_args: None)
+
+        summary = run_one_turn(
+            router_provider=provider,
+            planner_provider=provider,
+            context_manager=self.ctx,
+            turn_number=1,
+            delay_before_action=0,
+        )
+
+        assert summary is not None
+        assert summary.primitive == "popup_primitive"
+        assert summary.action_type == "press"
+        assert executed_actions == ["press"]
+
+    def test_run_one_turn_restarts_same_primitive_once_after_failed_loop_before_reroute(self, monkeypatch):
+        provider = DummyProvider()
+        image = Image.new("RGB", (100, 100))
+        routed_primitives = iter(
+            [
+                RouterResult("city_production_primitive", "initial city production"),
+                RouterResult("city_production_primitive", "stale reroute still sees production"),
+                RouterResult("popup_primitive", "recover via popup after retry"),
+            ]
+        )
+        executed_actions: list[str] = []
+        loop_calls = {"count": 0}
+
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            lambda: (image, 1440, 900, 0, 0),
+        )
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.route_primitive",
+            lambda *args, **kwargs: next(routed_primitives),
+        )
+
+        def fake_run_primitive_loop(**kwargs):
+            loop_calls["count"] += 1
+            if loop_calls["count"] == 1:
+                return PrimitiveLoopResult(
+                    success=False,
+                    completed=False,
+                    re_route=False,
+                    steps_taken=1,
+                    error_message="Primitive loop reached safety iteration cap (18) without completion",
+                    last_action=AgentAction(
+                        action="click",
+                        x=640,
+                        y=420,
+                        reasoning="city production stalled",
+                        task_status="in_progress",
+                    ),
+                )
+            return PrimitiveLoopResult(
+                success=True,
+                completed=True,
+                re_route=False,
+                steps_taken=1,
+                last_action=AgentAction(
+                    action="click",
+                    x=640,
+                    y=420,
+                    reasoning="city production completed on retry",
+                    task_status="in_progress",
+                ),
+            )
+
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.run_primitive_loop", fake_run_primitive_loop)
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.plan_action",
+            lambda *args, **kwargs: AgentAction(
+                action="press",
+                key="enter",
+                reasoning="dismiss popup after retry",
+                task_status="complete",
+            ),
+        )
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.execute_action",
+            lambda action, *args: executed_actions.append(action.action),
+        )
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.time.sleep", lambda *_args: None)
+
+        summary = run_one_turn(
+            router_provider=provider,
+            planner_provider=provider,
+            context_manager=self.ctx,
+            turn_number=1,
+            delay_before_action=0,
+        )
+
+        assert summary is not None
+        assert summary.primitive == "popup_primitive"
+        assert summary.action_type == "press"
+        assert executed_actions == ["press"]
+        assert loop_calls["count"] == 2
+
+    def test_run_one_turn_retries_full_reroute_after_single_step_plan_failure(self, monkeypatch):
+        provider = DummyProvider()
+        image = Image.new("RGB", (100, 100))
+        routed_primitives = iter(
+            [
+                RouterResult("popup_primitive", "initial popup route"),
+                RouterResult("popup_primitive", "retry popup route"),
+            ]
+        )
+        planned_actions = iter(
+            [
+                None,
+                AgentAction(
+                    action="press",
+                    key="enter",
+                    reasoning="dismiss popup on reroute retry",
+                    task_status="complete",
+                ),
+            ]
+        )
+        executed_actions: list[str] = []
+
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            lambda: (image, 1440, 900, 0, 0),
+        )
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.route_primitive",
+            lambda *args, **kwargs: next(routed_primitives),
+        )
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.plan_action",
+            lambda *args, **kwargs: next(planned_actions),
+        )
+        monkeypatch.setattr(
+            "computer_use_test.agent.turn_executor.execute_action",
+            lambda action, *args: executed_actions.append(action.action),
+        )
+        monkeypatch.setattr("computer_use_test.agent.turn_executor.time.sleep", lambda *_args: None)
+
+        summary = run_one_turn(
+            router_provider=provider,
+            planner_provider=provider,
+            context_manager=self.ctx,
+            turn_number=1,
+            delay_before_action=0,
+        )
+
+        assert summary is not None
+        assert summary.primitive == "popup_primitive"
+        assert summary.action_type == "press"
+        assert summary.success is True
+        assert executed_actions == ["press"]
+
     def test_run_primitive_loop_persists_mid_task_hitl_override_in_memory(self, monkeypatch):
         process = TaskLocalHitlLoopProcess()
         provider = DummyProvider()

@@ -521,6 +521,15 @@ class PrimitiveLoopResult:
     error_message: str = ""
 
 
+def _should_follow_up_route(loop_result: PrimitiveLoopResult) -> bool:
+    """Whether run_one_turn should attempt a follow-up route after a loop result."""
+    if loop_result.re_route or loop_result.completed:
+        return True
+    if not loop_result.error_message:
+        return False
+    return loop_result.error_message != "STOP directive received during loop"
+
+
 def run_primitive_loop(
     planner_provider: BaseVLMProvider,
     primitive_name: str,
@@ -1647,6 +1656,7 @@ def run_one_turn(
     turn_detector: TurnDetector | None = None,
     router_img_config: ImagePipelineConfig | None = None,
     planner_img_config: ImagePipelineConfig | None = None,
+    reroute_retry_budget: int = 1,
 ) -> TurnSummary | None:
     """
     Execute one full game turn.
@@ -1683,6 +1693,40 @@ def run_one_turn(
     # Get or create context manager singleton
     ctx = context_manager or ContextManager.get_instance()
     dbg = debug_options or DebugOptions.none()
+
+    def _retry_turn_via_reroute(error_message: str) -> TurnSummary | None:
+        if reroute_retry_budget <= 0:
+            return None
+        if error_message == "STOP directive received during loop":
+            return None
+        logger.info(
+            "Recoverable turn failure -> retry full reroute for turn %s (%s retry left after this): %s",
+            turn_number,
+            reroute_retry_budget - 1,
+            error_message,
+        )
+        return run_one_turn(
+            router_provider=router_provider,
+            planner_provider=planner_provider,
+            normalizing_range=normalizing_range,
+            delay_before_action=delay_before_action,
+            high_level_strategy=high_level_strategy,
+            context_manager=ctx,
+            strategy_planner=strategy_planner,
+            knowledge_manager=knowledge_manager,
+            turn_number=turn_number,
+            macro_turn_manager=macro_turn_manager,
+            state_bridge=state_bridge,
+            context_updater=context_updater,
+            debug_options=dbg,
+            command_queue=command_queue,
+            agent_gate=agent_gate,
+            strategy_updater=strategy_updater,
+            turn_detector=turn_detector,
+            router_img_config=router_img_config,
+            planner_img_config=planner_img_config,
+            reroute_retry_budget=reroute_retry_budget - 1,
+        )
 
     # Step 0: Read strategy (non-blocking when StrategyUpdater is active)
     if high_level_strategy:
@@ -1936,11 +1980,17 @@ def run_one_turn(
             delay_before_action=delay_before_action,
         )
 
-        # Handle follow-up routing after multi-step completion or reroute.
-        if loop_result.re_route or loop_result.completed:
+        # Handle follow-up routing after multi-step completion, reroute, or recoverable loop failure.
+        if _should_follow_up_route(loop_result):
+            if loop_result.error_message and not (loop_result.re_route or loop_result.completed):
+                logger.info(
+                    "Recoverable multi-step failure for %s -> follow-up reroute: %s",
+                    primitive_name,
+                    loop_result.error_message,
+                )
             same_primitive_restart_used = False
             for _ in range(3):
-                if not (loop_result.re_route or loop_result.completed):
+                if not _should_follow_up_route(loop_result):
                     break
                 re_image, *_ = capture_screen_pil()
                 rl.update_phase("routing")
@@ -2125,6 +2175,11 @@ def run_one_turn(
         memory.reset()
         rl.update_phase("idle")
 
+        if not loop_result.success:
+            retry_summary = _retry_turn_via_reroute(loop_result.error_message or "multi-step loop failed")
+            if retry_summary is not None:
+                return retry_summary
+
         # Build TurnSummary from loop result
         last = loop_result.last_action
         action_type = last.action if last else "none"
@@ -2174,6 +2229,9 @@ def run_one_turn(
             result="failed",
             error_message="VLM returned no action",
         )
+        retry_summary = _retry_turn_via_reroute("VLM returned no action")
+        if retry_summary is not None:
+            return retry_summary
         return TurnSummary(
             turn_number=turn_number,
             primitive=primitive_name,
@@ -2293,6 +2351,11 @@ def run_one_turn(
             result=execution_result,
             error_message=error_message,
         )
+
+    if execution_result != "success":
+        retry_summary = _retry_turn_via_reroute(error_message or "single-step execution failed")
+        if retry_summary is not None:
+            return retry_summary
 
     # Step 6: Macro-turn tracking (fallback: keyword-based detection from old flow)
     if macro_turn_manager:
