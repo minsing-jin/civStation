@@ -1252,9 +1252,9 @@ class ShortTermMemory:
         if not tab_name:
             return False
         if self.current_stage == "calibrate_tabs":
-            if tab_name == "군사":
-                return True
-            return not self.has_policy_aligned_tab_row()
+            return True
+        if self.has_policy_provisional_tab(tab_name):
+            return True
         if tab_name == "군사":
             return not self.is_policy_tab_confirmed(tab_name)
         if self.has_policy_aligned_tab_row():
