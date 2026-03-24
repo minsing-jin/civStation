@@ -152,6 +152,13 @@ class AgentStateBridge:
             self._current_reasoning = reasoning
         self._broadcast_if_connected()
 
+    def clear_current_action(self) -> None:
+        """Clear the current action display while preserving the current primitive."""
+        with self._lock:
+            self._current_action = ""
+            self._current_reasoning = ""
+        self._broadcast_if_connected()
+
     def update_micro_turn(self, n: int) -> None:
         """Called by main loop at each micro-turn."""
         with self._lock:

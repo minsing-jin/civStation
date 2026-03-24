@@ -630,6 +630,12 @@ class RichLogger:
                     table.add_row(k, str(v))
             self.console.print(table)
 
+    def clear_current_action(self) -> None:
+        """Clear the currently displayed action without emitting a new action log entry."""
+        self._main_state["action"] = ""
+        self._main_state["action_reasoning"] = ""
+        self._refresh()
+
     def execution_status(self, success: bool, message: str = "") -> None:
         """Display execution success/failure indicator."""
         if success:
