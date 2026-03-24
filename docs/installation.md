@@ -16,23 +16,23 @@ pip install computer-use-test
 
 ## From source
 
-The source files for computer-use-test can be downloaded from the [Github repo](https://github.com/minsing-jin/computer_use_test).
+The source files can be downloaded from the [GitHub repo](https://github.com/minsing-jin/civStation).
 
 You can either clone the public repository:
 
 ```sh
-git clone git://github.com/minsing-jin/computer_use_test
+git clone https://github.com/minsing-jin/civStation.git
 ```
 
-Or download the [tarball](https://github.com/minsing-jin/computer_use_test/tarball/master):
+Or download the tarball from the same repository:
 
 ```sh
-curl -OJL https://github.com/minsing-jin/computer_use_test/tarball/master
+curl -OJL https://github.com/minsing-jin/civStation/archive/refs/heads/main.tar.gz
 ```
 
 Once you have a copy of the source, you can install it with:
 
 ```sh
-cd computer_use_test
+cd civStation
 uv pip install .
 ```

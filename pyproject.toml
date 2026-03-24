@@ -68,9 +68,9 @@ test = [
 ]
 
 [project.urls]
-bugs = "https://github.com/minsing-jin/computer_use_test/issues"
-changelog = "https://github.com/minsing-jin/computer_use_test/blob/master/changelog.md"
-homepage = "https://github.com/minsing-jin/computer_use_test"
+bugs = "https://github.com/minsing-jin/civStation/issues"
+changelog = "https://github.com/minsing-jin/civStation/blob/main/changelog.md"
+homepage = "https://github.com/minsing-jin/civStation"
 
 [project.scripts]
 computer_use_test = "computer_use_test.cli:app"

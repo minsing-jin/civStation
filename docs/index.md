@@ -1,4 +1,9 @@
-# Welcome to computer-use-test's documentation!
+# Welcome to CivStation's documentation!
+
+Package/module note:
+
+- package name: `computer-use-test`
+- module name: `computer_use_test`
 
 ## Contents
 
