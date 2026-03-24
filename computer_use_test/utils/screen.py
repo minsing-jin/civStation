@@ -17,11 +17,13 @@ just the game area, eliminating desktop noise (Dock, menu bar, etc.).
 from __future__ import annotations
 
 import logging
+import time
 from types import SimpleNamespace
 
 from PIL import Image
 
 from computer_use_test.utils.llm_provider.base import AgentAction
+from computer_use_test.utils.screenshot_trajectory import record_screenshot_trajectory
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +34,7 @@ VLM_JPEG_QUALITY: int = 80
 
 # Keywords to match the Civilization VI window (case-insensitive)
 _GAME_WINDOW_KEYWORDS = ("civilization", "civ6", "civ vi")
+_SCROLL_HOVER_SETTLE_SECONDS = 0.18
 
 
 def _unavailable_pyautogui_method(*args, **kwargs):
@@ -47,6 +50,7 @@ except Exception:  # pragma: no cover - depends on runtime display availability
         moveTo=_unavailable_pyautogui_method,
         click=_unavailable_pyautogui_method,
         doubleClick=_unavailable_pyautogui_method,
+        hotkey=_unavailable_pyautogui_method,
         mouseDown=_unavailable_pyautogui_method,
         mouseUp=_unavailable_pyautogui_method,
         scroll=_unavailable_pyautogui_method,
@@ -138,6 +142,11 @@ def capture_screen_pil(crop_to_game: bool = True):
             region_w, region_h = gw, gh
             logger.debug(f"Cropped to game window: {gw}x{gh} at ({gx},{gy})")
 
+    try:
+        record_screenshot_trajectory(screenshot, label="capture")
+    except Exception as exc:
+        logger.debug("Screenshot trajectory capture skipped: %s", exc)
+
     return screenshot, region_w, region_h, x_offset, y_offset
 
 
@@ -225,10 +234,10 @@ def execute_action(
     logger.debug(f"Action: {action_type} | Reasoning: {reasoning}")
 
     # Validate action type
-    if not action_type or action_type not in ["click", "double_click", "drag", "scroll", "press", "type"]:
+    if not action_type or action_type not in ["click", "double_click", "drag", "scroll", "move", "press", "type"]:
         logger.error(f"Invalid or empty action type: '{action_type}'")
         logger.error(f"Full action object: {action}")
-        logger.error("Valid action types are: click, double_click, drag, scroll, press, type")
+        logger.error("Valid action types are: click, double_click, drag, scroll, move, press, type")
         return
 
     coord_space = getattr(action, "coord_space", "normalized") or "normalized"
@@ -336,13 +345,35 @@ def execute_action(
             action.scroll_amount,
         )
         pyautogui.moveTo(real_x, real_y, duration=0.2)
+        time.sleep(_SCROLL_HOVER_SETTLE_SECONDS)
         pyautogui.scroll(action.scroll_amount)
+
+    elif action_type == "move":
+        if coord_space == "absolute":
+            real_x = action.x
+            real_y = action.y
+        else:
+            real_x = norm_to_real(action.x, screen_w, normalizing_range) + x_offset
+            real_y = norm_to_real(action.y, screen_h, normalizing_range) + y_offset
+        logger.debug(
+            "Move: %s(%s, %s) -> real(%s, %s)",
+            coord_space,
+            action.x,
+            action.y,
+            real_x,
+            real_y,
+        )
+        pyautogui.moveTo(real_x, real_y, duration=0.2)
 
     elif action_type == "press":
         key = action.key
         if key:
             logger.debug(f"Press key: {key}")
-            pyautogui.press(key)
+            chord = [part.strip() for part in key.split("+") if part.strip()]
+            if len(chord) > 1:
+                pyautogui.hotkey(*chord)
+            else:
+                pyautogui.press(key)
         else:
             logger.error(f"Press action missing 'key' field. Full action: {action}")
 

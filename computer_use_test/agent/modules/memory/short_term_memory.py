@@ -77,7 +77,26 @@ class ChoiceCatalogState:
     best_option_reason: str = ""
     scroll_anchor: ScrollAnchor | None = None
     end_reached: bool = False
+    scan_end_reason: str = ""
     last_scroll_direction: str = "down"
+    last_new_candidate_count: int = 0
+    last_visible_option_ids: tuple[str, ...] = ()
+    downward_scan_scrolls: int = 0
+    downward_no_new_streak: int = 0
+
+
+@dataclass
+class CityPlacementState:
+    """State for city-production placement follow-up."""
+
+    has_target: bool = False
+    target_x: int = 0
+    target_y: int = 0
+    target_button: str = "right"
+    target_reason: str = ""
+    target_origin: str = ""  # direct_tile | purchase_button
+    target_tile_color: str = ""
+    reclick_attempts: int = 0
 
 
 @dataclass
@@ -146,6 +165,8 @@ class PolicyState:
     overview_mode: bool = False
     wild_slot_active: bool = False
     selected_tab_name: str = ""
+    verified_active_tab_name: str = ""
+    changes_made_this_run: bool = False
     visible_tabs: list[str] = field(default_factory=list)
     tab_positions: dict[str, PolicyTabPosition] = field(default_factory=dict)
     capture_geometry: PolicyCaptureGeometry | None = None
@@ -161,11 +182,39 @@ class PolicyState:
     generic_fallback_used: set[str] = field(default_factory=set)
     restart_current_tab_index: int = 0
     restart_completed_tabs: list[str] = field(default_factory=list)
+    restart_changes_made_this_run: bool = False
     cache_source: str = ""
     last_similarity_result: str = ""
     last_tab_check_result: str = ""
     last_relocalize_result: str = ""
     distinct_failed_tabs: set[str] = field(default_factory=set)
+
+
+@dataclass
+class VotingState:
+    """Process-memory for the world-congress voting primitive."""
+
+    enabled: bool = False
+    current_agenda_id: str = ""
+    current_agenda_label: str = ""
+    selected_resolution: str = ""
+    selected_vote_direction: str = ""
+    selected_target_label: str = ""
+    direction_click_x: int = 0
+    direction_click_y: int = 0
+    direction_click_reason: str = ""
+    direction_repeat_remaining: int = 0
+    direction_repeat_unlocked: bool = False
+    completed_agenda_ids: list[str] = field(default_factory=list)
+
+
+@dataclass
+class GovernorState:
+    """Process-memory for governor target tracking across subflows."""
+
+    target_governor_id: str = ""
+    target_governor_label: str = ""
+    target_governor_note: str = ""
 
 
 @dataclass
@@ -176,7 +225,10 @@ class FailureCheckpoint:
     branch: str = ""
     step_count: int = 0
     choice_catalog: ChoiceCatalogState = field(default_factory=ChoiceCatalogState)
+    city_placement_state: CityPlacementState = field(default_factory=CityPlacementState)
     policy_state: PolicyState = field(default_factory=PolicyState)
+    voting_state: VotingState = field(default_factory=VotingState)
+    governor_state: GovernorState = field(default_factory=GovernorState)
     completed_substeps: list[str] = field(default_factory=list)
     action_log: list[ActionTrace] = field(default_factory=list)
     stage_failure_counts: dict[str, int] = field(default_factory=dict)
@@ -184,6 +236,13 @@ class FailureCheckpoint:
     fallback_return_stage: str = ""
     fallback_return_key: str = ""
     last_semantic_verify: str = ""
+    last_observation_summary: str = ""
+    last_observation_anchor: str = ""
+    last_planned_action: str = ""
+    last_executed_action: str = ""
+    task_hitl_directive: str = ""
+    task_hitl_status: str = ""
+    task_hitl_reason: str = ""
 
 
 @dataclass
@@ -200,13 +259,23 @@ class ShortTermMemory:
     completed_substeps: list[str] = field(default_factory=list)
     action_log: list[ActionTrace] = field(default_factory=list)
     choice_catalog: ChoiceCatalogState = field(default_factory=ChoiceCatalogState)
+    city_placement_state: CityPlacementState = field(default_factory=CityPlacementState)
     policy_state: PolicyState = field(default_factory=PolicyState)
+    voting_state: VotingState = field(default_factory=VotingState)
+    governor_state: GovernorState = field(default_factory=GovernorState)
     stage_failure_counts: dict[str, int] = field(default_factory=dict)
     stage_fallback_used: set[str] = field(default_factory=set)
     fallback_return_stage: str = ""
     fallback_return_key: str = ""
     last_semantic_verify: str = ""
     last_stable_checkpoint: FailureCheckpoint | None = None
+    last_observation_summary: str = ""
+    last_observation_anchor: str = ""
+    last_planned_action: str = ""
+    last_executed_action: str = ""
+    task_hitl_directive: str = ""
+    task_hitl_status: str = ""
+    task_hitl_reason: str = ""
 
     def start_task(
         self,
@@ -216,6 +285,7 @@ class ShortTermMemory:
         normalizing_range: int = 1000,
         enable_choice_catalog: bool = False,
         enable_policy_state: bool = False,
+        enable_voting_state: bool = False,
     ) -> None:
         """Initialize memory for a new task."""
         self.reset()
@@ -224,12 +294,14 @@ class ShortTermMemory:
         self.normalizing_range = normalizing_range
         self.choice_catalog.enabled = enable_choice_catalog
         self.policy_state.enabled = enable_policy_state
+        self.voting_state.enabled = enable_voting_state
         logger.debug(
-            "ShortTermMemory started: %s (max_steps=%s, choice_catalog=%s, policy_state=%s)",
+            "ShortTermMemory started: %s (max_steps=%s, choice_catalog=%s, policy_state=%s, voting_state=%s)",
             primitive_name,
             max_steps,
             enable_choice_catalog,
             enable_policy_state,
+            enable_voting_state,
         )
 
     def reset(self) -> None:
@@ -244,21 +316,93 @@ class ShortTermMemory:
         self.completed_substeps = []
         self.action_log = []
         self.choice_catalog = ChoiceCatalogState()
+        self.city_placement_state = CityPlacementState()
         self.policy_state = PolicyState()
+        self.voting_state = VotingState()
+        self.governor_state = GovernorState()
         self.stage_failure_counts = {}
         self.stage_fallback_used = set()
         self.fallback_return_stage = ""
         self.fallback_return_key = ""
         self.last_semantic_verify = ""
         self.last_stable_checkpoint = None
+        self.last_observation_summary = ""
+        self.last_observation_anchor = ""
+        self.last_planned_action = ""
+        self.last_executed_action = ""
+        self.task_hitl_directive = ""
+        self.task_hitl_status = ""
+        self.task_hitl_reason = ""
 
     def begin_stage(self, stage: str) -> None:
         """Update the current stage label."""
         self.current_stage = stage
 
+    def set_task_hitl_directive(self, directive: str, *, reason: str = "") -> None:
+        """Store one task-local HITL directive until the current task ends."""
+        normalized = directive.strip()
+        if not normalized:
+            return
+        self.task_hitl_directive = normalized
+        self.task_hitl_status = "pending"
+        self.task_hitl_reason = reason.strip()
+
+    def get_task_hitl_directive(self) -> str:
+        """Return the current task-local HITL directive, if any."""
+        return self.task_hitl_directive.strip()
+
+    def clear_task_hitl_directive(self) -> None:
+        """Drop any task-local HITL directive."""
+        self.task_hitl_directive = ""
+        self.task_hitl_status = ""
+        self.task_hitl_reason = ""
+
+    def resolve_task_hitl_choice_candidate(self) -> tuple[ChoiceCandidate | None, str]:
+        """Try to map the current task-local HITL directive to one selectable candidate."""
+        directive = self.get_task_hitl_directive()
+        if not directive:
+            return None, ""
+
+        normalized_directive = _slugify(directive)
+        matches: list[ChoiceCandidate] = []
+        for candidate in self._selectable_choice_candidates():
+            label_key = _slugify(candidate.label)
+            id_key = _slugify(candidate.id)
+            keys = [key for key in (label_key, id_key) if len(key) >= 2]
+            if any(key in normalized_directive for key in keys):
+                matches.append(candidate)
+
+        if len(matches) == 1:
+            reason = f"task HITL matched candidate '{matches[0].label}'"
+            self.task_hitl_status = "applied"
+            self.task_hitl_reason = reason
+            return matches[0], reason
+
+        self.task_hitl_status = "ignored"
+        if len(matches) > 1:
+            labels = ", ".join(candidate.label for candidate in matches[:3])
+            self.task_hitl_reason = f"task HITL ambiguous across candidates: {labels}"
+        else:
+            self.task_hitl_reason = "task HITL did not match any selectable candidate"
+        return None, ""
+
     def set_branch(self, branch: str) -> None:
         """Persist the active process branch."""
         self.branch = branch
+
+    def set_governor_target(self, *, option_id: str = "", label: str = "", note: str = "") -> None:
+        """Persist the selected governor so later subflows can reuse it."""
+        self.governor_state.target_governor_id = option_id.strip()
+        self.governor_state.target_governor_label = label.strip()
+        self.governor_state.target_governor_note = note.strip()
+
+    def get_governor_target_label(self) -> str:
+        """Return the saved governor label, if any."""
+        return self.governor_state.target_governor_label.strip()
+
+    def clear_governor_target(self) -> None:
+        """Drop saved governor target state."""
+        self.governor_state = GovernorState()
 
     def mark_substep(self, substep: str) -> None:
         """Record completion of a process substep once."""
@@ -278,6 +422,24 @@ class ShortTermMemory:
             )
         )
         logger.debug("STM step %s (%s): %s", self.step_count, stage or self.current_stage, action_summary)
+
+    def set_last_observation_debug(
+        self,
+        summary: str,
+        *,
+        scroll_anchor: dict | ScrollAnchor | None = None,
+    ) -> None:
+        """Persist the latest observation summary for prompts and Rich debug."""
+        self.last_observation_summary = summary.strip()
+        self.last_observation_anchor = self._format_scroll_anchor(scroll_anchor)
+
+    def set_last_planned_action_debug(self, summary: str) -> None:
+        """Persist the latest planned action summary for prompts and Rich debug."""
+        self.last_planned_action = summary.strip()
+
+    def set_last_executed_action_debug(self, summary: str) -> None:
+        """Persist the latest executed action summary for prompts and Rich debug."""
+        self.last_executed_action = summary.strip()
 
     def recent_actions_prompt(self) -> str:
         """Summarize recent task-local actions."""
@@ -321,21 +483,24 @@ class ShortTermMemory:
                 self.choice_catalog.scroll_anchor = scroll_anchor
 
         current_ids: set[str] = set()
+        raw_visible_ids: set[str] = set()
+        new_candidate_count = 0
+        visible_option_ids: list[str] = []
         for raw in visible_options:
             label = str(raw.get("label", "")).strip()
             if not label:
                 continue
 
-            option_id = str(raw.get("id", "")).strip() or _slugify(label)
-            current_ids.add(option_id)
+            raw_option_id = str(raw.get("id", "")).strip() or _slugify(label)
+            option_id = self._resolve_observed_choice_id(raw_option_id, label)
+            raw_visible_ids.add(option_id)
             candidate = self.choice_catalog.candidates.get(option_id)
+            was_selectable = self._candidate_is_selectable(candidate) if candidate is not None else False
             if candidate is None:
                 candidate = ChoiceCandidate(id=option_id, label=label)
                 self.choice_catalog.candidates[option_id] = candidate
 
             candidate.label = label
-            candidate.visible_now = True
-            candidate.position_hint = "visible"
 
             raw_score = raw.get("score")
             try:
@@ -347,25 +512,80 @@ class ShortTermMemory:
             metadata = {
                 "disabled": bool(raw.get("disabled", False)),
                 "selected": bool(raw.get("selected", False)),
+                "built": bool(raw.get("built", raw.get("selected", False))),
                 "note": str(raw.get("note", "")).strip(),
             }
             metadata = {k: v for k, v in metadata.items() if v not in ("", None)}
             candidate.metadata.update(metadata)
 
+            if self._raw_choice_is_selectable(raw):
+                visible_option_ids.append(option_id)
+                current_ids.add(option_id)
+                candidate.visible_now = True
+                candidate.position_hint = "visible"
+                if not was_selectable:
+                    new_candidate_count += 1
+            else:
+                candidate.visible_now = False
+                candidate.position_hint = "unknown"
+
         for option_id, candidate in self.choice_catalog.candidates.items():
             if option_id in current_ids:
+                continue
+            if option_id in raw_visible_ids and not self._candidate_is_selectable(candidate):
+                candidate.visible_now = False
+                candidate.position_hint = "unknown"
                 continue
             if candidate.visible_now:
                 candidate.visible_now = False
                 candidate.position_hint = "above" if scroll_direction == "down" else "below"
 
+        self.choice_catalog.last_new_candidate_count = new_candidate_count
+        self.choice_catalog.last_visible_option_ids = tuple(visible_option_ids)
+        if not self.choice_catalog.end_reached:
+            self.choice_catalog.scan_end_reason = ""
+
+        if scroll_direction == "down" and self.choice_catalog.downward_scan_scrolls > 0:
+            if new_candidate_count == 0:
+                self.choice_catalog.downward_no_new_streak += 1
+            else:
+                self.choice_catalog.downward_no_new_streak = 0
+        else:
+            self.choice_catalog.downward_no_new_streak = 0
+
         if end_of_list:
             self.choice_catalog.end_reached = True
+            self.choice_catalog.scan_end_reason = "observer_end_of_list"
+            self.choice_catalog.downward_no_new_streak = 0
             for option_id, candidate in self.choice_catalog.candidates.items():
                 if option_id not in current_ids and candidate.position_hint == "unknown":
                     candidate.position_hint = "above"
+        elif (
+            scroll_direction == "down"
+            and self.choice_catalog.downward_scan_scrolls >= 3
+            and self.choice_catalog.downward_no_new_streak >= 3
+        ):
+            self.choice_catalog.end_reached = True
+            self.choice_catalog.scan_end_reason = "down_scroll_no_new_candidates"
 
         self.capture_checkpoint()
+
+    def _resolve_observed_choice_id(self, option_id: str, label: str) -> str:
+        """Collapse unstable observer ids back to one catalog key when safe."""
+        if option_id in self.choice_catalog.candidates:
+            return option_id
+        if self.primitive_name != "city_production_primitive":
+            return option_id
+
+        normalized_label = _slugify(label)
+        label_matches = [
+            candidate.id
+            for candidate in self.choice_catalog.candidates.values()
+            if candidate.label == label or _slugify(candidate.label) == normalized_label
+        ]
+        if len(label_matches) == 1:
+            return label_matches[0]
+        return option_id
 
     def set_best_choice(
         self,
@@ -384,6 +604,10 @@ class ShortTermMemory:
         if option_id is None:
             return
 
+        candidate = self.choice_catalog.candidates.get(option_id)
+        if candidate is None or not self._candidate_is_selectable(candidate):
+            return
+
         self.choice_catalog.best_option_id = option_id
         self.choice_catalog.best_option_reason = reason
 
@@ -392,11 +616,217 @@ class ShortTermMemory:
         option_id = self.choice_catalog.best_option_id
         if not option_id:
             return None
-        return self.choice_catalog.candidates.get(option_id)
+        candidate = self.choice_catalog.candidates.get(option_id)
+        if candidate is None or not self._candidate_is_selectable(candidate):
+            return None
+        return candidate
+
+    @staticmethod
+    def _raw_choice_is_selectable(raw: dict) -> bool:
+        """Whether a visible raw choice can be acted on right now."""
+        selected = bool(raw.get("selected", False))
+        return not bool(raw.get("disabled", False)) and not selected and not bool(raw.get("built", selected))
+
+    @staticmethod
+    def _candidate_is_selectable(candidate: ChoiceCandidate) -> bool:
+        """Checked/disabled catalog entries are not valid final choices."""
+        return (
+            not bool(candidate.metadata.get("disabled"))
+            and not bool(candidate.metadata.get("selected"))
+            and not bool(candidate.metadata.get("built"))
+        )
+
+    def register_choice_scroll(self, *, direction: str) -> None:
+        """Persist successful scan scroll direction for later observation heuristics."""
+        self.choice_catalog.last_scroll_direction = direction
+        if direction == "down":
+            self.choice_catalog.downward_scan_scrolls += 1
+
+    def choice_catalog_decision_max_tokens(self) -> int:
+        """Return a token budget sized for whole-catalog decision prompts."""
+        candidate_count = len(self._selectable_choice_candidates())
+        return min(4096, max(1024, 512 + candidate_count * 96))
+
+    @staticmethod
+    def _format_choice_candidate_line(candidate: ChoiceCandidate, *, include_id: bool) -> str:
+        flags = []
+        if candidate.visible_now:
+            flags.append("보임")
+        elif candidate.position_hint != "unknown":
+            flags.append(candidate.position_hint)
+        if candidate.metadata.get("disabled"):
+            flags.append("비활성")
+        if candidate.metadata.get("selected"):
+            flags.append("체크됨")
+        if candidate.metadata.get("built"):
+            flags.append("이미 지음")
+        note = str(candidate.metadata.get("note", "")).strip()
+        suffix = f" / {note}" if note else ""
+        flag_text = f" ({', '.join(flags)})" if flags else ""
+        if include_id:
+            return f"- id={candidate.id} | label={candidate.label}{flag_text}{suffix}"
+        return f"- {candidate.label}{flag_text}{suffix}"
+
+    def choice_catalog_decision_prompt(self) -> str:
+        """Return the full choice catalog with stable ids for memory-only decision calls."""
+        if not self.choice_catalog.enabled:
+            return "choice catalog disabled"
+
+        selectable_candidates = self._selectable_choice_candidates()
+        lines = [
+            f"[choice_catalog] 확인한 후보 {len(selectable_candidates)}개 / 목록끝={self.choice_catalog.end_reached}"
+        ]
+        for candidate in selectable_candidates:
+            lines.append(self._format_choice_candidate_line(candidate, include_id=True))
+        return "\n".join(lines)
 
     def get_scroll_anchor(self) -> ScrollAnchor | None:
         """Return the saved hover anchor for scrollable popups."""
         return self.choice_catalog.scroll_anchor
+
+    def reset_choice_catalog(self) -> None:
+        """Clear choice-catalog contents while preserving enablement."""
+        enabled = self.choice_catalog.enabled
+        self.choice_catalog = ChoiceCatalogState(enabled=enabled)
+
+    def remember_city_placement_target(
+        self,
+        *,
+        x: int,
+        y: int,
+        button: str = "right",
+        reason: str = "",
+        origin: str = "",
+        tile_color: str = "",
+    ) -> None:
+        """Persist the most recent placement follow-up target."""
+        if not self._is_normalized_coord(x, y, normalizing_range=self.normalizing_range):
+            return
+        self.city_placement_state.target_x = x
+        self.city_placement_state.target_y = y
+        self.city_placement_state.target_button = button or "right"
+        self.city_placement_state.target_reason = reason.strip()
+        self.city_placement_state.target_origin = origin.strip()
+        self.city_placement_state.target_tile_color = tile_color.strip()
+        self.city_placement_state.reclick_attempts = 0
+        self.city_placement_state.has_target = True
+
+    def get_city_placement_target(self) -> tuple[int, int, str] | None:
+        """Return the saved placement target, if present."""
+        if not self.city_placement_state.has_target:
+            return None
+        if not self._is_normalized_coord(
+            self.city_placement_state.target_x,
+            self.city_placement_state.target_y,
+            normalizing_range=self.normalizing_range,
+        ):
+            return None
+        return (
+            self.city_placement_state.target_x,
+            self.city_placement_state.target_y,
+            self.city_placement_state.target_button or "right",
+        )
+
+    def bump_city_placement_reclick_attempt(self) -> int:
+        """Record one automatic re-click attempt for a purchased blue tile."""
+        self.city_placement_state.reclick_attempts += 1
+        return self.city_placement_state.reclick_attempts
+
+    def clear_city_placement_target(self) -> None:
+        """Reset placement follow-up state."""
+        self.city_placement_state = CityPlacementState()
+
+    # ------------------------------------------------------------------
+    # Voting process-memory helpers
+    # ------------------------------------------------------------------
+
+    def init_voting_state(self) -> None:
+        """Initialize or reset world-congress voting task state."""
+        self.voting_state.enabled = True
+        self.voting_state.current_agenda_id = ""
+        self.voting_state.current_agenda_label = ""
+        self.voting_state.selected_resolution = ""
+        self.voting_state.selected_vote_direction = ""
+        self.voting_state.selected_target_label = ""
+        self.clear_current_voting_direction_plan()
+        self.voting_state.completed_agenda_ids = []
+
+    def set_current_voting_agenda(self, *, option_id: str, label: str | None = None) -> None:
+        """Persist the agenda currently being processed."""
+        candidate = self.choice_catalog.candidates.get(option_id)
+        self.voting_state.enabled = True
+        self.voting_state.current_agenda_id = option_id
+        self.voting_state.current_agenda_label = label or (candidate.label if candidate is not None else option_id)
+        self.voting_state.selected_resolution = ""
+        self.voting_state.selected_vote_direction = ""
+        self.voting_state.selected_target_label = ""
+        self.clear_current_voting_direction_plan()
+
+    def clear_current_voting_agenda(self) -> None:
+        """Clear the active world-congress agenda while keeping completion history."""
+        self.voting_state.current_agenda_id = ""
+        self.voting_state.current_agenda_label = ""
+        self.voting_state.selected_resolution = ""
+        self.voting_state.selected_vote_direction = ""
+        self.voting_state.selected_target_label = ""
+        self.clear_current_voting_direction_plan()
+
+    def mark_current_voting_resolution(self, selection: str) -> None:
+        """Persist the chosen A/B resolution branch."""
+        self.voting_state.selected_resolution = selection.strip()
+
+    def mark_current_voting_direction(self, selection: str) -> None:
+        """Persist the chosen vote direction."""
+        self.voting_state.selected_vote_direction = selection.strip()
+
+    def mark_current_voting_target(self, label: str) -> None:
+        """Persist the chosen target label for the active agenda."""
+        self.voting_state.selected_target_label = label.strip()
+
+    def set_current_voting_direction_plan(self, *, x: int, y: int, reason: str, repeat_remaining: int) -> None:
+        """Persist the current direction-click plan until activation is verified."""
+        self.voting_state.direction_click_x = x
+        self.voting_state.direction_click_y = y
+        self.voting_state.direction_click_reason = reason.strip()
+        self.voting_state.direction_repeat_remaining = max(0, repeat_remaining)
+        self.voting_state.direction_repeat_unlocked = False
+
+    def clear_current_voting_direction_plan(self) -> None:
+        """Reset any pending repeated direction-click plan."""
+        self.voting_state.direction_click_x = 0
+        self.voting_state.direction_click_y = 0
+        self.voting_state.direction_click_reason = ""
+        self.voting_state.direction_repeat_remaining = 0
+        self.voting_state.direction_repeat_unlocked = False
+
+    def mark_current_voting_agenda_complete(self) -> None:
+        """Mark the active agenda as complete and exclude it from future picks."""
+        option_id = self.voting_state.current_agenda_id.strip()
+        if not option_id:
+            return
+        if option_id not in self.voting_state.completed_agenda_ids:
+            self.voting_state.completed_agenda_ids.append(option_id)
+        candidate = self.choice_catalog.candidates.get(option_id)
+        if candidate is not None:
+            candidate.metadata["selected"] = True
+            candidate.visible_now = False
+            candidate.position_hint = "unknown"
+        if self.choice_catalog.best_option_id == option_id:
+            self.choice_catalog.best_option_id = ""
+            self.choice_catalog.best_option_reason = ""
+        self.clear_current_voting_agenda()
+
+    def get_next_pending_voting_agenda(self) -> ChoiceCandidate | None:
+        """Return the next uncompleted, selectable agenda in scan order."""
+        if not self.voting_state.enabled:
+            return None
+        completed = set(self.voting_state.completed_agenda_ids)
+        for candidate in self.choice_catalog.candidates.values():
+            if candidate.id in completed:
+                continue
+            if self._candidate_is_selectable(candidate):
+                return candidate
+        return None
 
     def capture_checkpoint(self) -> None:
         """Store the latest stable restore point."""
@@ -405,7 +835,10 @@ class ShortTermMemory:
             branch=self.branch,
             step_count=self.step_count,
             choice_catalog=copy.deepcopy(self.choice_catalog),
+            city_placement_state=copy.deepcopy(self.city_placement_state),
             policy_state=copy.deepcopy(self.policy_state),
+            voting_state=copy.deepcopy(self.voting_state),
+            governor_state=copy.deepcopy(self.governor_state),
             completed_substeps=list(self.completed_substeps),
             action_log=copy.deepcopy(self.action_log),
             stage_failure_counts=dict(self.stage_failure_counts),
@@ -413,6 +846,13 @@ class ShortTermMemory:
             fallback_return_stage=self.fallback_return_stage,
             fallback_return_key=self.fallback_return_key,
             last_semantic_verify=self.last_semantic_verify,
+            last_observation_summary=self.last_observation_summary,
+            last_observation_anchor=self.last_observation_anchor,
+            last_planned_action=self.last_planned_action,
+            last_executed_action=self.last_executed_action,
+            task_hitl_directive=self.task_hitl_directive,
+            task_hitl_status=self.task_hitl_status,
+            task_hitl_reason=self.task_hitl_reason,
         )
 
     def restore_last_checkpoint(self) -> bool:
@@ -425,7 +865,10 @@ class ShortTermMemory:
         self.branch = checkpoint.branch
         self.step_count = checkpoint.step_count
         self.choice_catalog = copy.deepcopy(checkpoint.choice_catalog)
+        self.city_placement_state = copy.deepcopy(checkpoint.city_placement_state)
         self.policy_state = copy.deepcopy(checkpoint.policy_state)
+        self.voting_state = copy.deepcopy(checkpoint.voting_state)
+        self.governor_state = copy.deepcopy(checkpoint.governor_state)
         self.completed_substeps = list(checkpoint.completed_substeps)
         self.action_log = copy.deepcopy(checkpoint.action_log)
         self.stage_failure_counts = dict(checkpoint.stage_failure_counts)
@@ -433,6 +876,13 @@ class ShortTermMemory:
         self.fallback_return_stage = checkpoint.fallback_return_stage
         self.fallback_return_key = checkpoint.fallback_return_key
         self.last_semantic_verify = checkpoint.last_semantic_verify
+        self.last_observation_summary = checkpoint.last_observation_summary
+        self.last_observation_anchor = checkpoint.last_observation_anchor
+        self.last_planned_action = checkpoint.last_planned_action
+        self.last_executed_action = checkpoint.last_executed_action
+        self.task_hitl_directive = checkpoint.task_hitl_directive
+        self.task_hitl_status = checkpoint.task_hitl_status
+        self.task_hitl_reason = checkpoint.task_hitl_reason
         self.failure_count = 0
         logger.debug("STM restored checkpoint for %s at stage=%s", self.primitive_name, self.current_stage)
         return True
@@ -463,6 +913,7 @@ class ShortTermMemory:
         """Initialize policy tab cache, slot inventory, and execution queue."""
         resume_index = self.policy_state.restart_current_tab_index
         resume_completed = list(self.policy_state.restart_completed_tabs)
+        resume_changes_made = bool(self.policy_state.restart_changes_made_this_run)
         self.policy_state.enabled = True
         self.policy_state.mode = "structured"
         self.policy_state.bootstrap_complete = True
@@ -473,6 +924,8 @@ class ShortTermMemory:
         self.policy_state.overview_mode = overview_mode
         self.policy_state.wild_slot_active = wild_slot_active
         self.policy_state.selected_tab_name = selected_tab_name
+        self.policy_state.verified_active_tab_name = ""
+        self.policy_state.changes_made_this_run = resume_changes_made
         self.policy_state.visible_tabs = list(visible_tabs or [])
         self.policy_state.provisional_tabs = {str(tab) for tab in (provisional_tabs or [])}
         self.policy_state.calibration_pending_tabs = list(calibration_pending_tabs or [])
@@ -483,6 +936,7 @@ class ShortTermMemory:
         self.policy_state.generic_fallback_used = set()
         self.policy_state.restart_current_tab_index = 0
         self.policy_state.restart_completed_tabs = []
+        self.policy_state.restart_changes_made_this_run = False
         self.policy_state.cache_source = cache_source.strip()
         self.policy_state.last_similarity_result = ""
         self.policy_state.last_tab_check_result = ""
@@ -735,6 +1189,18 @@ class ShortTermMemory:
             tab.confirmed = True
             self.policy_state.provisional_tabs.discard(tab_name)
 
+    def set_policy_verified_active_tab(self, tab_name: str) -> None:
+        """Persist the tab semantically verified as active in this run."""
+        self.policy_state.verified_active_tab_name = tab_name.strip()
+
+    def get_policy_verified_active_tab(self) -> str:
+        """Return the tab semantically verified as active in this run."""
+        return self.policy_state.verified_active_tab_name
+
+    def clear_policy_verified_active_tab(self) -> None:
+        """Clear the semantically verified active-tab marker."""
+        self.policy_state.verified_active_tab_name = ""
+
     def start_policy_calibration(self, tabs: list[str] | None = None) -> None:
         """Start a deterministic calibration pass for provisional policy tabs."""
         calibration_tabs = tabs or list(_PROMPT_POLICY_TAB_ORDER)
@@ -769,6 +1235,15 @@ class ShortTermMemory:
             return self.get_policy_current_tab_name()
         return ""
 
+    def has_policy_aligned_tab_row(self) -> bool:
+        """Whether cached policy tabs form one horizontal row with distinct x positions."""
+        positions = list(self.policy_state.tab_positions.values())
+        if len(positions) < 2:
+            return False
+        y_values = {pos.screen_y for pos in positions}
+        x_values = {pos.screen_x for pos in positions}
+        return len(y_values) == 1 and len(x_values) == len(positions)
+
     def should_verify_policy_tab_click(self) -> bool:
         """Whether the current policy tab click still needs explicit verification."""
         if self.current_stage not in {"calibrate_tabs", "click_cached_tab", "click_next_tab"}:
@@ -778,6 +1253,12 @@ class ShortTermMemory:
             return False
         if self.current_stage == "calibrate_tabs":
             return True
+        if self.has_policy_provisional_tab(tab_name):
+            return True
+        if tab_name == "군사":
+            return not self.is_policy_tab_confirmed(tab_name)
+        if self.has_policy_aligned_tab_row():
+            return False
         return not self.is_policy_tab_confirmed(tab_name)
 
     def record_policy_failed_tab(self, tab_name: str) -> None:
@@ -959,6 +1440,7 @@ class ShortTermMemory:
             slot.is_empty = False
             slot.selected_from_tab = source_tab
             slot.selection_reason = reasoning
+            self.policy_state.changes_made_this_run = True
 
     def mark_policy_tab_completed(self, tab_name: str) -> None:
         """Mark a tab as fully processed."""
@@ -1025,6 +1507,7 @@ class ShortTermMemory:
         entry_done = self.policy_state.entry_done if preserve_entry_done else False
         restart_index = self.policy_state.current_tab_index if preserve_progress else 0
         restart_completed = list(self.policy_state.completed_tabs) if preserve_progress else []
+        restart_changes_made = self.policy_state.changes_made_this_run if preserve_progress else False
         restart_tabs = copy.deepcopy(self.policy_state.tab_positions) if preserve_tab_positions else {}
         restart_provisional = set(self.policy_state.provisional_tabs) if preserve_tab_positions else set()
         restart_cache_geometry = copy.deepcopy(self.policy_state.cache_geometry) if preserve_tab_positions else None
@@ -1039,6 +1522,8 @@ class ShortTermMemory:
         self.policy_state.overview_mode = False
         self.policy_state.wild_slot_active = False
         self.policy_state.selected_tab_name = ""
+        self.policy_state.verified_active_tab_name = ""
+        self.policy_state.changes_made_this_run = restart_changes_made
         self.policy_state.visible_tabs = []
         self.policy_state.tab_positions = restart_tabs
         self.policy_state.cache_geometry = restart_cache_geometry
@@ -1052,6 +1537,7 @@ class ShortTermMemory:
         self.policy_state.tab_failure_counts = {}
         self.policy_state.restart_current_tab_index = restart_index
         self.policy_state.restart_completed_tabs = restart_completed
+        self.policy_state.restart_changes_made_this_run = restart_changes_made
         self.policy_state.cache_source = self.policy_state.cache_source if preserve_tab_positions else ""
         self.policy_state.last_similarity_result = ""
         self.policy_state.last_tab_check_result = ""
@@ -1070,30 +1556,57 @@ class ShortTermMemory:
             lines.append(f"현재 stage: {self.current_stage}")
         if self.branch:
             lines.append(f"현재 branch: {self.branch}")
+        if self.governor_state.target_governor_label:
+            note = self.governor_state.target_governor_note
+            suffix = f" / {note}" if note else ""
+            lines.append(f"[governor_target] {self.governor_state.target_governor_label}{suffix}")
 
         if self.choice_catalog.enabled:
-            candidate_count = len(self.choice_catalog.candidates)
+            selectable_candidates = self._selectable_choice_candidates()
+            candidate_count = len(selectable_candidates)
             best = self.get_best_choice()
             lines.append(f"[choice_catalog] 확인한 후보 {candidate_count}개 / 목록끝={self.choice_catalog.end_reached}")
+            if self.choice_catalog.downward_scan_scrolls:
+                lines.append(
+                    f"scan_scrolls={self.choice_catalog.downward_scan_scrolls} / "
+                    f"last_new={self.choice_catalog.last_new_candidate_count}"
+                )
+            if self.choice_catalog.scan_end_reason:
+                lines.append(f"scan_end_reason={self.choice_catalog.scan_end_reason}")
+            if self.last_observation_summary:
+                lines.append(f"obs_summary={self.last_observation_summary[:180]}")
+            if self.last_observation_anchor:
+                lines.append(f"scroll_anchor={self.last_observation_anchor}")
+            if self.last_planned_action:
+                lines.append(f"planned_action={self.last_planned_action[:180]}")
+            if self.last_executed_action:
+                lines.append(f"executed_action={self.last_executed_action[:180]}")
+            if self.task_hitl_directive:
+                hitl_status = self.task_hitl_status or "pending"
+                lines.append(f"[task_hitl] {hitl_status} / {self.task_hitl_directive[:160]}")
+                if self.task_hitl_reason:
+                    lines.append(f"task_hitl_reason={self.task_hitl_reason[:180]}")
             if best is not None:
                 best_note = self.choice_catalog.best_option_reason or "전략상 최적"
                 lines.append(f"최종 선택 후보: {best.label} ({best.position_hint}) - {best_note}")
 
-            display_candidates = list(self.choice_catalog.candidates.values())[-8:]
+            display_candidates = selectable_candidates
             for candidate in display_candidates:
-                flags = []
-                if candidate.visible_now:
-                    flags.append("보임")
-                elif candidate.position_hint != "unknown":
-                    flags.append(candidate.position_hint)
-                if candidate.metadata.get("disabled"):
-                    flags.append("비활성")
-                if candidate.metadata.get("selected"):
-                    flags.append("선택됨")
-                note = str(candidate.metadata.get("note", "")).strip()
-                suffix = f" / {note}" if note else ""
-                flag_text = f" ({', '.join(flags)})" if flags else ""
-                lines.append(f"- {candidate.label}{flag_text}{suffix}")
+                lines.append(self._format_choice_candidate_line(candidate, include_id=False))
+
+        placement_target = self.get_city_placement_target()
+        if placement_target is not None:
+            x, y, button = placement_target
+            lines.append(
+                f"[city_placement] target=({x},{y}) button={button} "
+                f"reclick_attempts={self.city_placement_state.reclick_attempts}"
+            )
+            if self.city_placement_state.target_origin:
+                lines.append(f"target_origin={self.city_placement_state.target_origin}")
+            if self.city_placement_state.target_tile_color:
+                lines.append(f"target_tile_color={self.city_placement_state.target_tile_color}")
+            if self.city_placement_state.target_reason:
+                lines.append(f"target_reason={self.city_placement_state.target_reason}")
 
         if self.policy_state.enabled:
             current_tab = self.get_policy_current_tab_name() or "-"
@@ -1103,6 +1616,7 @@ class ShortTermMemory:
                 f"current={current_tab} wild={self.policy_state.wild_slot_active}"
             )
             lines.append(f"overview_mode={self.policy_state.overview_mode}")
+            lines.append(f"changes_made_this_run={self.policy_state.changes_made_this_run}")
             lines.append(f"bootstrap_failures={self.policy_state.bootstrap_failures}")
             if self.policy_state.entry_done:
                 lines.append("entry_done=true")
@@ -1116,6 +1630,8 @@ class ShortTermMemory:
                 lines.append(f"visible_tabs: {', '.join(self.policy_state.visible_tabs)}")
             if self.policy_state.selected_tab_name:
                 lines.append(f"selected_tab={self.policy_state.selected_tab_name}")
+            if self.policy_state.verified_active_tab_name:
+                lines.append(f"verified_active_tab={self.policy_state.verified_active_tab_name}")
             lines.append(f"current_tab={current_tab}")
             lines.append(f"remaining_queue: {', '.join(remaining_queue) if remaining_queue else '<empty>'}")
             if self.policy_state.completed_tabs:
@@ -1154,12 +1670,49 @@ class ShortTermMemory:
             if self.policy_state.last_event:
                 lines.append(f"event={self.policy_state.last_event}")
 
+        if self.voting_state.enabled:
+            lines.append(f"[voting] current={self.voting_state.current_agenda_label or '-'}")
+            if self.voting_state.selected_resolution:
+                lines.append(f"resolution={self.voting_state.selected_resolution}")
+            if self.voting_state.selected_vote_direction:
+                lines.append(f"vote_direction={self.voting_state.selected_vote_direction}")
+            if self.voting_state.selected_target_label:
+                lines.append(f"target={self.voting_state.selected_target_label}")
+            if self.voting_state.completed_agenda_ids:
+                lines.append(f"completed_agendas={', '.join(self.voting_state.completed_agenda_ids)}")
+
         if self.last_semantic_verify:
             lines.append(f"[semantic] {self.last_semantic_verify}")
 
         if self.action_log:
             lines.append("[최근 task action]")
             lines.append(self.recent_actions_prompt())
+
+        return "\n".join(lines) if lines else "없음"
+
+    def to_observer_prompt_string(self) -> str:
+        """Compact prompt summary for observer-only passes without echoing candidate labels."""
+        lines = []
+
+        if self.current_stage:
+            lines.append(f"현재 stage: {self.current_stage}")
+        if self.branch:
+            lines.append(f"현재 branch: {self.branch}")
+
+        if self.choice_catalog.enabled:
+            lines.append(f"[choice_scan] 목록끝={self.choice_catalog.end_reached}")
+            if self.choice_catalog.downward_scan_scrolls:
+                lines.append(
+                    f"scan_scrolls={self.choice_catalog.downward_scan_scrolls} / "
+                    f"last_new={self.choice_catalog.last_new_candidate_count}"
+                )
+            if self.choice_catalog.scan_end_reason:
+                lines.append(f"scan_end_reason={self.choice_catalog.scan_end_reason}")
+            if self.choice_catalog.scroll_anchor is not None:
+                lines.append(f"scroll_anchor={self._format_scroll_anchor(self.choice_catalog.scroll_anchor)}")
+
+        if self.last_semantic_verify:
+            lines.append(f"[semantic] {self.last_semantic_verify}")
 
         return "\n".join(lines) if lines else "없음"
 
@@ -1208,3 +1761,22 @@ class ShortTermMemory:
             right=right,
             bottom=bottom,
         )
+
+    def _format_scroll_anchor(self, scroll_anchor: dict | ScrollAnchor | None) -> str:
+        """Return a compact one-line debug summary for a scroll anchor."""
+        anchor: ScrollAnchor | None = None
+        if isinstance(scroll_anchor, dict):
+            anchor = self._build_scroll_anchor(scroll_anchor)
+        elif isinstance(scroll_anchor, ScrollAnchor):
+            anchor = scroll_anchor
+        if anchor is None:
+            return ""
+        return f"({anchor.x},{anchor.y}) [{anchor.left},{anchor.top}]→[{anchor.right},{anchor.bottom}]"
+
+    def _selectable_choice_candidates(self) -> list[ChoiceCandidate]:
+        """Return only candidates that can still be selected."""
+        return [
+            candidate
+            for candidate in self.choice_catalog.candidates.values()
+            if self._candidate_is_selectable(candidate)
+        ]

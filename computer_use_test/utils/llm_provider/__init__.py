@@ -16,6 +16,7 @@ Example usage:
 
 from dotenv import load_dotenv
 
+from computer_use_test.utils.llm_provider.anthropic_computer import AnthropicComputerVLMProvider
 from computer_use_test.utils.llm_provider.base import (
     BaseVLMProvider,
     MockVLMProvider,
@@ -24,6 +25,7 @@ from computer_use_test.utils.llm_provider.base import (
 from computer_use_test.utils.llm_provider.claude import ClaudeVLMProvider
 from computer_use_test.utils.llm_provider.gemini import GeminiVLMProvider
 from computer_use_test.utils.llm_provider.gpt import GPTVLMProvider
+from computer_use_test.utils.llm_provider.openai_computer import OpenAIComputerVLMProvider
 from computer_use_test.utils.llm_provider.parser import (
     AgentAction,
     parse_action_json,
@@ -40,6 +42,8 @@ __all__ = [
     "ClaudeVLMProvider",
     "GeminiVLMProvider",
     "GPTVLMProvider",
+    "OpenAIComputerVLMProvider",
+    "AnthropicComputerVLMProvider",
     "MockVLMProvider",
     "create_provider",
     "get_available_providers",
@@ -83,6 +87,10 @@ def create_provider(
         "gemini": GeminiVLMProvider,
         "gpt": GPTVLMProvider,
         "openai": GPTVLMProvider,  # Alias
+        "openai-computer": OpenAIComputerVLMProvider,
+        "gpt-computer": OpenAIComputerVLMProvider,
+        "anthropic-computer": AnthropicComputerVLMProvider,
+        "claude-computer": AnthropicComputerVLMProvider,
         "mock": MockVLMProvider,
     }
 
@@ -116,5 +124,8 @@ def get_available_providers() -> dict[str, str]:
         "claude": ClaudeVLMProvider.DEFAULT_MODEL,
         "gemini": GeminiVLMProvider.DEFAULT_MODEL,
         "gpt": GPTVLMProvider.DEFAULT_MODEL,
+        "openai": GPTVLMProvider.DEFAULT_MODEL,
+        "openai-computer": OpenAIComputerVLMProvider.DEFAULT_MODEL,
+        "anthropic-computer": AnthropicComputerVLMProvider.DEFAULT_MODEL,
         "mock": "mock-vlm",
     }

@@ -131,13 +131,19 @@ class BaseVLMProvider(ABC):
         image_path: str | Path | None = None,
         temperature: float = 0.7,
         max_tokens: int = 8192,
+        use_thinking: bool = True,
     ) -> VLMResponse:
         """Call VLM with text prompt + optional image file."""
         content_parts = []
         if image_path:
             content_parts.append(self._build_image_content(image_path))
         content_parts.append(self._build_text_content(prompt))
-        return self._send_to_api(content_parts, temperature, max_tokens)
+        return self._send_to_api(
+            content_parts,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            use_thinking=use_thinking,
+        )
 
     def call_and_parse(
         self,

@@ -26,6 +26,8 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from computer_use_test.agent.modules.context import ContextManager
@@ -37,7 +39,13 @@ from computer_use_test.agent.modules.hitl.turn_checkpoint import (
     TurnSummary,
 )
 from computer_use_test.agent.modules.memory.short_term_memory import ShortTermMemory
-from computer_use_test.agent.modules.primitive.multi_step_process import StageTransition, get_multi_step_process
+from computer_use_test.agent.modules.primitive.multi_step_process import (
+    _POLICY_RIGHT_CARD_LIST_RATIOS,
+    _POLICY_RIGHT_TAB_BAR_RATIOS,
+    StageTransition,
+    VerificationResult,
+    get_multi_step_process,
+)
 from computer_use_test.agent.modules.router.primitive_registry import (
     PRIMITIVE_NAMES,
     PRIMITIVE_REGISTRY,
@@ -51,6 +59,7 @@ from computer_use_test.utils.image_pipeline import ImagePipelineConfig, process_
 from computer_use_test.utils.llm_provider.base import BaseVLMProvider
 from computer_use_test.utils.llm_provider.parser import AgentAction, strip_markdown
 from computer_use_test.utils.rich_logger import RichLogger
+from computer_use_test.utils.run_log_cache import get_run_log_cache_path
 from computer_use_test.utils.screen import capture_screen_pil, execute_action, move_cursor_to_center
 from computer_use_test.utils.ui_change_detector import screenshots_similar
 
@@ -68,9 +77,11 @@ logger = logging.getLogger(__name__)
 
 # finish_reason values that indicate truncation across providers
 _TRUNCATION_REASONS = {"max_tokens", "length", "MAX_TOKENS"}
+_SCROLL_LIST_POST_ACTION_WAIT_SECONDS = 0.55
 
 # Module-level TurnValidator singleton (created on first use)
 _turn_validator: TurnValidator | None = None
+_policy_artifact_session_dir: Path | None = None
 
 
 def _get_turn_validator() -> TurnValidator:
@@ -79,6 +90,154 @@ def _get_turn_validator() -> TurnValidator:
     if _turn_validator is None:
         _turn_validator = TurnValidator()
     return _turn_validator
+
+
+def _save_policy_semantic_failure_artifacts(
+    *,
+    primitive_name: str,
+    stage: str,
+    semantic_reason: str,
+    semantic_details: dict[str, object] | None,
+    memory: ShortTermMemory,
+    pil_image,
+) -> None:
+    """Best-effort hook for capturing policy semantic-failure context."""
+
+    def _crop_ratio_region(image, ratios: tuple[float, float, float, float]):
+        width, height = image.size
+        left = max(0, min(width, round(width * ratios[0])))
+        top = max(0, min(height, round(height * ratios[1])))
+        right = max(left + 1, min(width, round(width * ratios[2])))
+        bottom = max(top + 1, min(height, round(height * ratios[3])))
+        return image.crop((left, top, right, bottom))
+
+    def _get_policy_artifact_session_dir() -> Path:
+        global _policy_artifact_session_dir  # noqa: PLW0603
+        if _policy_artifact_session_dir is None:
+            run_log_path = get_run_log_cache_path()
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            _policy_artifact_session_dir = run_log_path.parent / "policy_artifacts" / stamp
+        _policy_artifact_session_dir.mkdir(parents=True, exist_ok=True)
+        return _policy_artifact_session_dir
+
+    try:
+        artifact_dir = _get_policy_artifact_session_dir()
+        full_path = artifact_dir / "full.png"
+        tab_bar_path = artifact_dir / "tab_bar.png"
+        card_list_path = artifact_dir / "card_list.png"
+        manifest_path = artifact_dir / "manifest.json"
+
+        pil_image.save(full_path)
+        _crop_ratio_region(pil_image, _POLICY_RIGHT_TAB_BAR_RATIOS).save(tab_bar_path)
+        _crop_ratio_region(pil_image, _POLICY_RIGHT_CARD_LIST_RATIOS).save(card_list_path)
+
+        details = dict(semantic_details or {})
+        manifest = {
+            "primitive": primitive_name,
+            "stage": stage,
+            "semantic_reason": semantic_reason,
+            "expected_tab": details.get("expected_tab", ""),
+            "observed_active_tab": details.get("observed_active_tab", details.get("tab_bar_observed", "")),
+            "policy_tab_outcome": details.get("policy_tab_outcome", ""),
+            "tab_content_state": details.get("tab_content_state", ""),
+            "selected_tab_name": memory.get_policy_selected_tab(),
+            "current_tab": memory.get_policy_current_tab_name(),
+            "current_tab_index": memory.policy_state.current_tab_index,
+            "overview_mode": memory.policy_state.overview_mode,
+            "last_event": memory.policy_state.last_event,
+            "last_tab_check_result": memory.policy_state.last_tab_check_result,
+            "image_size": getattr(pil_image, "size", None),
+        }
+        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        logger.warning(
+            "Policy semantic failure artifact | primitive=%s stage=%s "
+            "reason=%s path=%s details=%s memory=%s image_size=%s",
+            primitive_name,
+            stage,
+            semantic_reason,
+            artifact_dir,
+            details,
+            memory.to_prompt_string()[:400],
+            getattr(pil_image, "size", None),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Policy semantic failure artifact save failed | primitive=%s stage=%s reason=%s error=%s",
+            primitive_name,
+            stage,
+            semantic_reason,
+            exc,
+        )
+
+
+def _primitive_trace_tag(primitive_name: str) -> str:
+    """Return a compact display tag for one primitive trace line."""
+    overrides = {
+        "city_production_primitive": "CITY_PROD",
+        "governor_primitive": "GOVERNOR",
+        "research_select_primitive": "RESEARCH",
+        "culture_decision_primitive": "CULTURE",
+        "policy_primitive": "POLICY",
+        "religion_primitive": "RELIGION",
+        "voting_primitive": "VOTING",
+    }
+    if primitive_name in overrides:
+        return overrides[primitive_name]
+    return primitive_name.replace("_primitive", "").upper()
+
+
+def _emit_runtime_trace(
+    *,
+    rl: RichLogger,
+    state_bridge: AgentStateBridge | None,
+    primitive_name: str,
+    stage: str,
+    phase: str,
+    summary: str,
+    detail: str = "",
+) -> None:
+    """Emit one structured runtime trace event to Rich and HITL status."""
+    rl.primitive_event(
+        _primitive_trace_tag(primitive_name),
+        f"{phase} | stage={stage or '-'} | {summary}{f' | {detail}' if detail else ''}",
+    )
+    if state_bridge:
+        state_bridge.append_trace_event(
+            primitive=primitive_name,
+            stage=stage or "",
+            phase=phase,
+            summary=summary,
+            detail=detail,
+        )
+
+
+def _post_action_wait_seconds(
+    primitive_name: str,
+    actions: list[AgentAction],
+    *,
+    delay_before_action: float,
+    stage_name: str = "",
+) -> float:
+    """Return a capture-settle delay tuned to the executed action bundle."""
+    if primitive_name == "policy_primitive":
+        return 0.5
+    default_wait = min(delay_before_action, 0.3)
+    if primitive_name == "religion_primitive" and any(
+        action.action in {"click", "double_click", "press"} for action in actions
+    ):
+        return max(default_wait, 0.5)
+    if primitive_name in {"city_production_primitive", "governor_primitive"} and any(
+        action.action == "scroll" for action in actions
+    ):
+        return max(default_wait, _SCROLL_LIST_POST_ACTION_WAIT_SECONDS)
+    if (
+        primitive_name == "city_production_primitive"
+        and stage_name == "select_from_memory"
+        and any(action.action in {"click", "double_click"} for action in actions)
+    ):
+        return max(default_wait, 0.5)
+    return default_wait
 
 
 @dataclass
@@ -362,6 +521,15 @@ class PrimitiveLoopResult:
     error_message: str = ""
 
 
+def _should_follow_up_route(loop_result: PrimitiveLoopResult) -> bool:
+    """Whether run_one_turn should attempt a follow-up route after a loop result."""
+    if loop_result.re_route or loop_result.completed:
+        return True
+    if not loop_result.error_message:
+        return False
+    return loop_result.error_message != "STOP directive received during loop"
+
+
 def run_primitive_loop(
     planner_provider: BaseVLMProvider,
     primitive_name: str,
@@ -381,6 +549,7 @@ def run_primitive_loop(
     command_queue: CommandQueue | None = None,
     agent_gate: AgentGate | None = None,
     state_bridge: AgentStateBridge | None = None,
+    strategy_updater: StrategyUpdater | None = None,
     delay_before_action: float = 0.5,
 ) -> PrimitiveLoopResult:
     """Execute a class-based multi-step primitive until completion, rollback, or reroute."""
@@ -390,6 +559,24 @@ def run_primitive_loop(
     process.initialize(memory)
     rollback_used = False
     last_policy_event_emitted = ""
+    active_strategy_string = strategy_string or ""
+    active_hitl_directive = (hitl_directive or "").strip()
+    step_start = time.monotonic()
+    plan_end = step_start
+    exec_end = step_start
+    step = 0
+    loop_iterations = 0
+
+    def _strip_user_priority_prefix(text: str) -> str:
+        prefix = "[사용자 최우선 지시] "
+        if not text.startswith(prefix):
+            return text
+        parts = text.split("\n\n", 1)
+        return parts[1] if len(parts) == 2 else ""
+
+    base_strategy_string = _strip_user_priority_prefix(active_strategy_string)
+    if active_hitl_directive:
+        memory.set_task_hitl_directive(active_hitl_directive, reason="initial task hitl directive")
 
     def _emit_policy_event_if_changed() -> None:
         nonlocal last_policy_event_emitted
@@ -438,6 +625,17 @@ def run_primitive_loop(
             parts.append(f"{idx}:{planned_action.action}{coord}")
         return " | ".join(parts) if parts else "-"
 
+    def _publish_error_state(message: str) -> None:
+        if not message:
+            return
+        rl.action_result(
+            action_type="error",
+            coords=None,
+            reasoning=message,
+        )
+        if state_bridge:
+            state_bridge.update_current_action(primitive_name, "error", message)
+
     def _log_policy_state(prefix: str, actions: list[AgentAction] | None = None) -> None:
         if primitive_name != "policy_primitive" or not memory.policy_state.enabled:
             return
@@ -481,13 +679,117 @@ def run_primitive_loop(
             return ""
         return f"{best_choice.label} ({best_choice.position_hint})"
 
-    def _refresh_multi_step_debug() -> None:
+    def _multi_step_stm_summary() -> str:
         stm_raw = memory.to_prompt_string()
-        stm_str = stm_raw if primitive_name == "policy_primitive" else stm_raw[:150]
+        if primitive_name in {"policy_primitive", "city_production_primitive"}:
+            return stm_raw
+        return stm_raw[:150]
+
+    def _format_debug_action_summary(action: AgentAction) -> str:
+        parts = [action.action]
+        if action.action in {"click", "double_click", "scroll"}:
+            parts.append(f"@ ({action.x}, {action.y})")
+        if action.action == "drag":
+            parts.append(f"@ ({action.x}, {action.y}) -> ({action.end_x}, {action.end_y})")
+        if action.action == "scroll":
+            parts.append(f"amount={action.scroll_amount}")
+        if action.action == "press" and action.key:
+            parts.append(f"key={action.key}")
+        if action.reasoning:
+            parts.append(action.reasoning[:120])
+        return " | ".join(parts)
+
+    def _emit_city_production_event(label: str, detail: str) -> None:
+        if primitive_name != "city_production_primitive":
+            return
+        _emit_runtime_trace(
+            rl=rl,
+            state_bridge=state_bridge,
+            primitive_name=primitive_name,
+            stage=memory.current_stage or "-",
+            phase=label,
+            summary=detail,
+        )
+
+    def _visible_progress(displayed_step: int) -> tuple[int, int]:
+        step_value, max_value = process.get_visible_progress(
+            memory,
+            executed_steps=displayed_step,
+            hard_max_steps=max_steps,
+        )
+        step_value = max(0, step_value)
+        max_value = max(0, max_value)
+        if max_value and step_value > max_value:
+            step_value = max_value
+        return step_value, max_value
+
+    def _iteration_limit() -> int:
+        try:
+            requested_limit = int(process.get_iteration_limit(memory, action_limit=max_steps))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Iteration limit hook failed for %s: %s", primitive_name, exc)
+            requested_limit = max_steps
+        return max(max_steps, requested_limit)
+
+    def _policy_semantic_recheck_once(
+        initial_result,
+        *,
+        action: AgentAction,
+    ):
+        if primitive_name != "policy_primitive":
+            return initial_result
+        if not initial_result.handled or initial_result.passed:
+            return initial_result
+        time.sleep(0.1)
+        recheck_image, *_ = capture_screen_pil()
+        recheck_result = process.verify_action_success(
+            planner_provider,
+            recheck_image,
+            memory,
+            action,
+            img_config=planner_img_config,
+        )
+        if recheck_result.handled:
+            memory.set_last_semantic_verify(
+                "pass" if recheck_result.passed else "fail",
+                recheck_result.reason,
+            )
+        if recheck_result.passed:
+            logger.info(
+                "Policy semantic verification recovered on delayed recheck | stage=%s reason=%s",
+                memory.current_stage or "-",
+                recheck_result.reason,
+            )
+        return recheck_result
+
+    def _governor_completion_recheck_once(initial_verification: VerificationResult) -> VerificationResult:
+        if primitive_name != "governor_primitive":
+            return initial_verification
+        if initial_verification.complete:
+            return initial_verification
+        time.sleep(0.2)
+        recheck_image, *_ = capture_screen_pil()
+        recheck_result = process.verify_completion(
+            planner_provider,
+            recheck_image,
+            memory,
+            img_config=planner_img_config,
+        )
+        if recheck_result.complete:
+            logger.info(
+                "Governor completion recovered on delayed recheck | stage=%s reason=%s",
+                memory.current_stage or "-",
+                recheck_result.reason,
+            )
+        return recheck_result
+
+    def _refresh_multi_step_debug() -> None:
+        stm_str = _multi_step_stm_summary()
+        visible_step, visible_max_steps = _visible_progress(result.steps_taken)
         rl.update_multi_step(
             active=True,
-            step=result.steps_taken,
-            max_steps=max_steps,
+            step=visible_step,
+            max_steps=visible_max_steps,
             plan_ms=(plan_end - step_start) * 1000,
             exec_ms=(exec_end - plan_end) * 1000,
             stage=memory.current_stage,
@@ -498,8 +800,8 @@ def run_primitive_loop(
         if state_bridge:
             state_bridge.update_multi_step(
                 active=True,
-                step=result.steps_taken,
-                max_steps=max_steps,
+                step=visible_step,
+                max_steps=visible_max_steps,
                 plan_ms=(plan_end - step_start) * 1000,
                 exec_ms=(exec_end - plan_end) * 1000,
                 stage=memory.current_stage,
@@ -508,7 +810,61 @@ def run_primitive_loop(
                 stm_summary=stm_str,
             )
 
-    for step in range(max_steps):
+    def _clear_current_action_debug() -> None:
+        rl.clear_current_action()
+        if state_bridge:
+            state_bridge.clear_current_action()
+
+    def _complete_from_terminal_state() -> bool:
+        if not process.is_terminal_state(memory):
+            return False
+        result.completed = True
+        result.success = True
+        _refresh_multi_step_debug()
+        reason = process.terminal_state_reason(memory)
+        _emit_runtime_trace(
+            rl=rl,
+            state_bridge=state_bridge,
+            primitive_name=primitive_name,
+            stage=memory.current_stage or "-",
+            phase="complete",
+            summary=reason,
+        )
+        logger.info("Primitive loop completed from terminal state: %s in %s steps", primitive_name, step + 1)
+        return True
+
+    while True:
+        if result.steps_taken >= max_steps:
+            result.error_message = f"Primitive loop reached safety action cap ({max_steps}) without completion"
+            _emit_runtime_trace(
+                rl=rl,
+                state_bridge=state_bridge,
+                primitive_name=primitive_name,
+                stage=memory.current_stage or "-",
+                phase="error",
+                summary=result.error_message,
+            )
+            logger.warning(result.error_message)
+            break
+
+        current_iteration_limit = _iteration_limit()
+        if loop_iterations >= current_iteration_limit:
+            result.error_message = (
+                f"Primitive loop reached safety iteration cap ({current_iteration_limit}) without completion"
+            )
+            _emit_runtime_trace(
+                rl=rl,
+                state_bridge=state_bridge,
+                primitive_name=primitive_name,
+                stage=memory.current_stage or "-",
+                phase="error",
+                summary=result.error_message,
+            )
+            logger.warning(result.error_message)
+            break
+
+        step = loop_iterations
+        loop_iterations += 1
         pre_image, screen_w, screen_h, x_offset, y_offset = capture_screen_pil()
         if primitive_name == "policy_primitive":
             memory.set_policy_capture_geometry(screen_w, screen_h, x_offset, y_offset)
@@ -531,11 +887,28 @@ def run_primitive_loop(
             if queue_check.should_stop:
                 result.error_message = "STOP directive received during loop"
                 break
+            if queue_check.strategy_override:
+                override_text = str(queue_check.strategy_override).strip()
+                if override_text:
+                    memory.set_task_hitl_directive(override_text, reason="mid-task hitl directive")
+                    active_hitl_directive = override_text
+                    active_strategy_string = f"[사용자 최우선 지시] {override_text}\n\n{base_strategy_string}".strip()
+                    if strategy_updater:
+                        from computer_use_test.agent.modules.strategy.strategy_updater import (
+                            StrategyRequest,
+                            StrategyTrigger,
+                        )
+
+                        strategy_updater.submit(StrategyRequest(StrategyTrigger.HITL_CHANGE, human_input=override_text))
 
         step_start = time.monotonic()
         action: AgentAction | list[AgentAction] | None = None
 
         if process.should_observe(memory):
+            move_cursor_to_center(screen_w, screen_h, x_offset, y_offset)
+            pre_image, screen_w, screen_h, x_offset, y_offset = capture_screen_pil()
+            if primitive_name == "policy_primitive":
+                memory.set_policy_capture_geometry(screen_w, screen_h, x_offset, y_offset)
             observation = process.observe(
                 planner_provider,
                 pre_image,
@@ -549,12 +922,27 @@ def run_primitive_loop(
                 break
 
             action = process.consume_observation(memory, observation)
-            stm_raw = memory.to_prompt_string()
-            stm_str = stm_raw if primitive_name == "policy_primitive" else stm_raw[:150]
+            _emit_city_production_event(
+                "observe",
+                f"stage={memory.current_stage or '-'} | {memory.last_observation_summary or '-'} | "
+                f"anchor={memory.last_observation_anchor or '-'}",
+            )
+            if primitive_name != "city_production_primitive":
+                _emit_runtime_trace(
+                    rl=rl,
+                    state_bridge=state_bridge,
+                    primitive_name=primitive_name,
+                    stage=memory.current_stage or "-",
+                    phase="observe",
+                    summary=memory.last_observation_summary or "observation completed",
+                    detail=memory.last_observation_anchor or "",
+                )
+            stm_str = _multi_step_stm_summary()
+            visible_step, visible_max_steps = _visible_progress(result.steps_taken)
             rl.update_multi_step(
                 active=True,
-                step=step + 1,
-                max_steps=max_steps,
+                step=visible_step,
+                max_steps=visible_max_steps,
                 plan_ms=(plan_end - step_start) * 1000,
                 exec_ms=0,
                 stage=memory.current_stage,
@@ -565,8 +953,8 @@ def run_primitive_loop(
             if state_bridge:
                 state_bridge.update_multi_step(
                     active=True,
-                    step=step + 1,
-                    max_steps=max_steps,
+                    step=visible_step,
+                    max_steps=visible_max_steps,
                     plan_ms=(plan_end - step_start) * 1000,
                     exec_ms=0,
                     stage=memory.current_stage,
@@ -580,11 +968,16 @@ def run_primitive_loop(
             if action is None:
                 continue
         else:
-            if process.supports_observation and memory.choice_catalog.end_reached and memory.get_best_choice() is None:
+            if (
+                process.supports_observation
+                and memory.choice_catalog.end_reached
+                and memory.get_best_choice() is None
+                and process.should_auto_decide_from_memory(memory)
+            ):
                 decided = process.decide_from_memory(
                     planner_provider,
                     memory,
-                    high_level_strategy=strategy_string,
+                    high_level_strategy=active_strategy_string,
                 )
                 if not decided:
                     result.error_message = "Failed to decide best choice from short-term memory"
@@ -603,9 +996,9 @@ def run_primitive_loop(
                 pre_image,
                 memory,
                 normalizing_range=normalizing_range,
-                high_level_strategy=strategy_string,
+                high_level_strategy=active_strategy_string,
                 recent_actions=combined_recent_actions or "없음",
-                hitl_directive=hitl_directive,
+                hitl_directive=active_hitl_directive or None,
                 img_config=planner_img_config,
             )
             plan_end = time.monotonic()
@@ -625,48 +1018,79 @@ def run_primitive_loop(
                 action.stage,
                 action.reason or "-",
             )
+            _emit_runtime_trace(
+                rl=rl,
+                state_bridge=state_bridge,
+                primitive_name=primitive_name,
+                stage=memory.current_stage or "-",
+                phase="stage",
+                summary=action.reason or "internal stage transition",
+                detail=f"next={action.stage}",
+            )
+            visible_step, visible_max_steps = _visible_progress(result.steps_taken)
             rl.update_multi_step(
                 active=True,
-                step=result.steps_taken,
-                max_steps=max_steps,
+                step=visible_step,
+                max_steps=visible_max_steps,
                 plan_ms=(plan_end - step_start) * 1000,
                 exec_ms=0,
                 stage=memory.current_stage,
                 stall_count=memory.failure_count,
                 best_choice=_best_choice_summary(),
-                stm_summary=memory.to_prompt_string()
-                if primitive_name == "policy_primitive"
-                else memory.to_prompt_string()[:150],
+                stm_summary=_multi_step_stm_summary(),
             )
             if state_bridge:
                 state_bridge.update_multi_step(
                     active=True,
-                    step=result.steps_taken,
-                    max_steps=max_steps,
+                    step=visible_step,
+                    max_steps=visible_max_steps,
                     plan_ms=(plan_end - step_start) * 1000,
                     exec_ms=0,
                     stage=memory.current_stage,
                     stall_count=memory.failure_count,
                     best_choice=_best_choice_summary(),
-                    stm_summary=memory.to_prompt_string()
-                    if primitive_name == "policy_primitive"
-                    else memory.to_prompt_string()[:150],
+                    stm_summary=_multi_step_stm_summary(),
                 )
             _sync_policy_cache_to_context()
             _emit_policy_event_if_changed()
             _log_policy_state("stage-transition")
+            if _complete_from_terminal_state():
+                break
             continue
 
         is_action_bundle = isinstance(action, list)
         actions_list = action if is_action_bundle else [action]
         actions_list = process.resolve_actions(actions_list, memory)
         display_action = actions_list[0]
+        planned_summary = (
+            f"{_format_debug_action_summary(display_action)} +{len(actions_list) - 1}"
+            if is_action_bundle and len(actions_list) > 1
+            else _format_debug_action_summary(display_action)
+        )
+        memory.set_last_planned_action_debug(planned_summary)
         result.last_action = actions_list[-1]
         result.steps_taken += 1
 
-        action_extra = {"Step": f"{step + 1}/{max_steps}", "Status": display_action.task_status or "in_progress"}
+        visible_step, visible_max_steps = _visible_progress(result.steps_taken)
+        action_extra = {
+            "Step": f"{visible_step}/{visible_max_steps}",
+            "Status": display_action.task_status or "in_progress",
+        }
         if is_action_bundle:
             action_extra["Multi-Action"] = f"{len(actions_list)} actions"
+        _emit_city_production_event(
+            "plan",
+            f"stage={memory.current_stage or '-'} | {memory.last_planned_action or planned_summary}",
+        )
+        if primitive_name != "city_production_primitive":
+            _emit_runtime_trace(
+                rl=rl,
+                state_bridge=state_bridge,
+                primitive_name=primitive_name,
+                stage=memory.current_stage or "-",
+                phase="plan",
+                summary=memory.last_planned_action or planned_summary,
+            )
         _log_policy_state("planned-actions", actions_list)
         rl.action_result(
             action_type=display_action.action,
@@ -724,12 +1148,34 @@ def run_primitive_loop(
             break
         exec_end = time.monotonic()
 
-        stm_raw = memory.to_prompt_string()
-        stm_str = stm_raw if primitive_name == "policy_primitive" else stm_raw[:150]
+        executed_summary = (
+            " || ".join(_format_debug_action_summary(planned_action) for planned_action in actions_list[:2])
+            if len(actions_list) > 1
+            else _format_debug_action_summary(actions_list[0])
+        )
+        if len(actions_list) > 2:
+            executed_summary = f"{executed_summary} || +{len(actions_list) - 2} more"
+        memory.set_last_executed_action_debug(executed_summary)
+        _emit_city_production_event(
+            "exec",
+            f"stage={memory.current_stage or '-'} | {memory.last_executed_action or executed_summary}",
+        )
+        if primitive_name != "city_production_primitive":
+            _emit_runtime_trace(
+                rl=rl,
+                state_bridge=state_bridge,
+                primitive_name=primitive_name,
+                stage=memory.current_stage or "-",
+                phase="exec",
+                summary=memory.last_executed_action or executed_summary,
+            )
+
+        stm_str = _multi_step_stm_summary()
+        visible_step, visible_max_steps = _visible_progress(result.steps_taken)
         rl.update_multi_step(
             active=True,
-            step=step + 1,
-            max_steps=max_steps,
+            step=visible_step,
+            max_steps=visible_max_steps,
             plan_ms=(plan_end - step_start) * 1000,
             exec_ms=(exec_end - plan_end) * 1000,
             stage=memory.current_stage,
@@ -740,8 +1186,8 @@ def run_primitive_loop(
         if state_bridge:
             state_bridge.update_multi_step(
                 active=True,
-                step=step + 1,
-                max_steps=max_steps,
+                step=visible_step,
+                max_steps=visible_max_steps,
                 plan_ms=(plan_end - step_start) * 1000,
                 exec_ms=(exec_end - plan_end) * 1000,
                 stage=memory.current_stage,
@@ -778,7 +1224,12 @@ def run_primitive_loop(
             stage=memory.current_stage,
         )
 
-        post_action_wait = 0.5 if primitive_name == "policy_primitive" else min(delay_before_action, 0.3)
+        post_action_wait = _post_action_wait_seconds(
+            primitive_name,
+            actions_list,
+            delay_before_action=delay_before_action,
+            stage_name=memory.current_stage or "",
+        )
         if post_action_wait > 0:
             time.sleep(post_action_wait)
         post_image, *_ = capture_screen_pil()
@@ -804,6 +1255,10 @@ def run_primitive_loop(
                         "pass" if semantic_verify_result.passed else "fail",
                         semantic_verify_result.reason,
                     )
+                semantic_verify_result = _policy_semantic_recheck_once(
+                    semantic_verify_result,
+                    action=display_action,
+                )
                 verify_status = (
                     "pass"
                     if semantic_verify_result.handled and semantic_verify_result.passed
@@ -824,6 +1279,14 @@ def run_primitive_loop(
                         primitive_name,
                         memory.current_stage,
                         semantic_verify_result.reason if semantic_verify_result else "unhandled",
+                    )
+                    _save_policy_semantic_failure_artifacts(
+                        primitive_name=primitive_name,
+                        stage=memory.current_stage or "-",
+                        semantic_reason=semantic_verify_result.reason if semantic_verify_result else "unhandled",
+                        semantic_details=getattr(semantic_verify_result, "details", {}),
+                        memory=memory,
+                        pil_image=post_image,
                     )
                     no_progress_resolution = process.handle_no_progress(
                         planner_provider,
@@ -877,9 +1340,18 @@ def run_primitive_loop(
                     memory,
                     img_config=planner_img_config,
                 )
+                verification = _governor_completion_recheck_once(verification)
                 if verification.complete:
                     result.completed = True
                     result.success = True
+                    _emit_runtime_trace(
+                        rl=rl,
+                        state_bridge=state_bridge,
+                        primitive_name=primitive_name,
+                        stage=memory.current_stage or "-",
+                        phase="complete",
+                        summary=verification.reason or "completion verified",
+                    )
                     logger.info(f"Primitive loop completed: {primitive_name} in {step + 1} steps")
                     break
                 logger.warning(
@@ -922,6 +1394,8 @@ def run_primitive_loop(
             rollback_used = False
             _sync_policy_cache_to_context()
             _log_policy_state("stage-success", actions_list)
+            if _complete_from_terminal_state():
+                break
             continue
 
         raw_ui_changed = not screenshots_similar(
@@ -960,9 +1434,18 @@ def run_primitive_loop(
                 memory,
                 img_config=planner_img_config,
             )
+            verification = _governor_completion_recheck_once(verification)
             if verification.complete:
                 result.completed = True
                 result.success = True
+                _emit_runtime_trace(
+                    rl=rl,
+                    state_bridge=state_bridge,
+                    primitive_name=primitive_name,
+                    stage=memory.current_stage or "-",
+                    phase="complete",
+                    summary=verification.reason or "completion verified",
+                )
                 logger.info(f"Primitive loop completed: {primitive_name} in {step + 1} steps")
                 break
             logger.warning(
@@ -973,6 +1456,23 @@ def run_primitive_loop(
             )
 
         if effective_ui_changed:
+            if semantic_verify_result is None and not process.should_verify_action_after_ui_change(
+                memory, display_action
+            ):
+                stage_before_success = memory.current_stage
+                if is_action_bundle:
+                    process.on_actions_success(memory, actions_list)
+                else:
+                    process.on_action_success(memory, display_action)
+                process.on_stage_success(memory, display_action, stage_name=stage_before_success)
+                memory.failure_count = 0
+                rollback_used = False
+                _sync_policy_cache_to_context()
+                _log_policy_state("stage-success", actions_list)
+                if _complete_from_terminal_state():
+                    break
+                continue
+
             semantic_verify = semantic_verify_result
             if semantic_verify is None or not verify_without_ui_change:
                 semantic_verify = process.verify_action_success(
@@ -1028,6 +1528,8 @@ def run_primitive_loop(
             rollback_used = False
             _sync_policy_cache_to_context()
             _log_policy_state("stage-success", actions_list)
+            if _complete_from_terminal_state():
+                break
             continue
 
         no_progress_resolution = process.handle_no_progress(
@@ -1042,6 +1544,15 @@ def run_primitive_loop(
             img_config=planner_img_config,
         )
         if no_progress_resolution.handled:
+            _emit_runtime_trace(
+                rl=rl,
+                state_bridge=state_bridge,
+                primitive_name=primitive_name,
+                stage=memory.current_stage or "-",
+                phase="retry",
+                summary="no progress handled",
+                detail=memory.last_planned_action or "",
+            )
             memory.failure_count = 0
             _sync_policy_cache_to_context()
             _refresh_multi_step_debug()
@@ -1050,6 +1561,14 @@ def run_primitive_loop(
         if no_progress_resolution.reroute:
             result.re_route = True
             result.error_message = no_progress_resolution.error_message or "Process requested reroute"
+            _emit_runtime_trace(
+                rl=rl,
+                state_bridge=state_bridge,
+                primitive_name=primitive_name,
+                stage=memory.current_stage or "-",
+                phase="error",
+                summary=result.error_message,
+            )
             _sync_policy_cache_to_context()
             _log_policy_state("no-progress reroute", actions_list)
             break
@@ -1062,19 +1581,54 @@ def run_primitive_loop(
 
         if process.supports_observation and not rollback_used and memory.restore_last_checkpoint():
             rollback_used = True
+            _emit_runtime_trace(
+                rl=rl,
+                state_bridge=state_bridge,
+                primitive_name=primitive_name,
+                stage=memory.current_stage or "-",
+                phase="retry",
+                summary="rollback to last checkpoint",
+            )
             logger.info("No progress twice -> rollback to last observation checkpoint for %s", primitive_name)
             continue
 
         result.re_route = True
         result.error_message = "No UI change for 2 consecutive steps"
+        _emit_runtime_trace(
+            rl=rl,
+            state_bridge=state_bridge,
+            primitive_name=primitive_name,
+            stage=memory.current_stage or "-",
+            phase="error",
+            summary=result.error_message,
+        )
         logger.info("No UI change for 2 steps — signaling re-route from %s", primitive_name)
         break
 
     if not result.completed and not result.re_route and not result.error_message:
-        result.error_message = f"Primitive loop reached max_steps ({max_steps}) without completion"
+        current_iteration_limit = _iteration_limit()
+        if result.steps_taken >= max_steps:
+            result.error_message = f"Primitive loop reached safety action cap ({max_steps}) without completion"
+        else:
+            result.error_message = (
+                f"Primitive loop reached safety iteration cap ({current_iteration_limit}) without completion"
+            )
+        _emit_runtime_trace(
+            rl=rl,
+            state_bridge=state_bridge,
+            primitive_name=primitive_name,
+            stage=memory.current_stage or "-",
+            phase="error",
+            summary=result.error_message,
+        )
         logger.warning(result.error_message)
 
+    if result.error_message:
+        _publish_error_state(result.error_message)
+
     _sync_policy_cache_to_context()
+    if result.success or result.completed:
+        _clear_current_action_debug()
     rl.update_multi_step(active=False)
     if state_bridge:
         state_bridge.update_multi_step(active=False)
@@ -1102,6 +1656,7 @@ def run_one_turn(
     turn_detector: TurnDetector | None = None,
     router_img_config: ImagePipelineConfig | None = None,
     planner_img_config: ImagePipelineConfig | None = None,
+    reroute_retry_budget: int = 3,
 ) -> TurnSummary | None:
     """
     Execute one full game turn.
@@ -1138,6 +1693,40 @@ def run_one_turn(
     # Get or create context manager singleton
     ctx = context_manager or ContextManager.get_instance()
     dbg = debug_options or DebugOptions.none()
+
+    def _retry_turn_via_reroute(error_message: str) -> TurnSummary | None:
+        if reroute_retry_budget <= 0:
+            return None
+        if error_message == "STOP directive received during loop":
+            return None
+        logger.info(
+            "Recoverable turn failure -> retry full reroute for turn %s (%s retry left after this): %s",
+            turn_number,
+            reroute_retry_budget - 1,
+            error_message,
+        )
+        return run_one_turn(
+            router_provider=router_provider,
+            planner_provider=planner_provider,
+            normalizing_range=normalizing_range,
+            delay_before_action=delay_before_action,
+            high_level_strategy=high_level_strategy,
+            context_manager=ctx,
+            strategy_planner=strategy_planner,
+            knowledge_manager=knowledge_manager,
+            turn_number=turn_number,
+            macro_turn_manager=macro_turn_manager,
+            state_bridge=state_bridge,
+            context_updater=context_updater,
+            debug_options=dbg,
+            command_queue=command_queue,
+            agent_gate=agent_gate,
+            strategy_updater=strategy_updater,
+            turn_detector=turn_detector,
+            router_img_config=router_img_config,
+            planner_img_config=planner_img_config,
+            reroute_retry_budget=reroute_retry_budget - 1,
+        )
 
     # Step 0: Read strategy (non-blocking when StrategyUpdater is active)
     if high_level_strategy:
@@ -1340,6 +1929,7 @@ def run_one_turn(
             normalizing_range=normalizing_range,
             enable_choice_catalog=registry_entry.get("process_kind") == "observation_assisted",
             enable_policy_state=primitive_name == "policy_primitive",
+            enable_voting_state=primitive_name == "voting_primitive",
         )
         if primitive_name == "policy_primitive":
             memory.set_policy_capture_geometry(screen_w, screen_h, x_offset, y_offset)
@@ -1386,16 +1976,52 @@ def run_one_turn(
             command_queue=command_queue,
             agent_gate=agent_gate,
             state_bridge=state_bridge,
+            strategy_updater=strategy_updater,
             delay_before_action=delay_before_action,
         )
 
-        # Handle re-routing if UI didn't change
-        if loop_result.re_route:
+        # Handle follow-up routing after multi-step completion, reroute, or recoverable loop failure.
+        if _should_follow_up_route(loop_result):
+            if loop_result.error_message and not (loop_result.re_route or loop_result.completed):
+                logger.info(
+                    "Recoverable multi-step failure for %s -> follow-up reroute: %s",
+                    primitive_name,
+                    loop_result.error_message,
+                )
             same_primitive_restart_used = False
-            for _ in range(2):
+            for _ in range(3):
+                if not _should_follow_up_route(loop_result):
+                    break
                 re_image, *_ = capture_screen_pil()
+                rl.update_phase("routing")
+                if state_bridge:
+                    state_bridge.broadcast_agent_phase("라우팅 중...")
                 new_router = route_primitive(router_provider, re_image, img_config=router_img_config)
-                if new_router.primitive == primitive_name:
+                reroute_macro_turn = macro_turn_manager.macro_turn_number if macro_turn_manager else macro_turn
+                reroute_detected_turn = turn_detector.latest_turn if turn_detector else detected_turn
+                rl.route_result(
+                    new_router.primitive,
+                    new_router.reasoning,
+                    reroute_detected_turn,
+                    reroute_macro_turn,
+                    turn_number,
+                )
+                reroute_detail = f"follow-up route -> {new_router.primitive}"
+                if new_router.reasoning:
+                    reroute_detail = f"{reroute_detail} | {new_router.reasoning}"
+                rl.primitive_event("ROUTER", reroute_detail)
+                if (
+                    new_router.primitive == primitive_name
+                    and loop_result.completed
+                    and primitive_name in {"voting_primitive", "city_production_primitive"}
+                ):
+                    logger.info(
+                        "Completed %s rerouted back to same primitive "
+                        "-> retrying routing without restarting completed loop",
+                        primitive_name,
+                    )
+                    continue
+                if new_router.primitive == primitive_name and loop_result.re_route:
                     if primitive_name == "policy_primitive" and not same_primitive_restart_used:
                         same_primitive_restart_used = True
                         logger.info("Policy requested re-route to same primitive -> restarting same primitive once")
@@ -1407,6 +2033,9 @@ def run_one_turn(
                         memory.begin_stage("bootstrap_tabs" if preserve_entry_done else "policy_entry")
                         memory.set_policy_mode("structured")
                         memory.set_policy_event("same-primitive reroute -> preserved restart")
+                        rl.update_phase("planning")
+                        if state_bridge:
+                            state_bridge.broadcast_agent_phase("추론 중...")
                         loop_result = run_primitive_loop(
                             planner_provider=planner_provider,
                             primitive_name=primitive_name,
@@ -1426,6 +2055,7 @@ def run_one_turn(
                             command_queue=command_queue,
                             agent_gate=agent_gate,
                             state_bridge=state_bridge,
+                            strategy_updater=strategy_updater,
                             delay_before_action=delay_before_action,
                         )
                         if not loop_result.re_route:
@@ -1434,9 +2064,12 @@ def run_one_turn(
                     break  # Same primitive → give up re-routing
                 primitive_name = new_router.primitive
                 ctx.set_current_primitive(primitive_name)
-                logger.info(f"Re-routed to: {primitive_name}")
+                logger.info(f"Follow-up routed to: {primitive_name}")
 
                 entry = PRIMITIVE_REGISTRY.get(primitive_name, {})
+                rl.update_phase("planning")
+                if state_bridge:
+                    state_bridge.broadcast_agent_phase("추론 중...")
                 if not entry.get("multi_step", False):
                     # Single-step primitive → run once and exit
                     action = plan_action(
@@ -1451,9 +2084,27 @@ def run_one_turn(
                     )
                     if action is not None and not (isinstance(action, list) and len(action) == 0):
                         single_act = action[0] if isinstance(action, list) else action
+                        _emit_runtime_trace(
+                            rl=rl,
+                            state_bridge=state_bridge,
+                            primitive_name=primitive_name,
+                            stage="single_step",
+                            phase="plan",
+                            summary=f"{single_act.action} @ ({single_act.x}, {single_act.y})",
+                            detail=single_act.reasoning or "",
+                        )
                         if delay_before_action > 0:
                             time.sleep(delay_before_action)
                         execute_action(single_act, screen_w, screen_h, normalizing_range, x_offset, y_offset)
+                        _emit_runtime_trace(
+                            rl=rl,
+                            state_bridge=state_bridge,
+                            primitive_name=primitive_name,
+                            stage="single_step",
+                            phase="exec",
+                            summary=f"{single_act.action} executed",
+                            detail=single_act.reasoning or "",
+                        )
                         ctx.record_action(
                             action_type=single_act.action,
                             primitive=primitive_name,
@@ -1461,6 +2112,11 @@ def run_one_turn(
                             y=single_act.y,
                             result="success",
                         )
+                        loop_result.last_action = single_act
+                        loop_result.success = True
+                        loop_result.completed = single_act.task_status == "complete"
+                        loop_result.re_route = False
+                        loop_result.steps_taken = 1
                     break
 
                 # Re-routed to another multi-step primitive
@@ -1471,6 +2127,7 @@ def run_one_turn(
                     normalizing_range=normalizing_range,
                     enable_choice_catalog=entry.get("process_kind") == "observation_assisted",
                     enable_policy_state=primitive_name == "policy_primitive",
+                    enable_voting_state=primitive_name == "voting_primitive",
                 )
                 if primitive_name == "policy_primitive":
                     memory.set_policy_capture_geometry(screen_w, screen_h, x_offset, y_offset)
@@ -1509,13 +2166,19 @@ def run_one_turn(
                     command_queue=command_queue,
                     agent_gate=agent_gate,
                     state_bridge=state_bridge,
+                    strategy_updater=strategy_updater,
                     delay_before_action=delay_before_action,
                 )
-                if not loop_result.re_route:
+                if not (loop_result.re_route or loop_result.completed):
                     break
 
         memory.reset()
         rl.update_phase("idle")
+
+        if not loop_result.success:
+            retry_summary = _retry_turn_via_reroute(loop_result.error_message or "multi-step loop failed")
+            if retry_summary is not None:
+                return retry_summary
 
         # Build TurnSummary from loop result
         last = loop_result.last_action
@@ -1552,12 +2215,23 @@ def run_one_turn(
     if action is None or (isinstance(action, list) and len(action) == 0):
         logger.error("  VLM returned no action. Turn aborted.")
         rl.update_phase("idle")
+        _emit_runtime_trace(
+            rl=rl,
+            state_bridge=state_bridge,
+            primitive_name=primitive_name,
+            stage="single_step",
+            phase="error",
+            summary="VLM returned no action",
+        )
         ctx.record_action(
             action_type="none",
             primitive=primitive_name,
             result="failed",
             error_message="VLM returned no action",
         )
+        retry_summary = _retry_turn_via_reroute("VLM returned no action")
+        if retry_summary is not None:
+            return retry_summary
         return TurnSummary(
             turn_number=turn_number,
             primitive=primitive_name,
@@ -1577,6 +2251,23 @@ def run_one_turn(
         extra["Text"] = display_action.text
     if isinstance(action, list) and len(action) > 1:
         extra["Multi-Action"] = f"{len(action)} actions"
+    plan_summary = (
+        f"{display_action.action} @ ({display_action.x}, {display_action.y})"
+        if display_action.action != "drag"
+        else (
+            f"{display_action.action} @ ({display_action.x}, {display_action.y}) -> "
+            f"({display_action.end_x}, {display_action.end_y})"
+        )
+    )
+    _emit_runtime_trace(
+        rl=rl,
+        state_bridge=state_bridge,
+        primitive_name=primitive_name,
+        stage="single_step",
+        phase="plan",
+        summary=plan_summary,
+        detail=display_action.reasoning or "",
+    )
     rl.action_result(
         action_type=display_action.action,
         coords=(display_action.x, display_action.y),
@@ -1596,12 +2287,22 @@ def run_one_turn(
 
     # Normalize to list for uniform handling
     actions_list: list[AgentAction] = action if isinstance(action, list) else [action]
+    first_action = actions_list[0]
 
     execution_result = "success"
     error_message = ""
     for i, act in enumerate(actions_list):
         try:
             execute_action(act, screen_w, screen_h, normalizing_range, x_offset, y_offset)
+            _emit_runtime_trace(
+                rl=rl,
+                state_bridge=state_bridge,
+                primitive_name=primitive_name,
+                stage="single_step",
+                phase="exec",
+                summary=f"{act.action} executed",
+                detail=act.reasoning or "",
+            )
             if len(actions_list) > 1:
                 logger.debug(f"Multi-action {i + 1}/{len(actions_list)} executed: {act.action}")
                 if i < len(actions_list) - 1:
@@ -1610,16 +2311,33 @@ def run_one_turn(
             rl.execution_status(False, str(e))
             execution_result = "failed"
             error_message = str(e)
+            _emit_runtime_trace(
+                rl=rl,
+                state_bridge=state_bridge,
+                primitive_name=primitive_name,
+                stage="single_step",
+                phase="error",
+                summary=f"{act.action} failed",
+                detail=str(e),
+            )
             break
 
     if execution_result == "success":
         rl.execution_status(True)
+        _emit_runtime_trace(
+            rl=rl,
+            state_bridge=state_bridge,
+            primitive_name=primitive_name,
+            stage="single_step",
+            phase="complete",
+            summary="single-step execution complete",
+            detail=first_action.reasoning or "",
+        )
 
     rl.update_phase("idle")
 
     # Step 5: Record action(s) in context
     # Use the first action for summary; record all in context
-    first_action = actions_list[0]
     for act in actions_list:
         ctx.record_action(
             action_type=act.action,
@@ -1633,6 +2351,11 @@ def run_one_turn(
             result=execution_result,
             error_message=error_message,
         )
+
+    if execution_result != "success":
+        retry_summary = _retry_turn_via_reroute(error_message or "single-step execution failed")
+        if retry_summary is not None:
+            return retry_summary
 
     # Step 6: Macro-turn tracking (fallback: keyword-based detection from old flow)
     if macro_turn_manager:

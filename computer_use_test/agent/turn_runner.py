@@ -16,6 +16,8 @@ from computer_use_test.agent.modules.hitl import CommandQueue, QueueListener
 from computer_use_test.agent.turn_executor import run_multi_turn, run_one_turn
 from computer_use_test.utils.debug import DebugOptions
 from computer_use_test.utils.llm_provider import create_provider, get_available_providers
+from computer_use_test.utils.run_log_cache import start_run_log_session
+from computer_use_test.utils.screenshot_trajectory import start_screenshot_trajectory_session
 
 # Logging setup (로깅 설정)
 logging.basicConfig(
@@ -262,6 +264,32 @@ def main():
     except SystemExit:
         return
 
+    run_log_session = None
+    try:
+        run_log_session = start_run_log_session()
+        logger.info("Raw run log cache initialized: %s", run_log_session.path)
+    except Exception as e:
+        logger.warning("Raw run log cache disabled: %s", e)
+
+    trajectory_session = None
+    try:
+        trajectory_session = start_screenshot_trajectory_session(max_images=20)
+        logger.info("Screenshot trajectory session initialized: %s", trajectory_session.path)
+    except Exception as e:
+        logger.warning("Screenshot trajectory disabled: %s", e)
+
+    def close_run_log_session() -> None:
+        nonlocal run_log_session
+        if run_log_session is not None:
+            run_log_session.close()
+            run_log_session = None
+
+    def close_trajectory_session() -> None:
+        nonlocal trajectory_session
+        if trajectory_session is not None:
+            trajectory_session.close()
+            trajectory_session = None
+
     # 2. Setup Components
     try:
         router_provider, planner_provider = setup_providers(args)
@@ -286,6 +314,8 @@ def main():
         logger.error(f"Configuration Error: {e}")
         if "chat_app" in locals() and chat_app:
             chat_app.stop()
+        close_run_log_session()
+        close_trajectory_session()
         return
 
     # 2b. Image Pipeline Configs
@@ -471,6 +501,8 @@ def main():
                 "Manual start required, but no control channel is enabled. "
                 "Use --control-api/--status-ui, --relay-url, or chatapp input provider."
             )
+            close_run_log_session()
+            close_trajectory_session()
             return
         elif has_status_control:
             logger.info("Agent ready. Waiting for external start signal (POST /api/agent/start)...")
@@ -479,6 +511,8 @@ def main():
             agent_gate.wait_for_start()
             if agent_gate.is_stopped:
                 logger.info("STOP received before start. Exiting.")
+                close_run_log_session()
+                close_trajectory_session()
                 return
             logger.info("Start signal received. Beginning execution.")
         else:
@@ -510,6 +544,8 @@ def main():
 
                 if should_stop:
                     logger.info("STOP received before start. Exiting.")
+                    close_run_log_session()
+                    close_trajectory_session()
                     return
                 if should_start:
                     agent_gate.set_state(AgentState.RUNNING)
@@ -587,6 +623,8 @@ def main():
         if chat_app:
             chat_app.stop()
             logger.info("Chat app stopped")
+        close_run_log_session()
+        close_trajectory_session()
 
 
 if __name__ == "__main__":

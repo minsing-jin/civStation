@@ -108,8 +108,8 @@ class RichLogger:
             },
         }
 
-        # Recent log lines (max 10)
-        self._log_lines: deque[str] = deque(maxlen=10)
+        # Recent trace/log lines
+        self._log_lines: deque[str] = deque(maxlen=20)
 
     # ------------------------------------------------------------------
     # Live dashboard management
@@ -143,8 +143,13 @@ class RichLogger:
         layout = Layout()
         layout.split_column(Layout(name="top", ratio=4), Layout(name="log", ratio=1, minimum_size=5))
         policy_debug = self._main_state["multi_step_active"] and self._main_state["primitive"] == "policy_primitive"
+        city_production_debug = (
+            self._main_state["multi_step_active"] and self._main_state["primitive"] == "city_production_primitive"
+        )
         if policy_debug:
             layout["top"].update(self._build_policy_panel())
+        elif city_production_debug:
+            layout["top"].update(self._build_city_production_panel())
         else:
             layout["top"].split_row(
                 Layout(name="main", ratio=1),
@@ -158,6 +163,88 @@ class RichLogger:
         layout["log"].update(Panel(log_text, title="[bold]Recent Log[/bold]", border_style="bright_black"))
 
         return layout
+
+    def _build_city_production_panel(self) -> Panel:
+        """Build a dedicated city-production debug panel while the primitive is active."""
+        section_map: dict[str, list[str]] = {
+            "state": [],
+            "observation": [],
+            "candidates": [],
+            "actions": [],
+        }
+        for raw_line in (self._main_state["stm_summary"] or "").splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            if line.startswith("현재 stage:") or line.startswith("현재 branch:"):
+                section_map["state"].append(line)
+            elif (
+                line.startswith("[choice_catalog]")
+                or line.startswith("obs_summary=")
+                or line.startswith("scroll_anchor=")
+            ):
+                section_map["observation"].append(line)
+            elif line.startswith("planned_action=") or line.startswith("executed_action="):
+                section_map["actions"].append(line)
+            elif line.startswith("최종 선택 후보:") or line.startswith("- "):
+                section_map["candidates"].append(line)
+            else:
+                section_map["state"].append(line)
+
+        layout = Layout()
+        layout.split_column(Layout(name="top", ratio=2), Layout(name="bottom", ratio=3))
+        layout["top"].split_row(Layout(name="runtime", ratio=1), Layout(name="observation", ratio=1))
+        layout["bottom"].split_row(
+            Layout(name="candidates", ratio=1),
+            Layout(name="actions", ratio=1),
+        )
+
+        runtime = Table(show_header=False, expand=True, box=None, padding=(0, 1))
+        runtime.add_column("K", style="bold bright_yellow", width=11)
+        runtime.add_column("V", ratio=1)
+        runtime.add_row("Primitive", f"[bold green]{self._main_state['primitive']}[/]")
+        runtime.add_row("Phase", f"[bold blue]{self._main_state['phase'].upper()}[/]")
+        runtime.add_row("Stage", self._main_state["multi_step_stage"] or "-")
+        runtime.add_row("Step", f"{self._main_state['multi_step_step']}/{self._main_state['multi_step_max']}")
+        runtime.add_row("Status", self._main_state["status"])
+        runtime.add_row(
+            "Plan/Exec",
+            f"{_fmt_ms(self._main_state['step_plan_ms'] / 1000)} / {_fmt_ms(self._main_state['step_exec_ms'] / 1000)}",
+        )
+        if self._main_state["multi_step_best_choice"]:
+            runtime.add_row("Best", self._main_state["multi_step_best_choice"])
+        if self._main_state["multi_step_stall_count"]:
+            runtime.add_row("Stall", str(self._main_state["multi_step_stall_count"]))
+        layout["runtime"].update(Panel(runtime, title="[bold cyan]Runtime[/]", border_style="cyan", padding=(0, 1)))
+
+        def _lines_panel(title: str, lines: list[str], color: str) -> Panel:
+            body = "\n".join(lines) if lines else "[dim]-[/dim]"
+            return Panel(body, title=f"[bold {color}]{title}[/]", border_style=color, padding=(0, 1))
+
+        action_lines = [
+            f"current_action={self._main_state['action'] or '-'}",
+            f"current_reason={self._main_state['action_reasoning'] or '-'}",
+        ] + section_map["actions"]
+
+        layout["observation"].update(_lines_panel("Observation", section_map["observation"], "magenta"))
+        layout["candidates"].update(_lines_panel("Candidates", section_map["candidates"], "green"))
+        layout["actions"].update(_lines_panel("Actions", action_lines, "yellow"))
+
+        state_lines = section_map["state"]
+        if state_lines:
+            layout["bottom"].split_column(
+                Layout(name="state", ratio=1),
+                Layout(name="rest", ratio=4),
+            )
+            layout["rest"].split_row(
+                Layout(name="candidates", ratio=1),
+                Layout(name="actions", ratio=1),
+            )
+            layout["state"].update(_lines_panel("State", state_lines, "white"))
+            layout["candidates"].update(_lines_panel("Candidates", section_map["candidates"], "green"))
+            layout["actions"].update(_lines_panel("Actions", action_lines, "yellow"))
+
+        return Panel(layout, title="[bold yellow]◼ City Production Debug[/]", border_style="yellow", padding=(0, 1))
 
     def _build_policy_panel(self) -> Panel:
         """Build a dedicated policy debug panel while the policy primitive is active."""
@@ -526,7 +613,7 @@ class RichLogger:
     ) -> None:
         """Display VLM action result."""
         coord_str = f"({coords[0]}, {coords[1]})" if coords else ""
-        self._main_state["action"] = f"{action_type} {coord_str}"
+        self._main_state["action"] = f"{action_type} {coord_str}".strip()
         self._main_state["action_reasoning"] = reasoning or "-"
         self._refresh()
 
@@ -542,6 +629,12 @@ class RichLogger:
                 for k, v in extra.items():
                     table.add_row(k, str(v))
             self.console.print(table)
+
+    def clear_current_action(self) -> None:
+        """Clear the currently displayed action without emitting a new action log entry."""
+        self._main_state["action"] = ""
+        self._main_state["action_reasoning"] = ""
+        self._refresh()
 
     def execution_status(self, success: bool, message: str = "") -> None:
         """Display execution success/failure indicator."""
@@ -587,12 +680,16 @@ class RichLogger:
         if self._live is None:
             self.console.print(msg)
 
+    def primitive_event(self, primitive_tag: str, detail: str) -> None:
+        """Append a primitive-specific event to the bottom log."""
+        ts = time.strftime("%H:%M:%S")
+        self._log_lines.append(f"[{ts}] [{primitive_tag}] {detail}")
+        logger.info("[%s] event | %s", primitive_tag, detail)
+        self._refresh()
+
     def policy_event(self, detail: str) -> None:
         """Append a policy-specific event to the bottom log while policy debug is active."""
-        ts = time.strftime("%H:%M:%S")
-        self._log_lines.append(f"[{ts}] [POLICY] {detail}")
-        logger.info("[POLICY] event | %s", detail)
-        self._refresh()
+        self.primitive_event("POLICY", detail)
 
     def turn_summary(self, turn: int, primitive: str, action: str, success: bool) -> None:
         """Display one-line turn completion summary."""

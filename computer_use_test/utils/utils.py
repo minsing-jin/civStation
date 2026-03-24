@@ -3,9 +3,13 @@ import os
 # Provider name → environment variable mapping
 _ENV_KEY_MAPPING: dict[str, str] = {
     "claude": "ANTHROPIC_API_KEY",
+    "claude-computer": "ANTHROPIC_API_KEY",
     "gemini": "GENAI_API_KEY",
     "gpt": "OPENAI_API_KEY",
     "openai": "OPENAI_API_KEY",
+    "gpt-computer": "OPENAI_API_KEY",
+    "openai-computer": "OPENAI_API_KEY",
+    "anthropic-computer": "ANTHROPIC_API_KEY",
 }
 
 

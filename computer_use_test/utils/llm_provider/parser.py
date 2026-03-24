@@ -20,10 +20,10 @@ class AgentAction:
     """
     Single action from VLM using normalized or absolute coordinates.
 
-    Supports: click, double_click, drag, scroll, press, type
+    Supports: click, double_click, drag, scroll, move, press, type
     """
 
-    action: str = ""  # "click", "double_click", "drag", "scroll", "press", "type"
+    action: str = ""  # "click", "double_click", "drag", "scroll", "move", "press", "type"
     coord_space: str = "normalized"  # "normalized" or "absolute"
     x: int = 0  # X coordinate in coord_space
     y: int = 0  # Y coordinate in coord_space
@@ -97,9 +97,11 @@ def validate_action(action: AgentAction, normalizing_range: int = 1000) -> list[
         errors.append(f"coord_space='{action.coord_space}' is invalid, must be 'normalized' or 'absolute'")
 
     # --- Required fields per action type ---
-    if action.action in ("click", "double_click"):
+    if action.action in ("click", "double_click", "move"):
         if not (isinstance(action.x, int) and isinstance(action.y, int)):
-            errors.append(f"click requires int x,y, got x={type(action.x).__name__}, y={type(action.y).__name__}")
+            errors.append(
+                f"{action.action} requires int x,y, got x={type(action.x).__name__}, y={type(action.y).__name__}"
+            )
 
     elif action.action == "drag":
         if not all(isinstance(v, int) for v in (action.x, action.y, action.end_x, action.end_y)):
@@ -122,7 +124,7 @@ def validate_action(action: AgentAction, normalizing_range: int = 1000) -> list[
             errors.append("type action requires non-empty 'text' field")
 
     # --- Coordinate validation (only for actions that use coordinates) ---
-    if action.action in ("click", "double_click", "drag", "scroll"):
+    if action.action in ("click", "double_click", "drag", "scroll", "move"):
         for name, val in [("x", action.x), ("y", action.y)]:
             if action.coord_space == "normalized":
                 if not (0 <= val <= normalizing_range):
@@ -187,9 +189,27 @@ def parse_action_json(response_text: str) -> AgentAction | None:
             logger.warning(f"Parse: missing or invalid 'action' field: {data.get('action')!r}")
             return None
 
-        valid_actions = ["click", "double_click", "drag", "scroll", "press", "type"]
+        valid_actions = ["click", "double_click", "drag", "scroll", "move", "press", "type"]
         if action_value not in valid_actions:
             logger.warning(f"Parse: unknown action '{action_value}', expected one of {valid_actions}")
+            return None
+
+        # --- Required field presence before type-strict extraction ---
+        required_coord_fields = {
+            "click": ("x", "y"),
+            "double_click": ("x", "y"),
+            "scroll": ("x", "y", "scroll_amount"),
+            "move": ("x", "y"),
+            "drag": ("x", "y", "end_x", "end_y"),
+        }
+        missing_fields = [field for field in required_coord_fields.get(action_value, ()) if field not in data]
+        if missing_fields:
+            logger.warning(
+                "Parse: missing required field(s) for %s: %s | payload=%s",
+                action_value,
+                ", ".join(missing_fields),
+                data,
+            )
             return None
 
         # --- Type-strict field extraction ---

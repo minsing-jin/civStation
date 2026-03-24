@@ -67,6 +67,104 @@ class TestShortTermMemoryChoiceCatalog:
         assert restored is True
         assert "신성한 불꽃" in {v.label for v in memory.choice_catalog.candidates.values()}
 
+    def test_prompt_summary_keeps_all_choice_catalog_candidates(self):
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.begin_stage("observe_choices")
+
+        for idx in range(10):
+            memory.remember_choices(
+                [{"label": f"후보{idx}"}],
+                end_of_list=idx == 9,
+                scroll_direction="down",
+            )
+
+        summary = memory.to_prompt_string()
+
+        assert "[choice_catalog] 확인한 후보 10개" in summary
+        assert "- 후보0" in summary
+        assert "- 후보9" in summary
+
+    def test_choice_catalog_decision_prompt_includes_candidate_ids(self):
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.begin_stage("observe_choices")
+        memory.remember_choices(
+            [
+                {"id": "monument", "label": "기념비"},
+                {"id": "library", "label": "도서관"},
+            ],
+            end_of_list=True,
+        )
+
+        summary = memory.choice_catalog_decision_prompt()
+
+        assert "id=monument" in summary
+        assert "id=library" in summary
+
+    def test_checked_choice_cannot_be_set_as_best_option(self):
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.begin_stage("observe_choices")
+
+        memory.remember_choices(
+            [
+                {"label": "곡창", "selected": True},
+                {"label": "기념비"},
+            ],
+            end_of_list=True,
+        )
+        memory.set_best_choice(label="곡창", reason="이미 지은 건물을 잘못 고름")
+
+        assert memory.get_best_choice() is None
+
+    def test_city_production_prompt_excludes_disabled_and_checked_choices(self):
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.begin_stage("observe_choices")
+
+        memory.remember_choices(
+            [
+                {"id": "campus", "label": "캠퍼스", "disabled": True},
+                {"id": "granary", "label": "곡창", "selected": True},
+                {"id": "monument", "label": "기념비"},
+            ],
+            end_of_list=True,
+        )
+
+        decision_prompt = memory.choice_catalog_decision_prompt()
+        summary = memory.to_prompt_string()
+
+        assert "[choice_catalog] 확인한 후보 1개" in decision_prompt
+        assert "기념비" in decision_prompt
+        assert "캠퍼스" not in decision_prompt
+        assert "곡창" not in decision_prompt
+        assert "[choice_catalog] 확인한 후보 1개" in summary
+        assert "- 기념비" in summary
+        assert "캠퍼스" not in summary
+        assert "곡창" not in summary
+
+    def test_city_production_merges_same_label_when_observer_id_changes(self):
+        memory = ShortTermMemory()
+        memory.start_task("city_production_primitive", enable_choice_catalog=True)
+        memory.begin_stage("observe_choices")
+
+        memory.remember_choices(
+            [{"id": "monument", "label": "기념비"}],
+            end_of_list=False,
+        )
+        memory.remember_choices(
+            [{"id": "city_project_monument", "label": "기념비", "note": "5턴"}],
+            end_of_list=False,
+        )
+
+        candidates = list(memory.choice_catalog.candidates.values())
+
+        assert len(candidates) == 1
+        assert candidates[0].id == "monument"
+        assert candidates[0].label == "기념비"
+        assert candidates[0].metadata["note"] == "5턴"
+
     def test_policy_state_rejects_negative_absolute_coordinates(self):
         memory = ShortTermMemory()
         memory.start_task("policy_primitive", normalizing_range=500, enable_policy_state=True)

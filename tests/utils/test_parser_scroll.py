@@ -61,3 +61,49 @@ def test_parse_policy_drag_metadata_from_multi_action_json():
     assert actions[0].policy_source_tab == "군사"
     assert actions[0].policy_target_slot_id == "military_1"
     assert actions[0].policy_reasoning == "야만인 대응"
+
+
+def test_parse_click_action_requires_explicit_coordinates():
+    action = parse_action_json(
+        """
+        {
+          "action": "click",
+          "reasoning": "버튼을 클릭"
+        }
+        """
+    )
+
+    assert action is None
+
+
+def test_parse_scroll_action_requires_explicit_coordinates():
+    action = parse_action_json(
+        """
+        {
+          "action": "scroll",
+          "scroll_amount": -650,
+          "reasoning": "리스트를 스크롤"
+        }
+        """
+    )
+
+    assert action is None
+
+
+def test_parse_move_action():
+    action = parse_action_json(
+        """
+        {
+          "action": "move",
+          "x": 640,
+          "y": 420,
+          "reasoning": "생산 목록 중앙 hover"
+        }
+        """
+    )
+
+    assert action is not None
+    assert action.action == "move"
+    assert action.x == 640
+    assert action.y == 420
+    assert validate_action(action) == []

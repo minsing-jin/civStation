@@ -38,3 +38,92 @@ def test_execute_action_absolute_click_bypasses_normalized_conversion(monkeypatc
         ("moveTo", (1234, 567), {"duration": 0.5}),
         ("click", (), {"button": "left"}),
     ]
+
+
+def test_execute_action_move_only_moves_cursor(monkeypatch):
+    calls: list[tuple[str, tuple, dict]] = []
+
+    monkeypatch.setattr(
+        "computer_use_test.utils.screen.pyautogui.moveTo",
+        lambda *args, **kwargs: calls.append(("moveTo", args, kwargs)),
+    )
+
+    execute_action(
+        AgentAction(
+            action="move",
+            x=600,
+            y=300,
+        ),
+        screen_w=1600,
+        screen_h=900,
+        normalizing_range=1000,
+        x_offset=0,
+        y_offset=0,
+    )
+
+    assert calls == [
+        ("moveTo", (960, 270), {"duration": 0.2}),
+    ]
+
+
+def test_execute_action_scroll_waits_briefly_after_hover_before_wheel(monkeypatch):
+    calls: list[tuple[str, tuple, dict]] = []
+
+    monkeypatch.setattr(
+        "computer_use_test.utils.screen.pyautogui.moveTo",
+        lambda *args, **kwargs: calls.append(("moveTo", args, kwargs)),
+    )
+    monkeypatch.setattr(
+        "computer_use_test.utils.screen.pyautogui.scroll",
+        lambda *args, **kwargs: calls.append(("scroll", args, kwargs)),
+    )
+    monkeypatch.setattr(
+        "computer_use_test.utils.screen.time.sleep",
+        lambda seconds: calls.append(("sleep", (seconds,), {})),
+    )
+
+    execute_action(
+        AgentAction(
+            action="scroll",
+            x=600,
+            y=300,
+            scroll_amount=-650,
+        ),
+        screen_w=1600,
+        screen_h=900,
+        normalizing_range=1000,
+        x_offset=0,
+        y_offset=0,
+    )
+
+    assert calls == [
+        ("moveTo", (960, 270), {"duration": 0.2}),
+        ("sleep", (0.18,), {}),
+        ("scroll", (-650,), {}),
+    ]
+
+
+def test_execute_action_press_uses_hotkey_for_chords(monkeypatch):
+    calls: list[tuple[str, tuple, dict]] = []
+
+    monkeypatch.setattr(
+        "computer_use_test.utils.screen.pyautogui.hotkey",
+        lambda *args, **kwargs: calls.append(("hotkey", args, kwargs)),
+        raising=False,
+    )
+
+    execute_action(
+        AgentAction(
+            action="press",
+            key="cmd+s",
+        ),
+        screen_w=1600,
+        screen_h=900,
+        normalizing_range=1000,
+        x_offset=0,
+        y_offset=0,
+    )
+
+    assert calls == [
+        ("hotkey", ("cmd", "s"), {}),
+    ]

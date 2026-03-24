@@ -56,22 +56,33 @@ class RouterResult:
 PRIMITIVE_REGISTRY: dict[str, dict] = {
     # --- Router-included primitives (sorted by priority) ---
     "religion_primitive": {
-        "criteria": "종교관 선택 화면. 종교관 목록 또는 '종교관 세우기' 버튼 표시.",
+        "criteria": (
+            "종교관 선택 화면. 왼쪽 종교관 목록 또는 초록색 '종교관 세우기' 버튼 표시. "
+            "또는 우하단 천사 문양 원형 종교관 버튼 보임."
+        ),
         "prompt": RELIGION_PROMPT,
         "priority": 1,
         "multi_step": True,
         "process_kind": "observation_assisted",
-        "max_steps": 10,
-        "completion_condition": "초록색 '종교관 세우기' 버튼 클릭 완료 시 task_status='complete'.",
+        "max_steps": 20,
+        "completion_condition": (
+            "종교관 준비 팝업을 Esc로 닫은 뒤 prep_popup_visible=false 이고 "
+            "우하단 원형 버튼이 더 이상 천사 문양이 아니면 task_status='complete'."
+        ),
     },
     "governor_primitive": {
-        "criteria": "총독 카드 나열 또는 '총독 배정' 텍스트 표시. 총독 임명 팝업 포함.",
+        "criteria": (
+            "총독 카드 나열 또는 '총독 배정' 텍스트 표시. 총독 임명 팝업 포함. "
+            "또는 우하단 '총독 타이틀' 버튼/펜 아이콘 보임."
+        ),
         "prompt": GOVERNOR_PROMPT,
         "priority": 2,
         "multi_step": True,
-        "process_kind": "scripted",
-        "max_steps": 8,
-        "completion_condition": "[배정] 버튼 클릭 완료 시 task_status='complete'.",
+        "process_kind": "observation_assisted",
+        "max_steps": 20,
+        "completion_condition": (
+            "총독 진급 [확정] 후 ESC 2회 완료, 또는 총독 임명 후 [배정] 버튼 클릭 완료 시 task_status='complete'."
+        ),
     },
     "voting_primitive": {
         "criteria": "세계의회 투표 화면. 정책 A/B 선택, 찬성/반대 기호, 합의안 투표.",
@@ -100,7 +111,9 @@ PRIMITIVE_REGISTRY: dict[str, dict] = {
         "completion_condition": "",
     },
     "research_select_primitive": {
-        "criteria": "연구 선택 팝업 표시 또는 기술 트리 화면 열림. 기술 목록/노드 보임.",
+        "criteria": (
+            "연구 선택 팝업 표시 또는 기술 트리 화면 열림. 기술 목록/노드 보임. 또는 우하단 '연구 선택' 버튼 보임."
+        ),
         "prompt": RESEARCH_MANAGER_PROMPT,
         "priority": 5,
         "multi_step": True,
@@ -109,17 +122,20 @@ PRIMITIVE_REGISTRY: dict[str, dict] = {
         "completion_condition": "기술 클릭 완료 시 task_status='complete'.",
     },
     "city_production_primitive": {
-        "criteria": "생산 품목 선택 팝업 표시. 건물/유닛 목록 보임.",
+        "criteria": (
+            "생산 품목 선택 팝업 표시 또는 배치 화면 열림. 건물/유닛 목록/배치 타일 보임. "
+            "또는 우하단 '생산 품목' 버튼 보임."
+        ),
         "prompt": CITY_PRODUCTION_PROMPT,
         "priority": 6,
         "multi_step": True,
         "process_kind": "observation_assisted",
-        "max_steps": 12,
+        "max_steps": 18,
         "completion_condition": "생산 품목 클릭 완료 또는 배치 확인 시 task_status='complete'.",
         "img_config_preset": "planner_high_quality",
     },
     "culture_decision_primitive": {
-        "criteria": "사회 제도 트리 화면 열림. 사회 제도 노드 트리 형태.",
+        "criteria": "사회 제도 트리 화면 열림. 사회 제도 노드 트리 형태. 또는 우하단 '사회 제도 선택' 버튼 보임.",
         "prompt": CULTURE_MANAGER_PROMPT,
         "priority": 8,
         "multi_step": True,
@@ -152,12 +168,13 @@ PRIMITIVE_REGISTRY: dict[str, dict] = {
         "process_kind": "scripted",
         "max_steps": 24,
         "completion_condition": (
-            "'모든 정책 배정' 후 확인 팝업의 '예' 또는 확인 버튼 클릭 완료 시 task_status='complete'."
+            "'모든 정책 배정' 후 확인 팝업의 '예' 또는 확인 버튼 클릭 완료, "
+            "또는 이번 정책 run에서 변경 없음이라 정책 화면에서 Esc 종료 완료 시 task_status='complete'."
         ),
         "img_config_preset": "planner_high_quality",
     },
     "popup_primitive": {
-        "criteria": "기타 일반 팝업 표시됨. 또는 우하단에 '다음 턴'/'연구 선택'/'생산 품목' 버튼 보임.",
+        "criteria": "기타 일반 팝업 표시됨. 또는 우하단에 '다음 턴' 버튼 보임.",
         "prompt": POPUP_PROMPT,
         "priority": 99,
         "multi_step": False,
