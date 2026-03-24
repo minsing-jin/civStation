@@ -1,24 +1,73 @@
 # CivStation
 
-`CivStation` is a layered Civilization VI computer-use stack. The repo is organized around `Context`, `Strategy`, `Action`, `HitL`, and a layered `MCP` surface instead of presenting the system as one opaque agent.
+> A controllable Civ6 computer-use stack for people who want more than "run the bot and hope."
+>
+> Observe the screen, refine strategy, plan the next move, and intervene live through `HitL` or `MCP`.
 
 Canonical GitHub repository:
 
 - `https://github.com/minsing-jin/civStation`
 
-Note:
+Current package and module names are still:
 
-- the repository name has moved to `civStation`
-- the current Python package name is still `computer-use-test`
-- the current Python module name is still `computer_use_test`
+- Python package: `computer-use-test`
+- Python module: `computer_use_test`
 
-## Language
+Languages:
 
-- [README Hub](README.md)
+- [README.md](README.md) (default)
 - [한국어](README.ko.md)
 - [中文](README.zh.md)
 
-## At a Glance
+## Quick Start
+
+Install:
+
+```bash
+make install
+```
+
+Set your keys:
+
+```env
+ANTHROPIC_API_KEY=...
+GENAI_API_KEY=...
+OPENAI_API_KEY=...
+```
+
+Run the agent with live control enabled:
+
+```bash
+python -m computer_use_test.agent.turn_runner \
+  --provider claude \
+  --turns 100 \
+  --strategy "Focus on science victory" \
+  --status-ui \
+  --wait-for-start \
+  --status-port 8765
+```
+
+Open the dashboard:
+
+```text
+http://127.0.0.1:8765
+```
+
+Optional: run the layered MCP server in another terminal:
+
+```bash
+python -m computer_use_test.mcp.server
+```
+
+## Why CivStation?
+
+- `Layered by design`: the agent is broken into inspectable layers instead of one opaque loop.
+- `Human-steerable`: pause, resume, stop, change strategy, and discuss the next move while the run is live.
+- `MCP-first`: the same architecture is exposed as a stable external control surface.
+- `Extensible`: swap adapters, add skills, and change orchestration without rewriting the whole system.
+- `Operator-friendly`: local dashboard, WebSocket control, and remote phone control are all supported.
+
+## Architecture
 
 ### The Four Layers
 
@@ -28,6 +77,18 @@ Note:
 | `Strategy` | Given the state and human intent, what should matter next? | `computer_use_test/agent/modules/strategy/` | [Strategy README](computer_use_test/agent/modules/strategy/README.md) |
 | `Action` | Which primitive should handle this screen, and what action should it take? | `computer_use_test/agent/modules/router/`, `computer_use_test/agent/modules/primitive/` | [Router README](computer_use_test/agent/modules/router/README.md), [Primitive README](computer_use_test/agent/modules/primitive/README.md) |
 | `HitL` | How can a human intervene while the agent is running? | `computer_use_test/agent/modules/hitl/` | [HitL README](computer_use_test/agent/modules/hitl/README.md) |
+
+### Folder Mapping
+
+Yes, the abstractions now map directly to folders.
+
+- `Context` lives in `computer_use_test/agent/modules/context/`
+- `Strategy` lives in `computer_use_test/agent/modules/strategy/`
+- `HitL` lives in `computer_use_test/agent/modules/hitl/`
+- `Action` is the one deliberate split:
+  it lives across `computer_use_test/agent/modules/router/` and `computer_use_test/agent/modules/primitive/`
+
+That split is intentional: routing and primitive execution are separate responsibilities.
 
 ### High-Level Flow
 
@@ -44,182 +105,17 @@ Human-in-the-Loop can intervene at:
   - action: primitive override / direct command
 ```
 
-## About MCP
+## HitL in 60 Seconds
 
-This repository exposes the same architecture through a layered MCP server, so external clients do not need to import internal Python modules directly.
-
-Main tool groups:
-
-- `context_*`
-- `strategy_*`
-- `action_*`
-- `hitl_*`
-- `workflow_*`
-- `session_*`
-
-Key docs:
-
-- [MCP README](computer_use_test/mcp/README.md)
-- [Layered MCP Tool Map](docs/layered_mcp.md)
-
-Why use MCP here:
-
-- stable external contract over the same internal layers
-- session-level isolated state
-- import/export and adapter overrides
-- easy integration with external tools, automation, and agent skills
-
-## Extensibility
-
-### 1. MCP Extensibility
-
-The MCP layer is designed to support adapter swapping rather than forcing one hardcoded implementation.
-
-Extension slots:
-
-- `action_router`
-- `action_planner`
-- `context_observer`
-- `strategy_refiner`
-- `action_executor`
-
-Relevant files:
-
-- [runtime.py](computer_use_test/mcp/runtime.py)
-- [server.py](computer_use_test/mcp/server.py)
-- [session.py](computer_use_test/mcp/session.py)
-
-Typical extension flow:
-
-1. register a custom adapter in `LayerAdapterRegistry`
-2. set `adapter_overrides` during `session_create`
-3. or change them later with `session_config_update`
-
-This lets you keep the same MCP contract while swapping the internal router, planner, observer, refiner, or executor per session.
-
-### 2. Skill Extensibility
-
-This repo is also designed to work well with skill-based coding/agent workflows.
-
-Current skill locations:
-
-- `.codex/skills/`
-- `.agents/skills/`
-
-Existing project-facing example:
-
-- `.codex/skills/computer-use-mcp/SKILL.md`
-
-Recommended pattern:
-
-1. use MCP as the stable control plane instead of importing internals directly
-2. keep domain workflows in isolated skill folders
-3. define the workflow in `SKILL.md`
-4. add `scripts/`, `assets/`, or `references/` next to the skill when needed
-
-Example layout:
-
-```text
-.codex/skills/my-civ-skill/
-├── SKILL.md
-├── scripts/
-└── references/
-```
-
-Practical skill categories that fit this repo well:
-
-- `strategy-only`
-- `plan-only`
-- `hitl-ops`
-- `evaluation`
-- `dataset-collection`
-
-So the extensibility story is not only about swapping runtime adapters, but also about building reusable operator-side skills on top of the same layered MCP surface.
-
-## Repository Map
-
-```text
-computer_use_test/
-├── agent/
-│   ├── turn_runner.py
-│   ├── turn_executor.py
-│   └── modules/
-│       ├── context/
-│       ├── strategy/
-│       ├── router/
-│       ├── primitive/
-│       └── hitl/
-├── mcp/
-├── utils/
-└── evaluation/
-```
-
-## Quick Start
-
-### Install
-
-```bash
-make install
-```
-
-or:
-
-```bash
-pip install -e ".[ui]"
-```
-
-### Environment
-
-```env
-ANTHROPIC_API_KEY=...
-GENAI_API_KEY=...
-OPENAI_API_KEY=...
-DISCORD_BOT_TOKEN=...
-WHATSAPP_BOT_TOKEN=...
-```
-
-### Run The Agent
-
-```bash
-python -m computer_use_test.agent.turn_runner \
-  --provider claude \
-  --turns 20 \
-  --strategy "Focus on science victory" \
-  --status-ui \
-  --status-port 8765
-```
-
-Open:
-
-```text
-http://localhost:8765
-```
-
-### Run The Layered MCP Server
-
-```bash
-python -m computer_use_test.mcp.server
-```
-
-or:
-
-```bash
-computer_use_test_mcp
-```
-
-## HitL Usage
-
-In this repository, `HitL` means a human can supervise and steer the running agent through external channels.
-
-There are three practical modes:
+There are three practical control modes:
 
 1. local dashboard
-2. direct HTTP/WebSocket control
-3. remote phone controller through `tacticall`
+2. direct HTTP / WebSocket control
+3. remote phone controller through `tacticall/controller`
 
-### 1. Local Dashboard
+### Local Dashboard
 
-Run the agent in wait mode:
+Run:
 
 ```bash
 python -m computer_use_test.agent.turn_runner \
@@ -230,7 +126,7 @@ python -m computer_use_test.agent.turn_runner \
   --status-port 8765
 ```
 
-Available endpoints:
+Use:
 
 - `POST /api/agent/start`
 - `POST /api/agent/pause`
@@ -239,18 +135,9 @@ Available endpoints:
 - `POST /api/directive`
 - `POST /api/discuss`
 
-Examples:
+### WebSocket Control
 
-```bash
-curl -X POST http://127.0.0.1:8765/api/agent/start
-curl -X POST http://127.0.0.1:8765/api/agent/pause
-curl -X POST http://127.0.0.1:8765/api/agent/resume
-curl -X POST http://127.0.0.1:8765/api/agent/stop
-```
-
-### 2. WebSocket Control
-
-Built-in agent WebSocket:
+Agent socket:
 
 ```text
 ws://127.0.0.1:8765/ws
@@ -264,15 +151,11 @@ Supported messages:
 { "type": "control", "action": "resume" }
 { "type": "control", "action": "stop" }
 { "type": "command", "content": "Switch to culture victory and stop expanding" }
-{ "type": "ping" }
 ```
 
-### 3. Remote Phone Controller: `tacticall`
+### Remote Phone Controller
 
-The remote `HitL` controller lives in the separate `tacticall` repo under `controller/`.
-
-- controller repo: [`minsing-jin/tacticall`](https://github.com/minsing-jin/tacticall)
-- controller package: `controller/`
+The phone controller lives in the separate [`minsing-jin/tacticall`](https://github.com/minsing-jin/tacticall) repo under `controller/`.
 
 Architecture:
 
@@ -284,40 +167,16 @@ Phone browser
   <-> local discussion API (http://127.0.0.1:8765/api/discuss)
 ```
 
-#### A. Start the local agent
-
-```bash
-python -m computer_use_test.agent.turn_runner \
-  --provider claude \
-  --turns 100 \
-  --status-ui \
-  --wait-for-start \
-  --status-port 8765
-```
-
-#### B. Start the relay/controller
+Minimal setup:
 
 ```bash
 cd /Users/jinminseong/Desktop/tacticall/controller
 npm install
 npm start
-```
-
-Relay/controller endpoints:
-
-```text
-http://127.0.0.1:8787
-ws://127.0.0.1:8787/ws
-```
-
-#### C. Configure the bridge
-
-```bash
-cd /Users/jinminseong/Desktop/tacticall/controller
 cp host-config.example.json host-config.json
 ```
 
-Example:
+Important bridge config:
 
 ```json
 {
@@ -325,92 +184,93 @@ Example:
   "controllerBaseUrl": "auto",
   "localApiBaseUrl": "http://127.0.0.1:8765",
   "localAgentUrl": "ws://127.0.0.1:8765/ws",
-  "discussionUserId": "web_user",
-  "discussionMode": "in_game",
-  "discussionLanguage": "ko",
   "roomId": "civ6-room",
   "hostKey": "change-this-host-key"
 }
 ```
 
-Important:
-
-- `tacticall/controller/host-config.example.json` defaults `localAgentUrl` to `ws://localhost:8000/ws`
-- for this project you should change it to `ws://127.0.0.1:8765/ws`
-
-#### D. Start the bridge
+Then start the bridge:
 
 ```bash
 cd /Users/jinminseong/Desktop/tacticall/controller
 npm run host
 ```
 
-The bridge will:
+## MCP and Skill Extensibility
 
-1. authenticate to the relay as the host
-2. connect to the local agent websocket
-3. print a pairing QR code
+### MCP
 
-#### E. Scan the QR code on your phone
+This repository exposes the same architecture through a layered MCP server.
 
-After pairing:
+Tool groups:
 
-- `start/pause/resume/stop` buttons send WebSocket `control`
-- text commands send WebSocket `command`
-- the discussion panel sends `discussion_query`
-- the bridge forwards those messages to the local agent WebSocket or `POST /api/discuss`
-- the phone receives `status`, `agent_state`, `video_frame`, and discussion responses
+- `context_*`
+- `strategy_*`
+- `action_*`
+- `hitl_*`
+- `workflow_*`
+- `session_*`
 
-### How The Pieces Interact
+Run it with:
 
-#### Lifecycle control
-
-```text
-phone/web UI -> control(start|pause|resume|stop)
--> bridge.js
--> ws://127.0.0.1:8765/ws
--> AgentGate
+```bash
+python -m computer_use_test.mcp.server
 ```
 
-#### Strategy change
+Docs:
 
-```text
-phone/web UI -> command("Focus on science")
--> bridge.js
--> ws://127.0.0.1:8765/ws
--> CommandQueue
--> turn_executor checkpoint
--> strategy override applied
-```
+- [MCP README](computer_use_test/mcp/README.md)
+- [Layered MCP Tool Map](docs/layered_mcp.md)
 
-#### Discussion mode
+### Adapter Extensibility
 
-```text
-phone/web UI -> discussion_query
--> bridge.js
--> POST http://127.0.0.1:8765/api/discuss
--> Strategy discussion engine
--> answer returned to phone
-```
+The MCP runtime is adapter-driven.
 
-## MCP Usage Pattern
+Default extension slots:
 
-Typical external control flow:
+- `action_router`
+- `action_planner`
+- `context_observer`
+- `strategy_refiner`
+- `action_executor`
 
-1. `session_create`
-2. `context_get` or `workflow_observe`
-3. `strategy_refine`
-4. `action_route` / `action_plan` or `workflow_step`
-5. `hitl_send`
-6. `hitl_status`
+You can register adapters in `LayerAdapterRegistry` and select them per session through `adapter_overrides`.
 
-Examples:
+### Skill Extensibility
 
-- `hitl_send(session_id, directive_type="start")`
-- `hitl_send(session_id, directive_type="pause")`
-- `hitl_send(session_id, directive_type="resume")`
-- `hitl_send(session_id, directive_type="stop")`
-- `hitl_send(session_id, directive_type="change_strategy", payload="Avoid war and rush Campus")`
+This repo also supports skill-based agent workflows.
+
+Current skill roots:
+
+- `.codex/skills/`
+- `.agents/skills/`
+
+Existing project-facing example:
+
+- `.codex/skills/computer-use-mcp/SKILL.md`
+
+Recommended pattern:
+
+1. keep skills thin and stable
+2. use MCP as the control plane
+3. put reusable workflows in `SKILL.md`
+4. keep scripts and references next to the skill
+
+## Documentation
+
+Detailed layer docs:
+
+- [Context README](computer_use_test/agent/modules/context/README.md)
+- [Strategy README](computer_use_test/agent/modules/strategy/README.md)
+- [Router README](computer_use_test/agent/modules/router/README.md)
+- [Primitive README](computer_use_test/agent/modules/primitive/README.md)
+- [HitL README](computer_use_test/agent/modules/hitl/README.md)
+- [MCP README](computer_use_test/mcp/README.md)
+
+Other languages:
+
+- [한국어](README.ko.md)
+- [中文](README.zh.md)
 
 ## Development
 

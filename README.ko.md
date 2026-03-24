@@ -14,7 +14,7 @@
 
 ## Language
 
-- [README Hub](README.md)
+- [English (default)](README.md)
 - [English](README.en.md)
 - [中文](README.zh.md)
 
