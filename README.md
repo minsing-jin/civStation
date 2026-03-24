@@ -218,6 +218,33 @@ python -m computer_use_test.agent.turn_runner \
 Use the normal vision provider for routing, and switch only the planner to a
 computer-use provider for single-step action planning:
 
+---
+
+## Layered MCP
+
+This repo now includes a layered MCP server that exposes the internal architecture as MCP tools without forcing a large refactor.
+
+Run it with:
+
+```bash
+python -m computer_use_test.mcp.server
+```
+
+or:
+
+```bash
+computer_use_test_mcp
+```
+
+What it exposes:
+
+- layer tools for `context`, `strategy`, `memory`, `action`, and `hitl`
+- orchestration tools for `observe`, `decide`, `act`, and `step`
+- session import/export so state can move across clients
+- adapter overrides so Python callers can swap implementations behind the same MCP contract
+
+See [docs/layered_mcp.md](docs/layered_mcp.md) for the full tool map and recommended usage patterns.
+
 ```bash
 python -m computer_use_test.agent.turn_runner \
     --router-provider gemini --router-model gemini-2.0-flash \

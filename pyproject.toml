@@ -27,6 +27,7 @@ dependencies = [
     "dotenv>=0.9.9",
     "fastapi>=0.129.0",
     "google-genai>=1.60.0",
+    "mcp>=1.12,<2",
     "mss>=9.0.0",
     "openai>=2.16.0",
     "pillow>=12.1.0",
@@ -73,6 +74,7 @@ homepage = "https://github.com/minsing-jin/computer_use_test"
 
 [project.scripts]
 computer_use_test = "computer_use_test.cli:app"
+computer_use_test_mcp = "computer_use_test.mcp.server:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

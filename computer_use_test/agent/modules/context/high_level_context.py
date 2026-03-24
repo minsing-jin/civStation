@@ -13,10 +13,8 @@ including victory goals, priorities, threats, and opportunities.
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from computer_use_test.agent.modules.strategy.strategy_schemas import StructuredStrategy
+from computer_use_test.agent.modules.strategy.strategy_schemas import StructuredStrategy
 
 
 @dataclass
@@ -29,7 +27,7 @@ class HighLevelContext:
     """
 
     # Strategy
-    current_strategy: "StructuredStrategy | None" = None
+    current_strategy: StructuredStrategy | None = None
     strategy_updated_at: datetime | None = None
 
     # Victory tracking
@@ -46,7 +44,7 @@ class HighLevelContext:
     # Strategic notes
     notes: list[str] = field(default_factory=list)
 
-    def set_strategy(self, strategy: "StructuredStrategy") -> None:
+    def set_strategy(self, strategy: StructuredStrategy) -> None:
         """Update the current strategy and timestamp."""
         self.current_strategy = strategy
         self.strategy_updated_at = datetime.now()
