@@ -1,10 +1,17 @@
-# Bbox-Based Static Screenshot Evaluation
+# 📦 Bbox-Based Static Screenshot Evaluation
+
+## 📚 Index
+
+- [✨ 특징](#-특징)
+- [🗂️ 패키지 구조](#-패키지-구조)
+- [🚀 Quick Start](#-quick-start)
+- [🧾 JSONL 데이터셋 포맷](#-jsonl-데이터셋-포맷)
 
 **Bounding-box 기반 정적 스크린샷 평가 프레임워크**
 
 게임 에이전트가 예측한 포인트 좌표 액션을 Ground Truth 바운딩 박스 타겟과 비교하여 평가합니다.
 
-## 특징
+## ✨ 특징
 
 - **Bounding Box GT**: 기존 ±5px tolerance 대신 바운딩 박스 영역으로 정답 정의
 - **Multiple GT Sets**: 케이스당 여러 개의 허용 가능한 정답 액션 시퀀스 지원
@@ -12,7 +19,7 @@
 - **내장 VLM Provider**: Claude, Gemini, GPT 등 기존 프로바이더 래핑
 - **풍부한 메트릭**: `strict_success`, `prefix_len`, `step_accuracy`, 액션 타입별 breakdown
 
-## 패키지 구조
+## 🗂️ 패키지 구조
 
 ```
 bbox_eval/
@@ -32,7 +39,7 @@ bbox_eval/
 └── README.md
 ```
 
-## Quick Start
+## 🚀 Quick Start
 
 ### 1. Python API
 
@@ -91,7 +98,7 @@ python -m computer_use_test.evaluation.evaluator.action_eval.bbox_eval \
 
 > `--provider`와 `--agent-cmd`는 상호 배타적입니다.
 
-## JSONL 데이터셋 포맷
+## 🧾 JSONL 데이터셋 포맷
 
 각 줄이 하나의 평가 케이스입니다:
 

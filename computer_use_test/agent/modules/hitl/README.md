@@ -1,4 +1,14 @@
-# HitL Layer
+# 🕹️ HitL Layer
+
+## 📚 Index
+
+- [🎯 Responsibility](#-responsibility)
+- [📁 Main Files](#-main-files)
+- [⚖️ Directive Priority](#-directive-priority)
+- [🧭 Control Surfaces](#-control-surfaces)
+- [🌐 REST Endpoints](#-rest-endpoints)
+- [🔌 WebSocket Messages](#-websocket-messages)
+- [🧩 MCP Mapping](#-mcp-mapping)
 
 `HitL` means `Human-in-the-Loop`.
 
@@ -8,7 +18,7 @@ This layer answers:
 How can a human supervise, interrupt, or redirect the agent while it is running?
 ```
 
-## Responsibility
+## 🎯 Responsibility
 
 This layer provides:
 
@@ -18,7 +28,7 @@ This layer provides:
 - WebSocket control channel
 - remote relay/controller support
 
-## Main Files
+## 📁 Main Files
 
 - `agent_gate.py`
   Lifecycle state machine
@@ -35,7 +45,7 @@ This layer provides:
 - `queue_listener.py`
   Async stdin/chat input listener
 
-## Directive Priority
+## ⚖️ Directive Priority
 
 When multiple directives are pending, the executor applies them in this order:
 
@@ -43,7 +53,7 @@ When multiple directives are pending, the executor applies them in this order:
 STOP > PRIMITIVE_OVERRIDE > PAUSE > CHANGE_STRATEGY
 ```
 
-## Control Surfaces
+## 🧭 Control Surfaces
 
 ### Local
 
@@ -57,7 +67,7 @@ STOP > PRIMITIVE_OVERRIDE > PAUSE > CHANGE_STRATEGY
 
 The recommended remote controller flow is documented in the root [README](../../../../README.md).
 
-## REST Endpoints
+## 🌐 REST Endpoints
 
 - `GET /api/status`
 - `POST /api/directive`
@@ -69,7 +79,7 @@ The recommended remote controller flow is documented in the root [README](../../
 - `POST /api/discuss`
 - `POST /api/discuss/finalize`
 
-## WebSocket Messages
+## 🔌 WebSocket Messages
 
 Controller to agent:
 
@@ -85,7 +95,7 @@ Agent to controller:
 - `message`
 - dashboard snapshots
 
-## MCP Mapping
+## 🧩 MCP Mapping
 
 - `hitl_send`
 - `hitl_status`

@@ -1,4 +1,12 @@
-# Router Layer
+# 🧭 Router Layer
+
+## 📚 Index
+
+- [🎯 Responsibility](#-responsibility)
+- [📁 Main Files](#-main-files)
+- [❓ Why This Folder Matters](#-why-this-folder-matters)
+- [🔄 Flow](#-flow)
+- [🔌 MCP Mapping](#-mcp-mapping)
 
 The router is the first half of the `Action` layer.
 
@@ -8,7 +16,7 @@ It answers:
 Which primitive should handle the current screen?
 ```
 
-## Responsibility
+## 🎯 Responsibility
 
 The router classifies the current screenshot into a primitive such as:
 
@@ -21,7 +29,7 @@ The router classifies the current screenshot into a primitive such as:
 The router does not decide the final click itself.
 It decides which action specialist should take over.
 
-## Main Files
+## 📁 Main Files
 
 - `primitive_registry.py`
   Single source of truth for primitive criteria, prompts, priorities, and metadata
@@ -30,7 +38,7 @@ It decides which action specialist should take over.
 - `base_router.py`
   Shared router interface
 
-## Why This Folder Matters
+## ❓ Why This Folder Matters
 
 If you add, remove, or redefine primitives, start here.
 
@@ -41,7 +49,7 @@ If you add, remove, or redefine primitives, start here.
 - primitive prompt lookup
 - HITL-only primitive registration such as forced `war_primitive`
 
-## Flow
+## 🔄 Flow
 
 ```text
 Screenshot
@@ -50,7 +58,7 @@ Screenshot
   -> Primitive layer plans action
 ```
 
-## MCP Mapping
+## 🔌 MCP Mapping
 
 - `action_route`
 - `action_route_and_plan`

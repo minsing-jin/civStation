@@ -1,4 +1,11 @@
-# Context Layer
+# 🧭 Context Layer
+
+## 📚 Index
+
+- [🎯 Responsibility](#-responsibility)
+- [📁 Main Files](#-main-files)
+- [🔄 How It Fits The Stack](#-how-it-fits-the-stack)
+- [🔌 MCP Mapping](#-mcp-mapping)
 
 The `Context` layer answers one question:
 
@@ -6,7 +13,7 @@ The `Context` layer answers one question:
 What does the agent currently know about the game?
 ```
 
-## Responsibility
+## 🎯 Responsibility
 
 This layer maintains the shared state that the rest of the system reads from:
 
@@ -14,7 +21,7 @@ This layer maintains the shared state that the rest of the system reads from:
 - `HighLevelContext`: strategic notes, threats, opportunities, current strategy snapshot
 - `PrimitiveContext`: short-term action history and local execution state
 
-## Main Files
+## 📁 Main Files
 
 - `context_manager.py`
   Singleton state hub used by the agent loop
@@ -31,7 +38,7 @@ This layer maintains the shared state that the rest of the system reads from:
 - `primitive_context.py`
   Execution-local context and action history
 
-## How It Fits The Stack
+## 🔄 How It Fits The Stack
 
 ```text
 Screenshot
@@ -40,7 +47,7 @@ Screenshot
   -> Strategy and Action read from that shared state
 ```
 
-## MCP Mapping
+## 🔌 MCP Mapping
 
 The layered MCP server exposes this layer as:
 

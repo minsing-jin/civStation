@@ -1,4 +1,13 @@
-# Primitive Layer
+# ⚙️ Primitive Layer
+
+## 📚 Index
+
+- [🎯 Responsibility](#-responsibility)
+- [📁 Main Files](#-main-files)
+- [🔄 Execution Model](#-execution-model)
+- [🕹️ HitL Connection](#-hitl-connection)
+- [📍 Related Runtime Entry Points](#-related-runtime-entry-points)
+- [🔌 MCP Mapping](#-mcp-mapping)
 
 The primitive system is the second half of the `Action` layer.
 
@@ -8,7 +17,7 @@ It answers:
 Given the selected primitive, what action should be executed next?
 ```
 
-## Responsibility
+## 🎯 Responsibility
 
 This layer turns a routed screen into executable UI actions.
 
@@ -19,7 +28,7 @@ Depending on the primitive, that can be:
 - an observation-assisted multi-step flow
 - a HITL-forced override path
 
-## Main Files
+## 📁 Main Files
 
 - `multi_step_process.py`
   Main multi-step execution engine
@@ -30,7 +39,7 @@ Depending on the primitive, that can be:
 - `base_primitive.py`
   Shared primitive interface
 
-## Execution Model
+## 🔄 Execution Model
 
 ```text
 route_primitive()
@@ -42,7 +51,7 @@ route_primitive()
 
 The action output uses normalized coordinates, which are converted to real screen coordinates before execution.
 
-## HitL Connection
+## 🕹️ HitL Connection
 
 This layer is where lower-level intervention matters most.
 
@@ -55,12 +64,12 @@ Examples:
 
 The queue is checked before planning and during checkpoints in the turn executor.
 
-## Related Runtime Entry Points
+## 📍 Related Runtime Entry Points
 
 - `computer_use_test/agent/turn_executor.py`
   observe -> route -> plan -> execute
 
-## MCP Mapping
+## 🔌 MCP Mapping
 
 - `action_plan`
 - `action_execute`

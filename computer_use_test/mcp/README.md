@@ -1,8 +1,18 @@
-# Layered MCP
+# 🧩 Layered MCP
+
+## 📚 Index
+
+- [🧠 Mental Model](#-mental-model)
+- [📁 Main Files](#-main-files)
+- [🛠️ Tool Groups](#-tool-groups)
+- [🔧 Extensibility](#-extensibility)
+- [🧠 Skill Integration](#-skill-integration)
+- [🚀 Typical Usage](#-typical-usage)
+- [▶️ Run](#-run)
 
 This folder exposes the repo as a layered MCP server instead of forcing callers to import internal Python modules directly.
 
-## Mental Model
+## 🧠 Mental Model
 
 The MCP contract matches the architecture described in the root README:
 
@@ -16,7 +26,7 @@ plus higher-level orchestration:
 - `workflow`
 - `session`
 
-## Main Files
+## 📁 Main Files
 
 - `server.py`
   Registers MCP tools, prompts, and resources
@@ -27,7 +37,7 @@ plus higher-level orchestration:
 - `codec.py`
   Serialization and patch helpers
 
-## Tool Groups
+## 🛠️ Tool Groups
 
 ### Session
 
@@ -72,7 +82,7 @@ plus higher-level orchestration:
 - `workflow_act`
 - `workflow_step`
 
-## Extensibility
+## 🔧 Extensibility
 
 The MCP layer is intentionally adapter-driven.
 
@@ -92,7 +102,7 @@ You can:
 
 This keeps the external MCP contract stable while letting you swap internal implementations per session.
 
-## Skill Integration
+## 🧠 Skill Integration
 
 This MCP surface is also the recommended control plane for agent skills.
 
@@ -106,7 +116,7 @@ Current project-facing example:
 
 - `.codex/skills/computer-use-mcp/SKILL.md`
 
-## Typical Usage
+## 🚀 Typical Usage
 
 ### Strategy-only
 
@@ -128,7 +138,7 @@ Current project-facing example:
 2. `workflow_step(execute=true)`
 3. `hitl_status`
 
-## Run
+## ▶️ Run
 
 ```bash
 python -m computer_use_test.mcp.server

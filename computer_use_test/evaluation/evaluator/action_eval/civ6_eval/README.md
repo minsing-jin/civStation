@@ -1,8 +1,14 @@
-# Civilization VI Static Primitive Evaluator
+# 🎯 Civilization VI Static Primitive Evaluator
+
+## 📚 Index
+
+- [🔍 Overview](#-overview)
+- [🏗️ Architecture](#-architecture)
+- [🚀 Usage](#-usage)
 
 A comprehensive evaluation pipeline for assessing VLM-based AI agents playing Civilization VI. The system evaluates both **Primitive Selection** (strategy choice) and **Action Generation** (PyAutoGUI command sequences).
 
-## Overview
+## 🔍 Overview
 
 This evaluator implements a static testing framework that:
 1. Loads ground truth test cases from JSON
@@ -11,7 +17,7 @@ This evaluator implements a static testing framework that:
 4. Compares predictions against ground truth with configurable tolerances
 5. Reports detailed accuracy metrics
 
-## Architecture
+## 🏗️ Architecture
 
 ### Core Components
 
@@ -47,7 +53,7 @@ Concrete implementations for Civ6:
 #### 4. Runner (`main.py`)
 Main execution script with JSON loading and metrics reporting.
 
-## Usage
+## 🚀 Usage
 
 ### Basic Usage
 

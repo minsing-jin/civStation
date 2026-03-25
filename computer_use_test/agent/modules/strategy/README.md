@@ -1,4 +1,12 @@
-# Strategy Layer
+# 🧠 Strategy Layer
+
+## 📚 Index
+
+- [🎯 Responsibility](#-responsibility)
+- [📁 Main Files](#-main-files)
+- [🔄 How It Fits The Stack](#-how-it-fits-the-stack)
+- [🕹️ HitL Connection](#-hitl-connection)
+- [🔌 MCP Mapping](#-mcp-mapping)
 
 The `Strategy` layer answers:
 
@@ -6,7 +14,7 @@ The `Strategy` layer answers:
 Given the current state and human intent, what should the agent optimize for next?
 ```
 
-## Responsibility
+## 🎯 Responsibility
 
 This layer converts free-form guidance into a structured plan that downstream primitives can follow.
 
@@ -18,7 +26,7 @@ A strategy is not just plain text. It becomes a `StructuredStrategy` with:
 - `primitive_directives`
 - optional `primitive_hint`
 
-## Main Files
+## 📁 Main Files
 
 - `strategy_planner.py`
   Refines human input or generates strategy autonomously
@@ -29,7 +37,7 @@ A strategy is not just plain text. It becomes a `StructuredStrategy` with:
 - `prompts/strategy_prompts.py`
   Prompt templates for refine/update/autonomous flows
 
-## How It Fits The Stack
+## 🔄 How It Fits The Stack
 
 ```text
 Context
@@ -39,7 +47,7 @@ Context
   -> Action layer reads it during planning
 ```
 
-## HitL Connection
+## 🕹️ HitL Connection
 
 This is the main place where high-level human guidance lands.
 
@@ -51,7 +59,7 @@ Examples:
 
 Those instructions are refined into a structured strategy instead of being used as raw text forever.
 
-## MCP Mapping
+## 🔌 MCP Mapping
 
 - `strategy_get`
 - `strategy_set`

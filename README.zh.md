@@ -15,33 +15,59 @@
 - Python package: `computer-use-test`
 - Python module: `computer_use_test`
 
-语言：
+<div align="center">
 
-- [English (default)](README.md)
-- [English mirror](README.en.md)
-- [한국어](README.ko.md)
+**语言选择**
 
-## Quick Start
+[English](README.md) | [한국어](README.ko.md) | [中文](README.zh.md)
 
-安装：
+</div>
 
-```bash
-make install
-```
+## 📚 Index
 
-设置 API Key：
+- [🚀 Quick Start](#-quick-start)
+- [🎮 通过 `tacticall` 控制器玩 Civ6](#-通过-tacticall-控制器玩-civ6)
+- [✨ Why CivStation?](#-why-civstation)
+- [🏗️ Architecture](#-architecture)
+- [🕹️ HitL 控制面](#-hitl-控制面)
+- [🧩 MCP 与 Skill 可扩展性](#-mcp-与-skill-可扩展性)
+- [📖 Documentation](#-documentation)
+- [🛠️ Development](#-development)
 
-```env
-ANTHROPIC_API_KEY=...
-GENAI_API_KEY=...
-OPENAI_API_KEY=...
-```
+## 🚀 Quick Start
 
-以可实时控制的方式运行代理：
+这是让 CivStation 通过 `HitL` 真正开始玩 Civilization VI 的最快路径。
+
+> [!NOTE]
+> 推荐起始模型：`gemini-3-flash`。
+> 如果你想先用一个默认模型把 CivStation 跑起来，并兼顾速度与实用性，建议先从 `gemini-3-flash` 开始。
+
+### 1. 准备宿主机器
+
+- 在 **运行 Civilization VI 的同一台机器** 上运行代理。
+- 给终端或 Python 进程授予 `Screen Recording` 和 `Accessibility` 权限。
+- 代理运行期间，Civilization VI 必须始终可见且不要被遮挡。
+- 推荐布局：Civ6 在主屏幕，控制器放在手机或第二台设备上。
+
+为什么重要：
+
+- CivStation 会捕获游戏画面，并通过 PyAutoGUI 执行动作。
+- 在 macOS 上，如果游戏以 windowed 或 borderless 模式运行，`capture_screen_pil()` 会自动识别 Civ6 窗口并裁剪到游戏区域。
+
+### 2. 准备游戏状态
+
+- 启动 Civilization VI。
+- 新开一局或者加载现有存档。
+- 等游戏进入稳定、可操作的界面。
+- 如果想让代理从开局开始玩，就停在第一张可交互地图画面再发送开始信号。
+- 如果想从中途继续，就加载存档并停在你希望代理开始推理的那个画面。
+
+### 3. 以 wait mode 启动 CivStation 代理服务器
 
 ```bash
 python -m computer_use_test.agent.turn_runner \
-  --provider claude \
+  --provider gemini \
+  --model gemini-3-flash \
   --turns 100 \
   --strategy "Focus on science victory" \
   --status-ui \
@@ -49,19 +75,163 @@ python -m computer_use_test.agent.turn_runner \
   --status-port 8765
 ```
 
-打开仪表盘：
+重要：
+
+- 开启 `--wait-for-start` 后，代理 **不会立即开始游戏**
+- 它会先启动 dashboard / API / WebSocket 服务
+- 只有收到 `HitL start` 信号后，才会真正开始操作 Civilization VI
+
+内置仪表盘：
 
 ```text
 http://127.0.0.1:8765
 ```
 
-可选：在另一个终端启动 layered MCP 服务器：
+### 4. 启动 `tacticall` 控制器
+
+控制器位于独立仓库 [`minsing-jin/tacticall`](https://github.com/minsing-jin/tacticall) 的 `controller/` 目录中。
 
 ```bash
-python -m computer_use_test.mcp.server
+git clone https://github.com/minsing-jin/tacticall.git
+cd tacticall/controller
+npm install
+npm start
 ```
 
-## Why CivStation?
+这会启动控制器 UI 和 relay：
+
+```text
+http://127.0.0.1:8787
+ws://127.0.0.1:8787/ws
+```
+
+### 5. 配置 `tacticall` 与 CivStation 之间的 bridge
+
+```bash
+cd tacticall/controller
+cp host-config.example.json host-config.json
+```
+
+配置示例：
+
+```json
+{
+  "relayUrl": "ws://127.0.0.1:8787/ws",
+  "controllerBaseUrl": "auto",
+  "localApiBaseUrl": "http://127.0.0.1:8765",
+  "localAgentUrl": "ws://127.0.0.1:8765/ws",
+  "discussionUserId": "web_user",
+  "discussionMode": "in_game",
+  "discussionLanguage": "zh",
+  "roomId": "civ6-room",
+  "hostKey": "change-this-host-key"
+}
+```
+
+重要：
+
+- `localAgentUrl` 必须指向 CivStation 的 WebSocket 服务器
+- 模板默认值可能仍然是 `ws://localhost:8000/ws`
+- 对 CivStation 应该改成 `ws://127.0.0.1:8765/ws`
+
+### 6. 启动 bridge
+
+```bash
+cd tacticall/controller
+npm run host
+```
+
+bridge 会做这些事：
+
+1. 以 host 身份连接到 `tacticall` relay
+2. 连接本地 CivStation WebSocket 服务器
+3. 打印控制器配对二维码
+
+### 7. 配对控制器
+
+- 用手机扫描二维码
+- 或在浏览器中手动打开控制器并完成配对
+- 配对成功后，控制器就可以发送命令并接收实时状态
+
+### 8. 从 HitL 真正开始游戏
+
+很多人会漏掉这一步：
+
+- 此时 CivStation 仍然可能处于 idle 状态
+- 在控制器里点击 `Start` 会发送 `control:start`
+- 这个消息通过 bridge 到达 CivStation，并触发 `AgentGate.start()`
+- **只有这时** 代理才会真正开始玩 Civilization VI
+
+等价的启动方式：
+
+- 在 `tacticall` 控制器中点击 `Start`
+- 在本地 CivStation dashboard 中点击 `Start`
+- 调用 `POST /api/agent/start`
+- 发送 WebSocket `{ "type": "control", "action": "start" }`
+
+### 9. 运行中介入
+
+运行中你可以：
+
+- `pause`
+- `resume`
+- `stop`
+- 发送高层命令
+- 发起 discussion 问题
+- 中途修改策略
+
+### 10. 安全结束
+
+想结束这次运行时：
+
+- 从控制器发送 `stop`
+- 或调用 `POST /api/agent/stop`
+- 或在本地 dashboard 中停止
+
+## 🎮 通过 `tacticall` 控制器玩 Civ6
+
+### 关系
+
+```text
+Civilization VI game window
+  <- screen capture + action execution -> CivStation
+  <- local WebSocket/API bridge -> tacticall/controller
+  <- remote UI -> phone or browser
+```
+
+### 端到端控制流
+
+```text
+Phone / Browser
+  -> tacticall controller
+  -> tacticall relay
+  -> bridge.js on host
+  -> CivStation WebSocket/API
+  -> AgentGate / CommandQueue / Discussion API
+  -> Civ6 gameplay
+```
+
+### `start` 实际上做了什么
+
+```text
+Controller Start button
+  -> WebSocket control:start
+  -> bridge.js
+  -> ws://127.0.0.1:8765/ws
+  -> AgentGate.start()
+  -> turn_runner exits wait state
+  -> turn_executor begins playing turns
+```
+
+### 推荐操作方式
+
+- 让 Civ6 始终在主屏幕可见。
+- 不要让本地控制器 UI 覆盖游戏窗口。
+- 尽量用手机或第二台设备操作控制器。
+- 在 macOS 上，如果想稳定使用自动窗口裁剪，推荐 windowed 或 borderless 模式。
+- 运行过程中尽量不要改变分辨率。
+
+## ✨ Why CivStation?
 
 - `Layered by design`：代理被拆成可观察、可替换的层，而不是一个黑盒循环。
 - `Human-steerable`：运行中可以 pause、resume、stop、change strategy 和 discussion。
@@ -70,7 +240,7 @@ python -m computer_use_test.mcp.server
 - `Operator-friendly`：支持本地仪表盘、WebSocket 控制和手机远程控制。
 - `实用型 VLM harness`：不是临时把 VLM 调在原始截图上，而是把上下文、路由、规划、执行和介入点组织成可复用的控制循环。
 
-## Architecture
+## 🏗️ Architecture
 
 ### 四个核心层
 
@@ -108,29 +278,11 @@ Human-in-the-Loop can intervene at:
   - action: primitive override / direct command
 ```
 
-## HitL 60 秒概览
+## 🕹️ HitL 控制面
 
-实际有三种控制方式：
+### 本地 dashboard
 
-1. 本地仪表盘
-2. HTTP / WebSocket 直接控制
-3. 通过 `tacticall/controller` 的手机远程控制
-
-### 本地仪表盘
-
-运行：
-
-```bash
-python -m computer_use_test.agent.turn_runner \
-  --provider claude \
-  --turns 100 \
-  --status-ui \
-  --wait-for-start \
-  --status-port 8765
-```
-
-可用接口：
-
+- `http://127.0.0.1:8765`
 - `POST /api/agent/start`
 - `POST /api/agent/pause`
 - `POST /api/agent/resume`
@@ -138,9 +290,7 @@ python -m computer_use_test.agent.turn_runner \
 - `POST /api/directive`
 - `POST /api/discuss`
 
-### WebSocket 控制
-
-代理 WebSocket：
+### WebSocket
 
 ```text
 ws://127.0.0.1:8765/ws
@@ -156,50 +306,12 @@ ws://127.0.0.1:8765/ws
 { "type": "command", "content": "Switch to culture victory and stop expanding" }
 ```
 
-### 手机远程控制器
+### 远程控制器
 
-手机控制器位于独立仓库 [`minsing-jin/tacticall`](https://github.com/minsing-jin/tacticall) 的 `controller/` 目录。
+- [`minsing-jin/tacticall`](https://github.com/minsing-jin/tacticall)
+- `controller/`
 
-架构：
-
-```text
-Phone browser
-  <-> tacticall relay server (/ws on 8787)
-  <-> tacticall bridge.js on the host machine
-  <-> local agent websocket (ws://127.0.0.1:8765/ws)
-  <-> local discussion API (http://127.0.0.1:8765/api/discuss)
-```
-
-最小配置：
-
-```bash
-cd /Users/jinminseong/Desktop/tacticall/controller
-npm install
-npm start
-cp host-config.example.json host-config.json
-```
-
-重要 bridge 配置：
-
-```json
-{
-  "relayUrl": "ws://127.0.0.1:8787/ws",
-  "controllerBaseUrl": "auto",
-  "localApiBaseUrl": "http://127.0.0.1:8765",
-  "localAgentUrl": "ws://127.0.0.1:8765/ws",
-  "roomId": "civ6-room",
-  "hostKey": "change-this-host-key"
-}
-```
-
-然后启动 bridge：
-
-```bash
-cd /Users/jinminseong/Desktop/tacticall/controller
-npm run host
-```
-
-## MCP 与 Skill 可扩展性
+## 🧩 MCP 与 Skill 可扩展性
 
 ### MCP
 

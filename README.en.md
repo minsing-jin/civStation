@@ -15,33 +15,59 @@ Current package and module names are still:
 - Python package: `computer-use-test`
 - Python module: `computer_use_test`
 
-Languages:
+<div align="center">
 
-- [README.md](README.md) (default)
-- [한국어](README.ko.md)
-- [中文](README.zh.md)
+**Languages**
 
-## Quick Start
+[English](README.md) | [한국어](README.ko.md) | [中文](README.zh.md)
 
-Install:
+</div>
 
-```bash
-make install
-```
+## 📚 Index
 
-Set your keys:
+- [🚀 Quick Start](#-quick-start)
+- [🎮 Playing Civ6 With The `tacticall` Controller](#-playing-civ6-with-the-tacticall-controller)
+- [✨ Why CivStation?](#-why-civstation)
+- [🏗️ Architecture](#-architecture)
+- [🕹️ HitL Control Surfaces](#-hitl-control-surfaces)
+- [🧩 MCP and Skill Extensibility](#-mcp-and-skill-extensibility)
+- [📖 Documentation](#-documentation)
+- [🛠️ Development](#-development)
 
-```env
-ANTHROPIC_API_KEY=...
-GENAI_API_KEY=...
-OPENAI_API_KEY=...
-```
+## 🚀 Quick Start
 
-Run the agent with live control enabled:
+This is the fastest path to letting CivStation actually play Civilization VI through `HitL`.
+
+> [!NOTE]
+> Recommended starting model: `gemini-3-flash`.
+> If you want one default that is fast, practical, and easy to operate for CivStation, start with `gemini-3-flash` before tuning anything else.
+
+### 1. Prepare the host machine
+
+- Run on the same machine that has Civilization VI open.
+- Grant your terminal / Python process `Screen Recording` and `Accessibility` permissions.
+- Keep Civilization VI visible and unobstructed while the agent is running.
+- Recommended setup: Civ6 on the main screen, controller on your phone or another device.
+
+Why this matters:
+
+- CivStation captures the game screen and clicks through PyAutoGUI.
+- On macOS, when the game is in windowed or borderless mode, `capture_screen_pil()` automatically detects the Civ6 window and crops to it.
+
+### 2. Prepare the game state
+
+- Launch Civilization VI.
+- Start a new game or load an existing save.
+- Wait until the game is on a stable, playable screen.
+- If you want the agent to play from the beginning, stop on the first interactive map screen before giving the start signal.
+- If you want the agent to continue an existing run, load the save and stop on the exact screen you want it to reason from.
+
+### 3. Start the CivStation agent server in wait mode
 
 ```bash
 python -m computer_use_test.agent.turn_runner \
-  --provider claude \
+  --provider gemini \
+  --model gemini-3-flash \
   --turns 100 \
   --strategy "Focus on science victory" \
   --status-ui \
@@ -49,19 +75,163 @@ python -m computer_use_test.agent.turn_runner \
   --status-port 8765
 ```
 
-Open the dashboard:
+Important:
+
+- with `--wait-for-start`, the agent does **not** begin playing immediately
+- it starts the dashboard/API/WebSocket server first
+- actual gameplay begins only after a `start` signal arrives from `HitL`
+
+Open the built-in dashboard:
 
 ```text
 http://127.0.0.1:8765
 ```
 
-Optional: run the layered MCP server in another terminal:
+### 4. Start the `tacticall` controller
+
+The controller lives in the separate [`minsing-jin/tacticall`](https://github.com/minsing-jin/tacticall) repo under `controller/`.
 
 ```bash
-python -m computer_use_test.mcp.server
+git clone https://github.com/minsing-jin/tacticall.git
+cd tacticall/controller
+npm install
+npm start
 ```
 
-## Why CivStation?
+This starts the controller UI and relay:
+
+```text
+http://127.0.0.1:8787
+ws://127.0.0.1:8787/ws
+```
+
+### 5. Configure the bridge between `tacticall` and CivStation
+
+```bash
+cd tacticall/controller
+cp host-config.example.json host-config.json
+```
+
+Use a config like this:
+
+```json
+{
+  "relayUrl": "ws://127.0.0.1:8787/ws",
+  "controllerBaseUrl": "auto",
+  "localApiBaseUrl": "http://127.0.0.1:8765",
+  "localAgentUrl": "ws://127.0.0.1:8765/ws",
+  "discussionUserId": "web_user",
+  "discussionMode": "in_game",
+  "discussionLanguage": "en",
+  "roomId": "civ6-room",
+  "hostKey": "change-this-host-key"
+}
+```
+
+Important:
+
+- `localAgentUrl` must point to CivStation's WebSocket server
+- the default template may still point to `ws://localhost:8000/ws`
+- for CivStation it should be `ws://127.0.0.1:8765/ws`
+
+### 6. Start the bridge
+
+```bash
+cd tacticall/controller
+npm run host
+```
+
+What the bridge does:
+
+1. connects to the `tacticall` relay as the host
+2. connects to the local CivStation WebSocket server
+3. prints a QR code for controller pairing
+
+### 7. Pair the controller
+
+- Scan the QR code with your phone
+- or open the controller in a browser and pair manually
+- once paired, the controller can send commands and receive live status
+
+### 8. Start gameplay from HitL
+
+This is the step people miss:
+
+- CivStation is still idle until `HitL start` is sent
+- pressing `Start` in the controller sends a `control:start` message
+- that message reaches CivStation through the bridge and triggers `AgentGate.start()`
+- only then does the agent begin actually playing Civilization VI
+
+Equivalent ways to start the run:
+
+- press `Start` in the `tacticall` controller
+- press `Start` in the local CivStation dashboard
+- call `POST /api/agent/start`
+- send WebSocket `{ "type": "control", "action": "start" }`
+
+### 9. Observe and intervene while it plays
+
+While the run is active, you can:
+
+- `pause`
+- `resume`
+- `stop`
+- send a high-level command
+- ask a discussion question
+- change the strategy mid-run
+
+### 10. Stop safely
+
+When you want the run to end:
+
+- send `stop` from the controller
+- or use `POST /api/agent/stop`
+- or stop from the local dashboard
+
+## 🎮 Playing Civ6 With The `tacticall` Controller
+
+### Relationship
+
+```text
+Civilization VI game window
+  <- screen capture + action execution -> CivStation
+  <- local WebSocket/API bridge -> tacticall/controller
+  <- remote UI -> phone or browser
+```
+
+### End-to-end control flow
+
+```text
+Phone / Browser
+  -> tacticall controller
+  -> tacticall relay
+  -> bridge.js on host
+  -> CivStation WebSocket/API
+  -> AgentGate / CommandQueue / Discussion API
+  -> Civ6 gameplay
+```
+
+### What `start` actually does
+
+```text
+Controller Start button
+  -> WebSocket control:start
+  -> bridge.js
+  -> ws://127.0.0.1:8765/ws
+  -> AgentGate.start()
+  -> turn_runner exits wait state
+  -> turn_executor begins playing turns
+```
+
+### Recommended operator setup
+
+- Keep Civ6 on the main display and visible at all times.
+- Do not cover the game window with the local controller UI.
+- Prefer controlling from a phone or secondary device.
+- Use windowed or borderless mode if you want reliable automatic game-window cropping on macOS.
+- Keep the game at a stable resolution during a run.
+
+## ✨ Why CivStation?
 
 - `Layered by design`: the agent is broken into inspectable layers instead of one opaque loop.
 - `Human-steerable`: pause, resume, stop, change strategy, and discuss the next move while the run is live.
@@ -70,7 +240,7 @@ python -m computer_use_test.mcp.server
 - `Operator-friendly`: local dashboard, WebSocket control, and remote phone control are all supported.
 - `A practical VLM harness`: instead of calling a VLM on raw screenshots ad hoc, CivStation wraps the model in a reusable control loop with context, routing, planning, execution, and intervention points.
 
-## Architecture
+## 🏗️ Architecture
 
 ### The Four Layers
 
@@ -108,29 +278,11 @@ Human-in-the-Loop can intervene at:
   - action: primitive override / direct command
 ```
 
-## HitL in 60 Seconds
+## 🕹️ HitL Control Surfaces
 
-There are three practical control modes:
+### Local dashboard
 
-1. local dashboard
-2. direct HTTP / WebSocket control
-3. remote phone controller through `tacticall/controller`
-
-### Local Dashboard
-
-Run:
-
-```bash
-python -m computer_use_test.agent.turn_runner \
-  --provider claude \
-  --turns 100 \
-  --status-ui \
-  --wait-for-start \
-  --status-port 8765
-```
-
-Use:
-
+- `http://127.0.0.1:8765`
 - `POST /api/agent/start`
 - `POST /api/agent/pause`
 - `POST /api/agent/resume`
@@ -138,9 +290,7 @@ Use:
 - `POST /api/directive`
 - `POST /api/discuss`
 
-### WebSocket Control
-
-Agent socket:
+### WebSocket
 
 ```text
 ws://127.0.0.1:8765/ws
@@ -156,50 +306,12 @@ Supported messages:
 { "type": "command", "content": "Switch to culture victory and stop expanding" }
 ```
 
-### Remote Phone Controller
+### Remote controller
 
-The phone controller lives in the separate [`minsing-jin/tacticall`](https://github.com/minsing-jin/tacticall) repo under `controller/`.
+- [`minsing-jin/tacticall`](https://github.com/minsing-jin/tacticall)
+- `controller/`
 
-Architecture:
-
-```text
-Phone browser
-  <-> tacticall relay server (/ws on 8787)
-  <-> tacticall bridge.js on the host machine
-  <-> local agent websocket (ws://127.0.0.1:8765/ws)
-  <-> local discussion API (http://127.0.0.1:8765/api/discuss)
-```
-
-Minimal setup:
-
-```bash
-cd /Users/jinminseong/Desktop/tacticall/controller
-npm install
-npm start
-cp host-config.example.json host-config.json
-```
-
-Important bridge config:
-
-```json
-{
-  "relayUrl": "ws://127.0.0.1:8787/ws",
-  "controllerBaseUrl": "auto",
-  "localApiBaseUrl": "http://127.0.0.1:8765",
-  "localAgentUrl": "ws://127.0.0.1:8765/ws",
-  "roomId": "civ6-room",
-  "hostKey": "change-this-host-key"
-}
-```
-
-Then start the bridge:
-
-```bash
-cd /Users/jinminseong/Desktop/tacticall/controller
-npm run host
-```
-
-## MCP and Skill Extensibility
+## 🧩 MCP and Skill Extensibility
 
 ### MCP
 
@@ -225,7 +337,7 @@ Docs:
 - [MCP README](computer_use_test/mcp/README.md)
 - [Layered MCP Tool Map](docs/layered_mcp.md)
 
-### Adapter Extensibility
+### Adapter extensibility
 
 The MCP runtime is adapter-driven.
 
@@ -239,7 +351,7 @@ Default extension slots:
 
 You can register adapters in `LayerAdapterRegistry` and select them per session through `adapter_overrides`.
 
-### Skill Extensibility
+### Skill extensibility
 
 This repo also supports skill-based agent workflows.
 
@@ -259,7 +371,7 @@ Recommended pattern:
 3. put reusable workflows in `SKILL.md`
 4. keep scripts and references next to the skill
 
-## Documentation
+## 📖 Documentation
 
 Detailed layer docs:
 
@@ -275,7 +387,7 @@ Other languages:
 - [한국어](README.ko.md)
 - [中文](README.zh.md)
 
-## Development
+## 🛠️ Development
 
 ```bash
 make lint

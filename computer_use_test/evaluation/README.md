@@ -1,8 +1,15 @@
-# Evaluation Framework
+# 📏 Evaluation Framework
+
+## 📚 Index
+
+- [🏗️ 아키텍처](#-아키텍처)
+- [⚖️ 평가 방식 비교](#-평가-방식-비교)
+- [🚀 Quick Start](#-quick-start)
+- [🤝 오픈소스 기여 가이드](#-오픈소스-기여-가이드)
 
 게임 에이전트의 행동을 정량적으로 평가하기 위한 프레임워크입니다.
 
-## 아키텍처
+## 🏗️ 아키텍처
 
 ```
 evaluation/
@@ -19,7 +26,7 @@ evaluation/
 └── metric/                           # 메트릭 정의
 ```
 
-## 평가 방식 비교
+## ⚖️ 평가 방식 비교
 
 | 기능 | civ6_eval (기존) | bbox_eval (신규) |
 |------|------------------|------------------|
@@ -31,7 +38,7 @@ evaluation/
 | 데이터 포맷 | JSON (배열) | JSONL (라인별 독립) |
 | CLI | main.py | `python -m ...bbox_eval` |
 
-## Quick Start
+## 🚀 Quick Start
 
 ### Bbox 평가 (추천)
 
@@ -74,7 +81,7 @@ from computer_use_test.evaluation.evaluator.action_eval.civ6_eval import Civ6Sta
 
 자세한 문서는 [civ6_eval/README.md](evaluator/action_eval/civ6_eval/README.md)를 참고하세요.
 
-## 오픈소스 기여 가이드
+## 🤝 오픈소스 기여 가이드
 
 ### 커스텀 에이전트 추가
 

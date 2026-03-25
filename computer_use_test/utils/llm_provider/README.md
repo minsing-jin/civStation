@@ -1,8 +1,16 @@
-# VLM Provider Integration Guide
+# 🤖 VLM Provider Integration Guide
+
+## 📚 Index
+
+- [🔍 Overview](#-overview)
+- [🚀 Quick Start](#-quick-start)
+- [🧩 Provider Details](#-provider-details)
+- [💻 Programmatic Usage](#-programmatic-usage)
+- [🏗️ Provider Architecture](#-provider-architecture)
 
 This guide explains how to use Vision-Language Model (VLM) providers with the Civilization VI Static Primitive Evaluator.
 
-## Overview
+## 🔍 Overview
 
 The evaluation pipeline supports multiple VLM providers:
 - **Claude** (Anthropic): Claude 3.5 Sonnet, Opus, Haiku
@@ -10,7 +18,7 @@ The evaluation pipeline supports multiple VLM providers:
 - **GPT** (OpenAI): GPT-4o, GPT-4o-mini, GPT-4 Vision
 - **Mock**: Deterministic mocking for testing (no API calls)
 
-## Quick Start
+## 🚀 Quick Start
 
 ### 1. Install Dependencies
 
@@ -57,7 +65,7 @@ python -m computer_use_test.evaluator.static_eval.civ6_eval.main --provider gemi
 python -m computer_use_test.evaluator.static_eval.civ6_eval.main --provider claude path/to/tests.json
 ```
 
-## Provider Details
+## 🧩 Provider Details
 
 ### Claude (Anthropic)
 
@@ -133,7 +141,7 @@ plan = provider.call_and_parse(
 )
 ```
 
-## Programmatic Usage
+## 💻 Programmatic Usage
 
 ### Using Providers in Code
 
@@ -203,7 +211,7 @@ gpt = create_provider("gpt")
 mock = create_provider("mock")  # No API key needed
 ```
 
-## Provider Architecture
+## 🏗️ Provider Architecture
 
 Each provider implements the `BaseVLMProvider` interface:
 

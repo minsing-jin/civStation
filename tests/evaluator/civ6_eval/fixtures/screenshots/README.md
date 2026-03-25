@@ -1,8 +1,21 @@
-# Screenshot Fixtures
+# 🖼️ Screenshot Fixtures
+
+## 📚 Index
+
+- [🗂️ Directory Structure](#-directory-structure)
+- [➕ How to Add Screenshots](#-how-to-add-screenshots)
+- [📸 Expected Screenshot Characteristics](#-expected-screenshot-characteristics)
+- [🧪 Testing Without Screenshots](#-testing-without-screenshots)
+- [🧾 Ground Truth Format](#-ground-truth-format)
+- [🧩 Primitive Types](#-primitive-types)
+- [🎮 Action Types](#-action-types)
+- [▶️ Running Integration Tests](#-running-integration-tests)
+- [🛠️ Troubleshooting](#-troubleshooting)
+- [🔒 Privacy Note](#-privacy-note)
 
 This directory contains screenshot files for integration testing of the Civ6 Static Primitive Evaluator.
 
-## Directory Structure
+## 🗂️ Directory Structure
 
 ```
 screenshots/
@@ -15,7 +28,7 @@ screenshots/
 └── science_tech_boost.png      # Tech boost screenshot (if available)
 ```
 
-## How to Add Screenshots
+## ➕ How to Add Screenshots
 
 To run integration tests with real screenshots:
 
@@ -37,20 +50,20 @@ To run integration tests with real screenshots:
 
 4. **Update Ground Truth**: If needed, update `../ground_truth.json` with the correct actions for your screenshots
 
-## Expected Screenshot Characteristics
+## 📸 Expected Screenshot Characteristics
 
 - **Format**: PNG or JPEG
 - **Resolution**: Typically 1920x1080 (Full HD) or 2560x1440 (2K)
 - **Content**: Clear view of the relevant game screen element
 - **File Size**: Typically 100KB - 5MB depending on resolution
 
-## Testing Without Screenshots
+## 🧪 Testing Without Screenshots
 
 The integration tests will automatically skip if screenshot files are not present. The evaluator can still be tested using the unit tests in:
 - `test_tolerance.py` - Coordinate tolerance tests
 - `test_discriminated_union.py` - Action parsing tests
 
-## Ground Truth Format
+## 🧾 Ground Truth Format
 
 Each screenshot should have corresponding ground truth in `../ground_truth.json`:
 
@@ -65,7 +78,7 @@ Each screenshot should have corresponding ground truth in `../ground_truth.json`
 }
 ```
 
-## Primitive Types
+## 🧩 Primitive Types
 
 Available primitives:
 - `unit_ops_primitive` - Unit operations (movement, combat, fortify)
@@ -73,7 +86,7 @@ Available primitives:
 - `science_decision_primitive` - Technology tree decisions
 - `culture_decision_primitive` - Civics tree decisions
 
-## Action Types
+## 🎮 Action Types
 
 Supported action types:
 - `click` - Mouse click at coordinates
@@ -82,7 +95,7 @@ Supported action types:
 - `wait` - Wait/delay action
 - `double_click` - Double click at coordinates
 
-## Running Integration Tests
+## ▶️ Running Integration Tests
 
 ```bash
 # Run all tests including integration tests (will skip if no screenshots)
@@ -95,7 +108,7 @@ pytest tests/evaluator/static_eval/civ6_eval/test_evaluation_integration.py -m i
 pytest tests/evaluator/static_eval/civ6_eval/test_evaluation_integration.py -v
 ```
 
-## Troubleshooting
+## 🛠️ Troubleshooting
 
 **Tests are skipping**: Screenshots are not present in this directory. Add screenshot files to enable integration tests.
 
@@ -105,6 +118,6 @@ pytest tests/evaluator/static_eval/civ6_eval/test_evaluation_integration.py -v
 3. Ensure screenshot files are valid image files
 4. Verify file permissions allow reading
 
-## Privacy Note
+## 🔒 Privacy Note
 
 Do not commit copyrighted game screenshots to public repositories. This directory should remain empty in version control, with screenshots added locally for testing purposes only.

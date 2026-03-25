@@ -15,33 +15,59 @@
 - Python package: `computer-use-test`
 - Python module: `computer_use_test`
 
-언어:
+<div align="center">
 
-- [English (default)](README.md)
-- [English mirror](README.en.md)
-- [中文](README.zh.md)
+**언어 선택**
 
-## Quick Start
+[English](README.md) | [한국어](README.ko.md) | [中文](README.zh.md)
 
-설치:
+</div>
 
-```bash
-make install
-```
+## 📚 Index
 
-API 키 설정:
+- [🚀 Quick Start](#-quick-start)
+- [🎮 `tacticall` 컨트롤러로 Civ6 플레이하기](#-tacticall-컨트롤러로-civ6-플레이하기)
+- [✨ Why CivStation?](#-why-civstation)
+- [🏗️ Architecture](#-architecture)
+- [🕹️ HitL 제어면](#-hitl-제어면)
+- [🧩 MCP와 Skill 확장성](#-mcp와-skill-확장성)
+- [📖 Documentation](#-documentation)
+- [🛠️ Development](#-development)
 
-```env
-ANTHROPIC_API_KEY=...
-GENAI_API_KEY=...
-OPENAI_API_KEY=...
-```
+## 🚀 Quick Start
 
-실시간 제어가 가능한 상태로 에이전트 실행:
+이 섹션은 CivStation이 실제로 Civilization VI를 플레이하기 시작하도록 만드는 가장 빠른 절차입니다.
+
+> [!NOTE]
+> 권장 시작 모델은 `gemini-3-flash`입니다.
+> CivStation에서 하나의 기본값으로 시작해야 한다면, 운영 속도와 실용성 측면에서 먼저 `gemini-3-flash`를 쓰는 것을 권장합니다.
+
+### 1. 호스트 머신 준비
+
+- Civilization VI가 실행되는 **같은 머신**에서 에이전트를 돌립니다.
+- 터미널 또는 Python 프로세스에 `Screen Recording`과 `Accessibility` 권한을 부여합니다.
+- 에이전트가 실행되는 동안 Civilization VI 창은 계속 보이고 가려지지 않아야 합니다.
+- 권장 구성: Civ6는 메인 화면, 컨트롤러는 휴대폰이나 보조 기기에서 조작
+
+왜 필요한가:
+
+- CivStation은 게임 화면을 캡처하고 PyAutoGUI로 클릭을 실행합니다.
+- macOS에서는 게임이 windowed/borderless 모드일 때 `capture_screen_pil()`이 Civ6 창을 자동 탐지하고 게임 영역만 크롭합니다.
+
+### 2. 게임 상태 준비
+
+- Civilization VI를 실행합니다.
+- 새 게임을 시작하거나 기존 저장 파일을 불러옵니다.
+- 게임이 실제로 플레이 가능한 안정된 화면에 도달할 때까지 기다립니다.
+- 턴 1부터 맡기고 싶으면 첫 지도 화면에서 멈춘 뒤 시작 신호를 보냅니다.
+- 중간 저장부터 이어서 맡기고 싶으면, 에이전트가 해석을 시작하길 원하는 정확한 화면에서 멈춥니다.
+
+### 3. CivStation 에이전트 서버를 wait mode로 실행
 
 ```bash
 python -m computer_use_test.agent.turn_runner \
-  --provider claude \
+  --provider gemini \
+  --model gemini-3-flash \
   --turns 100 \
   --strategy "Focus on science victory" \
   --status-ui \
@@ -49,19 +75,163 @@ python -m computer_use_test.agent.turn_runner \
   --status-port 8765
 ```
 
-대시보드 열기:
+중요:
+
+- `--wait-for-start`를 켜면 에이전트는 **즉시 플레이를 시작하지 않습니다**
+- 먼저 dashboard / API / WebSocket 서버만 띄웁니다
+- 실제 플레이는 `HitL start` 신호가 도착한 뒤에만 시작됩니다
+
+내장 대시보드:
 
 ```text
 http://127.0.0.1:8765
 ```
 
-선택 사항: 다른 터미널에서 layered MCP 서버 실행:
+### 4. `tacticall` 컨트롤러 실행
+
+컨트롤러는 별도 저장소 [`minsing-jin/tacticall`](https://github.com/minsing-jin/tacticall) 의 `controller/` 아래에 있습니다.
 
 ```bash
-python -m computer_use_test.mcp.server
+git clone https://github.com/minsing-jin/tacticall.git
+cd tacticall/controller
+npm install
+npm start
 ```
 
-## Why CivStation?
+이렇게 하면 컨트롤러 UI와 relay가 실행됩니다:
+
+```text
+http://127.0.0.1:8787
+ws://127.0.0.1:8787/ws
+```
+
+### 5. `tacticall`과 CivStation 사이 bridge 설정
+
+```bash
+cd tacticall/controller
+cp host-config.example.json host-config.json
+```
+
+예시 설정:
+
+```json
+{
+  "relayUrl": "ws://127.0.0.1:8787/ws",
+  "controllerBaseUrl": "auto",
+  "localApiBaseUrl": "http://127.0.0.1:8765",
+  "localAgentUrl": "ws://127.0.0.1:8765/ws",
+  "discussionUserId": "web_user",
+  "discussionMode": "in_game",
+  "discussionLanguage": "ko",
+  "roomId": "civ6-room",
+  "hostKey": "change-this-host-key"
+}
+```
+
+중요:
+
+- `localAgentUrl`은 CivStation의 WebSocket 서버를 가리켜야 합니다
+- 템플릿 기본값은 아직 `ws://localhost:8000/ws`일 수 있습니다
+- CivStation에는 `ws://127.0.0.1:8765/ws`를 써야 합니다
+
+### 6. bridge 실행
+
+```bash
+cd tacticall/controller
+npm run host
+```
+
+bridge가 하는 일:
+
+1. `tacticall` relay에 host로 접속
+2. 로컬 CivStation WebSocket 서버에 접속
+3. 컨트롤러 pairing용 QR 코드를 출력
+
+### 7. 컨트롤러 페어링
+
+- 휴대폰으로 QR 코드를 스캔하거나
+- 브라우저에서 직접 컨트롤러를 열어 수동 pairing합니다
+- pairing이 끝나면 컨트롤러가 실시간 상태를 받고 명령을 보낼 수 있습니다
+
+### 8. HitL에서 실제 플레이 시작
+
+많이 놓치는 부분이 바로 이 단계입니다.
+
+- 이 시점에서도 CivStation은 아직 idle 상태일 수 있습니다
+- 컨트롤러에서 `Start`를 누르면 `control:start` 메시지가 전송됩니다
+- 이 메시지가 bridge를 거쳐 CivStation으로 들어가고 `AgentGate.start()`를 호출합니다
+- **그때부터** 에이전트가 실제로 Civilization VI를 플레이하기 시작합니다
+
+동일한 시작 방법:
+
+- `tacticall` 컨트롤러에서 `Start` 누르기
+- 로컬 CivStation dashboard에서 `Start` 누르기
+- `POST /api/agent/start` 호출
+- WebSocket `{ "type": "control", "action": "start" }` 전송
+
+### 9. 플레이 중 개입
+
+실행 중에는 다음이 가능합니다:
+
+- `pause`
+- `resume`
+- `stop`
+- high-level command 전송
+- discussion 질문
+- 전략 변경
+
+### 10. 안전하게 종료
+
+종료하고 싶으면:
+
+- 컨트롤러에서 `stop`
+- 또는 `POST /api/agent/stop`
+- 또는 로컬 dashboard에서 `stop`
+
+## 🎮 `tacticall` 컨트롤러로 Civ6 플레이하기
+
+### 관계
+
+```text
+Civilization VI game window
+  <- screen capture + action execution -> CivStation
+  <- local WebSocket/API bridge -> tacticall/controller
+  <- remote UI -> phone or browser
+```
+
+### end-to-end 제어 흐름
+
+```text
+Phone / Browser
+  -> tacticall controller
+  -> tacticall relay
+  -> bridge.js on host
+  -> CivStation WebSocket/API
+  -> AgentGate / CommandQueue / Discussion API
+  -> Civ6 gameplay
+```
+
+### `start`가 실제로 하는 일
+
+```text
+Controller Start button
+  -> WebSocket control:start
+  -> bridge.js
+  -> ws://127.0.0.1:8765/ws
+  -> AgentGate.start()
+  -> turn_runner exits wait state
+  -> turn_executor begins playing turns
+```
+
+### 권장 운영 방식
+
+- Civ6는 메인 화면에서 항상 보여야 합니다.
+- 로컬 컨트롤러 UI가 게임 창 위를 덮지 않도록 합니다.
+- 가능하면 휴대폰이나 보조 기기에서 조작합니다.
+- macOS에서 자동 게임창 크롭을 쓰려면 windowed 또는 borderless 모드를 권장합니다.
+- 실행 중에는 해상도를 바꾸지 않는 편이 좋습니다.
+
+## ✨ Why CivStation?
 
 - `Layered by design`: 에이전트가 하나의 불투명한 루프가 아니라, 관찰 가능한 레이어로 나뉘어 있습니다.
 - `Human-steerable`: 실행 중에도 pause, resume, stop, strategy change, discussion이 가능합니다.
@@ -70,7 +240,7 @@ python -m computer_use_test.mcp.server
 - `Operator-friendly`: 로컬 대시보드, WebSocket 제어, 원격 폰 제어까지 지원합니다.
 - `실전형 VLM harness`: 단순히 VLM에 스크린샷을 던지는 방식이 아니라, 컨텍스트, 라우팅, 계획, 실행, 개입 지점을 갖춘 재사용 가능한 제어 루프로 모델을 감쌉니다.
 
-## Architecture
+## 🏗️ Architecture
 
 ### 4개 레이어
 
@@ -108,29 +278,11 @@ Human-in-the-Loop can intervene at:
   - action: primitive override / direct command
 ```
 
-## HitL 60초 요약
+## 🕹️ HitL 제어면
 
-실제로는 세 가지 제어 방식이 있습니다:
+### 로컬 dashboard
 
-1. 로컬 대시보드
-2. HTTP / WebSocket 직접 제어
-3. `tacticall/controller`를 통한 원격 폰 컨트롤러
-
-### 로컬 대시보드
-
-실행:
-
-```bash
-python -m computer_use_test.agent.turn_runner \
-  --provider claude \
-  --turns 100 \
-  --status-ui \
-  --wait-for-start \
-  --status-port 8765
-```
-
-사용:
-
+- `http://127.0.0.1:8765`
 - `POST /api/agent/start`
 - `POST /api/agent/pause`
 - `POST /api/agent/resume`
@@ -138,9 +290,7 @@ python -m computer_use_test.agent.turn_runner \
 - `POST /api/directive`
 - `POST /api/discuss`
 
-### WebSocket 제어
-
-에이전트 소켓:
+### WebSocket
 
 ```text
 ws://127.0.0.1:8765/ws
@@ -156,50 +306,12 @@ ws://127.0.0.1:8765/ws
 { "type": "command", "content": "Switch to culture victory and stop expanding" }
 ```
 
-### 원격 폰 컨트롤러
+### 원격 컨트롤러
 
-폰 컨트롤러는 별도 저장소 [`minsing-jin/tacticall`](https://github.com/minsing-jin/tacticall) 의 `controller/` 아래에 있습니다.
+- [`minsing-jin/tacticall`](https://github.com/minsing-jin/tacticall)
+- `controller/`
 
-구조:
-
-```text
-Phone browser
-  <-> tacticall relay server (/ws on 8787)
-  <-> tacticall bridge.js on the host machine
-  <-> local agent websocket (ws://127.0.0.1:8765/ws)
-  <-> local discussion API (http://127.0.0.1:8765/api/discuss)
-```
-
-최소 설정:
-
-```bash
-cd /Users/jinminseong/Desktop/tacticall/controller
-npm install
-npm start
-cp host-config.example.json host-config.json
-```
-
-중요 bridge 설정:
-
-```json
-{
-  "relayUrl": "ws://127.0.0.1:8787/ws",
-  "controllerBaseUrl": "auto",
-  "localApiBaseUrl": "http://127.0.0.1:8765",
-  "localAgentUrl": "ws://127.0.0.1:8765/ws",
-  "roomId": "civ6-room",
-  "hostKey": "change-this-host-key"
-}
-```
-
-그 다음 bridge 실행:
-
-```bash
-cd /Users/jinminseong/Desktop/tacticall/controller
-npm run host
-```
-
-## MCP와 Skill 확장성
+## 🧩 MCP와 Skill 확장성
 
 ### MCP
 
