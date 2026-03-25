@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "computer-use-test"
 version = "0.0.1"
@@ -13,14 +17,13 @@ maintainers = [
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Games/Entertainment :: Turn Based Strategy",
 ]
-license = { text = "MIT" }
+license = "MIT"
 dependencies = [
     "anthropic>=0.77.0",
     "configargparse>=1.7.1",
@@ -58,6 +61,11 @@ ui = [
     "fastapi>=0.115.0",
     "uvicorn>=0.34.0",
 ]
+docs = [
+    "mkdocs-material>=9.6.0",
+    "mkdocs-static-i18n>=1.3.1",
+    "pymdown-extensions>=10.0",
+]
 test = [
     "coverage", # testing
     "pytest", # testing
@@ -70,6 +78,7 @@ test = [
 [project.urls]
 bugs = "https://github.com/minsing-jin/civStation/issues"
 changelog = "https://github.com/minsing-jin/civStation/blob/main/changelog.md"
+documentation = "https://minsing-jin.github.io/civStation/"
 homepage = "https://github.com/minsing-jin/civStation"
 
 [project.scripts]
@@ -111,3 +120,6 @@ select = [
 
 [tool.uv]
 package = true
+
+[tool.setuptools.packages.find]
+include = ["computer_use_test*"]
