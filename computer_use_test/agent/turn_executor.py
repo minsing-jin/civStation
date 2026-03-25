@@ -472,6 +472,7 @@ def plan_action(
     high_level_strategy: str | None = None,
     recent_actions_string: str | None = None,
     hitl_directive: str | None = None,
+    prompt_language: str = "eng",
     img_config: ImagePipelineConfig | None = None,
 ) -> AgentAction | list[AgentAction] | None:
     """
@@ -488,6 +489,7 @@ def plan_action(
         high_level_strategy: Optional high-level strategy/goal to guide action selection
         recent_actions_string: Compressed string of recent actions (for repetition avoidance)
         hitl_directive: Optional micro-level HITL directive (e.g., "병영을 최우선 선택")
+        prompt_language: Primitive prompt language (`eng` default, `kor` optional)
         img_config: Image pipeline config for planner (defaults to PLANNER_DEFAULT)
 
     Returns:
@@ -497,8 +499,9 @@ def plan_action(
         primitive_name,
         normalizing_range,
         high_level_strategy=high_level_strategy,
-        recent_actions=recent_actions_string or "없음",
+        recent_actions=recent_actions_string,
         hitl_directive=hitl_directive,
+        language=prompt_language,
     )
 
     return provider.analyze(
@@ -545,6 +548,7 @@ def run_primitive_loop(
     ctx: ContextManager,
     max_steps: int,
     completion_condition: str,
+    prompt_language: str = "eng",
     planner_img_config: ImagePipelineConfig | None = None,
     command_queue: CommandQueue | None = None,
     agent_gate: AgentGate | None = None,
@@ -914,6 +918,7 @@ def run_primitive_loop(
                 pre_image,
                 memory,
                 normalizing_range=normalizing_range,
+                prompt_language=prompt_language,
                 img_config=planner_img_config,
             )
             plan_end = time.monotonic()
@@ -978,6 +983,7 @@ def run_primitive_loop(
                     planner_provider,
                     memory,
                     high_level_strategy=active_strategy_string,
+                    prompt_language=prompt_language,
                 )
                 if not decided:
                     result.error_message = "Failed to decide best choice from short-term memory"
@@ -999,6 +1005,7 @@ def run_primitive_loop(
                 high_level_strategy=active_strategy_string,
                 recent_actions=combined_recent_actions or "없음",
                 hitl_directive=active_hitl_directive or None,
+                prompt_language=prompt_language,
                 img_config=planner_img_config,
             )
             plan_end = time.monotonic()
@@ -1297,6 +1304,7 @@ def run_primitive_loop(
                         high_level_strategy=strategy_string,
                         recent_actions=recent_actions_str,
                         hitl_directive=hitl_directive,
+                        prompt_language=prompt_language,
                         img_config=planner_img_config,
                     )
                     if no_progress_resolution.handled:
@@ -1369,6 +1377,7 @@ def run_primitive_loop(
                     high_level_strategy=strategy_string,
                     recent_actions=recent_actions_str,
                     hitl_directive=hitl_directive,
+                    prompt_language=prompt_language,
                     img_config=planner_img_config,
                 )
                 if no_progress_resolution.handled:
@@ -1503,6 +1512,7 @@ def run_primitive_loop(
                     high_level_strategy=strategy_string,
                     recent_actions=recent_actions_str,
                     hitl_directive=hitl_directive,
+                    prompt_language=prompt_language,
                     img_config=planner_img_config,
                 )
                 if no_progress_resolution.handled:
@@ -1541,6 +1551,7 @@ def run_primitive_loop(
             high_level_strategy=strategy_string,
             recent_actions=recent_actions_str,
             hitl_directive=hitl_directive,
+            prompt_language=prompt_language,
             img_config=planner_img_config,
         )
         if no_progress_resolution.handled:
@@ -1641,6 +1652,7 @@ def run_one_turn(
     planner_provider: BaseVLMProvider,
     normalizing_range: int = 1000,
     delay_before_action: float = 0.5,
+    prompt_language: str = "eng",
     high_level_strategy: str | None = None,
     context_manager: ContextManager | None = None,
     strategy_planner: StrategyPlanner | None = None,
@@ -1677,6 +1689,7 @@ def run_one_turn(
         planner_provider: VLM provider for planning (action generation)
         normalizing_range: Coordinate normalization range (default 1000)
         delay_before_action: Seconds to wait before executing the action
+        prompt_language: Primitive prompt language (`eng` default, `kor` optional)
         high_level_strategy: Optional high-level strategy to guide action selection
         context_manager: Optional ContextManager instance (uses singleton if None)
         strategy_planner: Optional StrategyPlanner for HITL strategy refinement
@@ -1710,6 +1723,7 @@ def run_one_turn(
             planner_provider=planner_provider,
             normalizing_range=normalizing_range,
             delay_before_action=delay_before_action,
+            prompt_language=prompt_language,
             high_level_strategy=high_level_strategy,
             context_manager=ctx,
             strategy_planner=strategy_planner,
@@ -1972,6 +1986,7 @@ def run_one_turn(
             ctx=ctx,
             max_steps=registry_entry.get("max_steps", 10),
             completion_condition=registry_entry.get("completion_condition", ""),
+            prompt_language=prompt_language,
             planner_img_config=effective_img_config,
             command_queue=command_queue,
             agent_gate=agent_gate,
@@ -2051,6 +2066,7 @@ def run_one_turn(
                             ctx=ctx,
                             max_steps=registry_entry.get("max_steps", 10),
                             completion_condition=registry_entry.get("completion_condition", ""),
+                            prompt_language=prompt_language,
                             planner_img_config=effective_img_config,
                             command_queue=command_queue,
                             agent_gate=agent_gate,
@@ -2080,6 +2096,7 @@ def run_one_turn(
                         high_level_strategy=strategy_string,
                         recent_actions_string=recent_actions_str,
                         hitl_directive=primitive_hint if primitive_hint else None,
+                        prompt_language=prompt_language,
                         img_config=planner_img_config,
                     )
                     if action is not None and not (isinstance(action, list) and len(action) == 0):
@@ -2162,6 +2179,7 @@ def run_one_turn(
                     ctx=ctx,
                     max_steps=entry.get("max_steps", 10),
                     completion_condition=entry.get("completion_condition", ""),
+                    prompt_language=prompt_language,
                     planner_img_config=planner_img_config,
                     command_queue=command_queue,
                     agent_gate=agent_gate,
@@ -2208,6 +2226,7 @@ def run_one_turn(
         high_level_strategy=strategy_string,
         recent_actions_string=recent_actions_str,
         hitl_directive=primitive_hint if primitive_hint else None,
+        prompt_language=prompt_language,
         img_config=planner_img_config,
     )
 
@@ -2388,6 +2407,7 @@ def run_multi_turn(
     normalizing_range: int = 1000,
     delay_between_turns: float = 1.0,
     delay_before_action: float = 0.5,
+    prompt_language: str = "eng",
     high_level_strategy: str | None = None,
     context_manager: ContextManager | None = None,
     strategy_planner: StrategyPlanner | None = None,
@@ -2414,6 +2434,7 @@ def run_multi_turn(
         normalizing_range: Coordinate normalization range
         delay_between_turns: Seconds to wait between turns
         delay_before_action: Seconds to wait before each action
+        prompt_language: Primitive prompt language (`eng` default, `kor` optional)
         high_level_strategy: Optional high-level strategy to guide action selection
         context_manager: Optional ContextManager instance
         strategy_planner: Optional StrategyPlanner for HITL strategy refinement
@@ -2465,6 +2486,7 @@ def run_multi_turn(
                 planner_provider=planner_provider,
                 normalizing_range=normalizing_range,
                 delay_before_action=delay_before_action,
+                prompt_language=prompt_language,
                 high_level_strategy=turn_strategy,
                 context_manager=ctx,
                 strategy_planner=strategy_planner,

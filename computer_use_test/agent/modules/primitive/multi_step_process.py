@@ -1,3 +1,5 @@
+# ruff: noqa: E501
+
 """
 Class-based multi-step primitive processes.
 
@@ -14,6 +16,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import re
 from dataclasses import dataclass
 
 from computer_use_test.agent.modules.memory.short_term_memory import ScrollAnchor, ShortTermMemory
@@ -28,8 +31,8 @@ from computer_use_test.utils.image_pipeline import PRESETS
 from computer_use_test.utils.llm_provider.base import BaseVLMProvider
 from computer_use_test.utils.llm_provider.parser import AgentAction, strip_markdown
 from computer_use_test.utils.prompts.primitive_prompt import (
-    JSON_FORMAT_INSTRUCTION,
-    MULTI_ACTION_SEQUENCE_JSON_FORMAT_INSTRUCTION,
+    get_json_instruction_template,
+    normalize_prompt_language,
 )
 from computer_use_test.utils.screen import norm_to_real
 
@@ -50,16 +53,71 @@ _RELIGION_LIST_HOVER_LEFT_INSET_RATIO = 0.02
 _RELIGION_LIST_HOVER_WIDTH_BIAS = 0.62
 
 
-def _normalized_coord_note(normalizing_range: int, *, fields: str) -> str:
+def _contains_hangul(text: str) -> bool:
+    return re.search(r"[가-힣]", text) is not None
+
+
+def _generic_english_multistep_note(memory: ShortTermMemory) -> str:
+    stage = memory.current_stage or "step"
+    lines = [f"Current multi-step stage: {stage}"]
+    if memory.branch:
+        lines.append(f"Current branch: {memory.branch}")
+    if memory.completed_substeps:
+        lines.append(f"Completed substeps: {', '.join(memory.completed_substeps[-5:])}")
+    lines.append("Follow only the safest action that advances or restores the current stage.")
+    return "\n".join(lines)
+
+
+def _generic_english_extra_note(memory: ShortTermMemory) -> str:
+    stage = memory.fallback_return_stage or memory.current_stage or "step"
+    return (
+        f"Current stage guidance ({stage}): take exactly one safe action that restores the screen "
+        "or advances the task. Do not interact with unrelated UI."
+    )
+
+
+def _normalized_coord_note(normalizing_range: int, *, fields: str, prompt_language: str = "eng") -> str:
     """Return a shared normalization contract for structured JSON fields."""
+    if normalize_prompt_language(prompt_language) == "eng":
+        return (
+            f"- {fields} must use normalized coordinates in the 0-{normalizing_range} range of the screenshot seen by the VLM.\n"
+            "- Do not return pixel coordinates or real monitor coordinates."
+        )
     return (
         f"- {fields}는 현재 VLM이 보는 스크린샷 기준 0-{normalizing_range} normalized coordinates 여야 한다.\n"
         "- 픽셀 좌표나 실제 모니터 좌표를 반환하지 마."
     )
 
 
-def _build_observation_json_instruction(normalizing_range: int) -> str:
+def _build_observation_json_instruction(normalizing_range: int, *, prompt_language: str = "eng") -> str:
     """Structured JSON contract for observation-only passes."""
+    if normalize_prompt_language(prompt_language) == "eng":
+        return f"""Return exactly one JSON object in the format below.
+{{
+  "visible_options": [
+    {{
+      "id": "stable_id",
+      "label": "actual visible option name",
+      "disabled": false,
+      "selected": false,
+      "note": "effect / turns / extra details"
+    }}
+  ],
+  "end_of_list": false,
+  "scroll_anchor": {{
+    "x": 0, "y": 0,
+    "left": 0, "top": 0, "right": {normalizing_range}, "bottom": {normalizing_range}
+  }},
+  "reasoning": "observation summary"
+}}
+- Include only options that are actually visible on the current screen.
+- Never make the final choice.
+- scroll_anchor is the center hover point of the actual popup/list that must be scrolled.
+- If the correct popup/list is unclear, scroll_anchor may be null.
+- Use end_of_list=false when there are still unseen items below.
+- Use end_of_list=true only when there are no new items below.
+{_normalized_coord_note(normalizing_range, fields="scroll_anchor.x/y and scroll_anchor.left/top/right/bottom", prompt_language=prompt_language)}
+"""
     return f"""응답은 아래 JSON 하나만 출력해.
 {{
   "visible_options": [
@@ -84,7 +142,7 @@ def _build_observation_json_instruction(normalizing_range: int) -> str:
 - 스크롤할 팝업/리스트가 명확하지 않으면 scroll_anchor는 null 로 반환해도 된다.
 - 목록 아래에 아직 새 항목이 남아 있으면 end_of_list=false.
 - 더 아래에 새 항목이 없으면 end_of_list=true.
-{_normalized_coord_note(normalizing_range, fields="scroll_anchor.x/y 와 scroll_anchor.left/top/right/bottom")}
+{_normalized_coord_note(normalizing_range, fields="scroll_anchor.x/y 와 scroll_anchor.left/top/right/bottom", prompt_language=prompt_language)}
 """
 
 
@@ -189,11 +247,33 @@ class ScrollableChoiceObserver(BaseObserver):
     def __init__(self, target_description: str):
         self.target_description = target_description
 
-    def build_prompt(self, primitive_name: str, memory: ShortTermMemory, *, normalizing_range: int) -> str:
+    def build_prompt(
+        self,
+        primitive_name: str,
+        memory: ShortTermMemory,
+        *,
+        normalizing_range: int,
+        prompt_language: str = "eng",
+    ) -> str:
         memory_summary = memory.to_observer_prompt_string()
+        if normalize_prompt_language(prompt_language) == "eng":
+            return (
+                "You are an observation-only sub-agent for a Civilization VI agent. "
+                "Do not choose, judge, or click anything. Only collect visible options.\n\n"
+                f"{_build_observation_json_instruction(normalizing_range, prompt_language=prompt_language)}\n\n"
+                f"Target UI: {self.target_description}\n"
+                f"Current primitive: {primitive_name}\n"
+                f"Current task-local observation context:\n{memory_summary}\n\n"
+                "Rules:\n"
+                "- Put only currently visible options into visible_options.\n"
+                "- Mark inactive or dark options with disabled=true.\n"
+                "- Mark already selected or checked options with selected=true.\n"
+                "- Return the center of the actual scrollable panel as scroll_anchor.\n"
+                "- If hidden items may still exist below, set end_of_list=false.\n"
+            )
         return (
             "너는 문명6 에이전트의 관찰 전용 서브에이전트야. 선택/판단/클릭을 하지 말고 보이는 선택지만 수집해.\n\n"
-            f"{_build_observation_json_instruction(normalizing_range)}\n\n"
+            f"{_build_observation_json_instruction(normalizing_range, prompt_language=prompt_language)}\n\n"
             f"대상 UI: {self.target_description}\n"
             f"현재 primitive: {primitive_name}\n"
             f"현재 task-local 관찰 컨텍스트:\n{memory_summary}\n\n"
@@ -209,8 +289,25 @@ class ScrollableChoiceObserver(BaseObserver):
 class CityProductionObserver(ScrollableChoiceObserver):
     """Observer specialized for the tall city-production list popup."""
 
-    def build_prompt(self, primitive_name: str, memory: ShortTermMemory, *, normalizing_range: int) -> str:
-        base_prompt = super().build_prompt(primitive_name, memory, normalizing_range=normalizing_range)
+    def build_prompt(
+        self,
+        primitive_name: str,
+        memory: ShortTermMemory,
+        *,
+        normalizing_range: int,
+        prompt_language: str = "eng",
+    ) -> str:
+        base_prompt = super().build_prompt(
+            primitive_name, memory, normalizing_range=normalizing_range, prompt_language=prompt_language
+        )
+        if normalize_prompt_language(prompt_language) == "eng":
+            return (
+                f"{base_prompt}\n"
+                "- The production list is the tall vertical production-choice panel on the right side of the screen. "
+                "Judge only the actual list area that shows building/unit/district names and turn counts.\n"
+                "- scroll_anchor must be inside the center of that production list.\n"
+                "- Do not use map hexes, the empty left area, outside-right HUD, or the lower-right production notification as scroll_anchor.\n"
+            )
         return (
             f"{base_prompt}\n"
             "- 생산 목록은 화면 오른쪽에 세로로 길게 뜨는 생산 품목 패널이다. "
@@ -223,8 +320,29 @@ class CityProductionObserver(ScrollableChoiceObserver):
 class GovernorObserver(ScrollableChoiceObserver):
     """Observer specialized for the governor card list panel."""
 
-    def build_prompt(self, primitive_name: str, memory: ShortTermMemory, *, normalizing_range: int) -> str:
-        base_prompt = super().build_prompt(primitive_name, memory, normalizing_range=normalizing_range)
+    def build_prompt(
+        self,
+        primitive_name: str,
+        memory: ShortTermMemory,
+        *,
+        normalizing_range: int,
+        prompt_language: str = "eng",
+    ) -> str:
+        base_prompt = super().build_prompt(
+            primitive_name, memory, normalizing_range=normalizing_range, prompt_language=prompt_language
+        )
+        if normalize_prompt_language(prompt_language) == "eng":
+            return (
+                f"{base_prompt}\n"
+                "- Observe each governor card in the governor-card list panel.\n"
+                "- Use the governor-name slug as the id (for example: Pingala, Liang, Hermes_secret_society).\n"
+                "- Record status in note: 'appoint_available', 'reassign', 'promote_available', 'secret_society', and so on.\n"
+                "- If an appoint button exists, mark 'appoint_available'. If a promote button exists, mark 'promote_available'.\n"
+                "- Governors already assigned to a city should be marked 'reassign'.\n"
+                "- If no active button exists, set disabled=true.\n"
+                "- scroll_anchor must be the center of the governor-card list.\n"
+                "- Secret-society governors may be hidden below the fold.\n"
+            )
         return (
             f"{base_prompt}\n"
             "- 총독 카드 목록 패널에서 각 총독 카드를 관찰해.\n"
@@ -241,8 +359,30 @@ class GovernorObserver(ScrollableChoiceObserver):
 class GovernorCityObserver(ScrollableChoiceObserver):
     """Observer specialized for the governor appoint-city popup."""
 
-    def build_prompt(self, primitive_name: str, memory: ShortTermMemory, *, normalizing_range: int) -> str:
-        base_prompt = super().build_prompt(primitive_name, memory, normalizing_range=normalizing_range)
+    def build_prompt(
+        self,
+        primitive_name: str,
+        memory: ShortTermMemory,
+        *,
+        normalizing_range: int,
+        prompt_language: str = "eng",
+    ) -> str:
+        base_prompt = super().build_prompt(
+            primitive_name, memory, normalizing_range=normalizing_range, prompt_language=prompt_language
+        )
+        if normalize_prompt_language(prompt_language) == "eng":
+            return (
+                f"{base_prompt}\n"
+                "- Observe only the vertically listed city-choice blocks in the left popup.\n"
+                "- Record each city block as one visible_options item, and use the city-name slug as the id.\n"
+                "- Critical rule: if the circle to the left of the city name contains a governor face, that city already has a governor assigned.\n"
+                "- Such city blocks must be recorded with disabled=true and note='governor_assigned'.\n"
+                "- If the circle to the left of the city name is empty, record disabled=false and include 'unassigned' in note.\n"
+                "- If other visible stats are readable in the same city block, append a short summary in note: science, culture, production, gold, food, amenities, housing, campus, commercial hub, and so on.\n"
+                "- The governor card itself, map tiles, and lower-right HUD are not observation targets.\n"
+                "- If the city list is scrollable, scroll_anchor must be the center of that left-side city list.\n"
+                "- If scrolling is impossible or ambiguous, scroll_anchor may be null.\n"
+            )
         return (
             f"{base_prompt}\n"
             "- 왼쪽 팝업창에 세로로 나열된 여러 도시 선택지 블럭만 관찰해.\n"
@@ -262,8 +402,28 @@ class GovernorCityObserver(ScrollableChoiceObserver):
 class ReligionObserver(ScrollableChoiceObserver):
     """Observer specialized for the left-side pantheon belief list."""
 
-    def build_prompt(self, primitive_name: str, memory: ShortTermMemory, *, normalizing_range: int) -> str:
-        base_prompt = super().build_prompt(primitive_name, memory, normalizing_range=normalizing_range)
+    def build_prompt(
+        self,
+        primitive_name: str,
+        memory: ShortTermMemory,
+        *,
+        normalizing_range: int,
+        prompt_language: str = "eng",
+    ) -> str:
+        base_prompt = super().build_prompt(
+            primitive_name, memory, normalizing_range=normalizing_range, prompt_language=prompt_language
+        )
+        if normalize_prompt_language(prompt_language) == "eng":
+            return (
+                f"{base_prompt}\n"
+                "- Observe only the vertically listed pantheon boxes inside the left-side pantheon popup.\n"
+                "- Record each pantheon as one visible_options item, and use the actually visible pantheon name as label.\n"
+                "- Write a short pantheon effect summary in note.\n"
+                "- If an item is already selected or can no longer be chosen, mark selected=true or disabled=true.\n"
+                "- scroll_anchor must be the center of the left-side pantheon popup.\n"
+                "- Do not use the lower-right angel-icon button, the top title bar, the map, or the empty area outside the left popup as scroll_anchor.\n"
+                "- If scrolling is ambiguous, scroll_anchor may be null.\n"
+            )
         return (
             f"{base_prompt}\n"
             "- 왼쪽 종교관 팝업 안에 세로로 나열된 종교관 박스만 관찰해.\n"
@@ -279,8 +439,27 @@ class ReligionObserver(ScrollableChoiceObserver):
 class VotingObserver(ScrollableChoiceObserver):
     """Observer specialized for world-congress agenda blocks."""
 
-    def build_prompt(self, primitive_name: str, memory: ShortTermMemory, *, normalizing_range: int) -> str:
-        base_prompt = super().build_prompt(primitive_name, memory, normalizing_range=normalizing_range)
+    def build_prompt(
+        self,
+        primitive_name: str,
+        memory: ShortTermMemory,
+        *,
+        normalizing_range: int,
+        prompt_language: str = "eng",
+    ) -> str:
+        base_prompt = super().build_prompt(
+            primitive_name, memory, normalizing_range=normalizing_range, prompt_language=prompt_language
+        )
+        if normalize_prompt_language(prompt_language) == "eng":
+            return (
+                f"{base_prompt}\n"
+                "- Record one World Congress agenda block as one visible_options item.\n"
+                "- Use the agenda-title slug as id, and the actually visible agenda title as label.\n"
+                "- In note, record the key visible state: A/B choices, support/oppose buttons, target radio buttons, and whether the agenda still needs a vote.\n"
+                "- If that agenda is already fully voted and no more clicks are needed, set selected=true.\n"
+                "- If voting is not finished yet, keep selected=false.\n"
+                "- scroll_anchor must be the center of the World Congress agenda list.\n"
+            )
         return (
             f"{base_prompt}\n"
             "- 세계의회 합의안 block 하나를 visible_options 한 항목으로 기록해.\n"
@@ -319,6 +498,7 @@ class BaseMultiStepProcess:
         memory: ShortTermMemory,
         *,
         normalizing_range: int,
+        prompt_language: str = "eng",
         img_config=None,
     ) -> ObservationBundle | None:
         return None
@@ -327,14 +507,19 @@ class BaseMultiStepProcess:
         """Update memory from observation and optionally emit a deterministic action."""
         return None
 
-    def build_stage_note(self, memory: ShortTermMemory) -> str:
+    def build_stage_note(self, memory: ShortTermMemory, *, prompt_language: str = "eng") -> str:
         """Extra per-stage guidance appended to the base primitive prompt."""
         stage = memory.current_stage or "step"
-        note = [f"현재 멀티스텝 stage: {stage}"]
+        language = normalize_prompt_language(prompt_language)
+        if language == "eng":
+            note = [f"Current multi-step stage: {stage}"]
+        else:
+            note = [f"현재 멀티스텝 stage: {stage}"]
         if memory.branch:
-            note.append(f"현재 branch: {memory.branch}")
+            note.append(f"Current branch: {memory.branch}" if language == "eng" else f"현재 branch: {memory.branch}")
         if memory.completed_substeps:
-            note.append(f"완료된 하위 단계: {', '.join(memory.completed_substeps[-5:])}")
+            completed = ", ".join(memory.completed_substeps[-5:])
+            note.append(f"Completed substeps: {completed}" if language == "eng" else f"완료된 하위 단계: {completed}")
         return "\n".join(note)
 
     def build_instruction(
@@ -345,6 +530,7 @@ class BaseMultiStepProcess:
         high_level_strategy: str,
         recent_actions: str,
         hitl_directive: str | None,
+        prompt_language: str = "eng",
     ) -> str:
         prompt = get_primitive_prompt(
             self.primitive_name,
@@ -353,11 +539,25 @@ class BaseMultiStepProcess:
             recent_actions=recent_actions,
             hitl_directive=hitl_directive,
             short_term_memory=memory.to_prompt_string(),
+            language=prompt_language,
         )
-        return f"{prompt}\n\n=== 현재 프로세스 상태 ===\n{self.build_stage_note(memory)}"
+        section_title = (
+            "=== Current Process State ==="
+            if normalize_prompt_language(prompt_language) == "eng"
+            else "=== 현재 프로세스 상태 ==="
+        )
+        stage_note = self.build_stage_note(memory, prompt_language=prompt_language)
+        if normalize_prompt_language(prompt_language) == "eng" and _contains_hangul(stage_note):
+            stage_note = _generic_english_multistep_note(memory)
+        return f"{prompt}\n\n{section_title}\n{stage_note}"
 
-    def build_generic_fallback_note(self, memory: ShortTermMemory) -> str:
+    def build_generic_fallback_note(self, memory: ShortTermMemory, *, prompt_language: str = "eng") -> str:
         stage = memory.fallback_return_stage or memory.current_stage or "step"
+        if normalize_prompt_language(prompt_language) == "eng":
+            return (
+                f"The current multi-step stage '{stage}' failed. "
+                "Take exactly one safest action to recover the current screen or return to the next normal step."
+            )
         return (
             f"현재 멀티스텝 stage '{stage}' 에서 실패했다. "
             "현재 화면을 복구하거나 다음 정상 단계로 돌아가기 위한 가장 안전한 단일 action 1개만 수행해."
@@ -373,6 +573,7 @@ class BaseMultiStepProcess:
         high_level_strategy: str,
         recent_actions: str,
         hitl_directive: str | None,
+        prompt_language: str = "eng",
         img_config=None,
         extra_note: str = "",
     ) -> AgentAction | None:
@@ -383,10 +584,18 @@ class BaseMultiStepProcess:
             recent_actions=recent_actions,
             hitl_directive=hitl_directive,
             short_term_memory=memory.to_prompt_string(),
+            language=prompt_language,
         )
-        combined_note = extra_note or self.build_generic_fallback_note(memory)
+        combined_note = extra_note or self.build_generic_fallback_note(memory, prompt_language=prompt_language)
+        if normalize_prompt_language(prompt_language) == "eng" and _contains_hangul(combined_note):
+            combined_note = _generic_english_extra_note(memory)
         if combined_note:
-            prompt = f"{prompt}\n\n[현재 추가 지시]\n{combined_note}"
+            extra_title = (
+                "[Current Extra Instruction]"
+                if normalize_prompt_language(prompt_language) == "eng"
+                else "[현재 추가 지시]"
+            )
+            prompt = f"{prompt}\n\n{extra_title}\n{combined_note}"
         return provider.analyze(
             pil_image=pil_image,
             instruction=prompt,
@@ -404,6 +613,7 @@ class BaseMultiStepProcess:
         high_level_strategy: str,
         recent_actions: str,
         hitl_directive: str | None,
+        prompt_language: str = "eng",
         img_config=None,
     ) -> AgentAction | list[AgentAction] | StageTransition | None:
         if memory.current_stage == "generic_fallback":
@@ -415,6 +625,7 @@ class BaseMultiStepProcess:
                 high_level_strategy=high_level_strategy,
                 recent_actions=recent_actions,
                 hitl_directive=hitl_directive,
+                prompt_language=prompt_language,
                 img_config=img_config,
             )
 
@@ -424,6 +635,7 @@ class BaseMultiStepProcess:
             high_level_strategy=high_level_strategy,
             recent_actions=recent_actions,
             hitl_directive=hitl_directive,
+            prompt_language=prompt_language,
         )
         return provider.analyze(
             pil_image=pil_image,
@@ -438,6 +650,7 @@ class BaseMultiStepProcess:
         memory: ShortTermMemory,
         *,
         high_level_strategy: str,
+        prompt_language: str = "eng",
     ) -> bool:
         """Optional text-only decision stage before action planning."""
         return True
@@ -560,6 +773,7 @@ class BaseMultiStepProcess:
         high_level_strategy: str,
         recent_actions: str,
         hitl_directive: str | None,
+        prompt_language: str = "eng",
         img_config=None,
     ) -> NoProgressResolution:
         """Hook called when the UI did not change after an action."""
@@ -642,12 +856,14 @@ class ObservationAssistedProcess(BaseMultiStepProcess):
         memory: ShortTermMemory,
         *,
         normalizing_range: int,
+        prompt_language: str = "eng",
         img_config=None,
     ) -> ObservationBundle | None:
         prompt = self.observer.build_prompt(
             self.primitive_name,
             memory,
             normalizing_range=normalizing_range,
+            prompt_language=prompt_language,
         )
         effective_img_config = (
             PRESETS.get("observation_fast")
@@ -686,7 +902,7 @@ class ObservationAssistedProcess(BaseMultiStepProcess):
             task_status="in_progress",
         )
 
-    def build_stage_note(self, memory: ShortTermMemory) -> str:
+    def build_stage_note(self, memory: ShortTermMemory, *, prompt_language: str = "eng") -> str:
         if not memory.choice_catalog.end_reached:
             return (
                 "현재 멀티스텝 stage: observation_scan\n"
@@ -709,6 +925,7 @@ class ObservationAssistedProcess(BaseMultiStepProcess):
         memory: ShortTermMemory,
         *,
         high_level_strategy: str,
+        prompt_language: str = "eng",
     ) -> bool:
         if memory.get_best_choice() is not None:
             return True
@@ -725,16 +942,29 @@ class ObservationAssistedProcess(BaseMultiStepProcess):
             strategy_for_decision = parts[1] if len(parts) == 2 else ""
 
         max_tokens = memory.choice_catalog_decision_max_tokens()
-        prompt = (
-            "너는 문명6 선택 결정 서브에이전트야. 아래 short-term memory에 누적된 전체 후보 중 "
-            "상위 전략에 가장 적합한 하나를 고르고 JSON만 출력해.\n"
-            'JSON: {"best_option_id":"stable_id","reason":"짧은 이유"}\n'
-            "- best_option_id는 후보 catalog에 적힌 id를 그대로 복사해.\n"
-            "- 체크됨, 이미 지음, 비활성 후보는 고르지 마.\n\n"
-            f"Primitive: {self.primitive_name}\n"
-            f"상위 전략:\n{strategy_for_decision}\n\n"
-            f"후보 catalog:\n{memory.choice_catalog_decision_prompt()}\n"
-        )
+        if normalize_prompt_language(prompt_language) == "eng":
+            prompt = (
+                "You are a Civilization VI choice-decision sub-agent. "
+                "From the full candidate list accumulated in short-term memory below, "
+                "choose the single option that best matches the high-level strategy and return JSON only.\n"
+                'JSON: {"best_option_id":"stable_id","reason":"short reason"}\n'
+                "- Copy best_option_id exactly from the candidate catalog.\n"
+                "- Do not choose checked, already-built, or disabled candidates.\n\n"
+                f"Primitive: {self.primitive_name}\n"
+                f"High-level strategy:\n{strategy_for_decision}\n\n"
+                f"Candidate catalog:\n{memory.choice_catalog_decision_prompt()}\n"
+            )
+        else:
+            prompt = (
+                "너는 문명6 선택 결정 서브에이전트야. 아래 short-term memory에 누적된 전체 후보 중 "
+                "상위 전략에 가장 적합한 하나를 고르고 JSON만 출력해.\n"
+                'JSON: {"best_option_id":"stable_id","reason":"짧은 이유"}\n'
+                "- best_option_id는 후보 catalog에 적힌 id를 그대로 복사해.\n"
+                "- 체크됨, 이미 지음, 비활성 후보는 고르지 마.\n\n"
+                f"Primitive: {self.primitive_name}\n"
+                f"상위 전략:\n{strategy_for_decision}\n\n"
+                f"후보 catalog:\n{memory.choice_catalog_decision_prompt()}\n"
+            )
         try:
             response = provider.call_vlm(
                 prompt=prompt,
@@ -776,7 +1006,7 @@ class PolicyProcess(ScriptedMultiStepProcess):
         if not memory.current_stage:
             memory.begin_stage("policy_entry")
 
-    def build_stage_note(self, memory: ShortTermMemory) -> str:
+    def build_stage_note(self, memory: ShortTermMemory, *, prompt_language: str = "eng") -> str:
         stage = memory.current_stage
         if stage == "policy_entry":
             return (
@@ -846,7 +1076,7 @@ class PolicyProcess(ScriptedMultiStepProcess):
             "- 탭 queue를 따라 탭 클릭 -> 현재 탭 카드 판단 -> 즉시 drag-and-drop -> 다음 탭을 반복해."
         )
 
-    def build_generic_fallback_note(self, memory: ShortTermMemory) -> str:
+    def build_generic_fallback_note(self, memory: ShortTermMemory, *, prompt_language: str = "eng") -> str:
         current_tab = memory.get_policy_current_tab_name() or "-"
         queue = (
             ", ".join(memory.policy_state.eligible_tabs_queue) if memory.policy_state.eligible_tabs_queue else "없음"
@@ -1169,6 +1399,7 @@ class PolicyProcess(ScriptedMultiStepProcess):
         high_level_strategy: str,
         recent_actions: str,
         hitl_directive: str | None,
+        prompt_language: str = "eng",
         img_config=None,
         extra_note: str = "",
     ) -> AgentAction | None:
@@ -1178,9 +1409,17 @@ class PolicyProcess(ScriptedMultiStepProcess):
             high_level_strategy=high_level_strategy,
             recent_actions=recent_actions,
             hitl_directive=hitl_directive,
+            prompt_language=prompt_language,
         )
         if extra_note:
-            prompt = f"{prompt}\n\n[현재 추가 지시]\n{extra_note}"
+            if normalize_prompt_language(prompt_language) == "eng" and _contains_hangul(extra_note):
+                extra_note = _generic_english_extra_note(memory)
+            extra_title = (
+                "[Current Extra Instruction]"
+                if normalize_prompt_language(prompt_language) == "eng"
+                else "[현재 추가 지시]"
+            )
+            prompt = f"{prompt}\n\n{extra_title}\n{extra_note}"
         return provider.analyze(
             pil_image=pil_image,
             instruction=prompt,
@@ -1198,6 +1437,7 @@ class PolicyProcess(ScriptedMultiStepProcess):
         high_level_strategy: str,
         recent_actions: str,
         hitl_directive: str | None,
+        prompt_language: str = "eng",
         img_config=None,
         extra_note: str = "",
     ) -> list[AgentAction] | None:
@@ -1207,14 +1447,26 @@ class PolicyProcess(ScriptedMultiStepProcess):
             high_level_strategy=high_level_strategy,
             recent_actions=recent_actions,
             hitl_directive=hitl_directive,
+            prompt_language=prompt_language,
         )
         prompt = prompt.replace(
-            JSON_FORMAT_INSTRUCTION.format(normalizing_range=normalizing_range),
-            MULTI_ACTION_SEQUENCE_JSON_FORMAT_INSTRUCTION.format(normalizing_range=normalizing_range),
+            get_json_instruction_template(prompt_language, format_kind="single").format(
+                normalizing_range=normalizing_range
+            ),
+            get_json_instruction_template(prompt_language, format_kind="multi_action").format(
+                normalizing_range=normalizing_range
+            ),
             1,
         )
         if extra_note:
-            prompt = f"{prompt}\n\n[현재 추가 지시]\n{extra_note}"
+            if normalize_prompt_language(prompt_language) == "eng" and _contains_hangul(extra_note):
+                extra_note = _generic_english_extra_note(memory)
+            extra_title = (
+                "[Current Extra Instruction]"
+                if normalize_prompt_language(prompt_language) == "eng"
+                else "[현재 추가 지시]"
+            )
+            prompt = f"{prompt}\n\n{extra_title}\n{extra_note}"
         return provider.analyze_multi(
             pil_image=pil_image,
             instruction=prompt,
@@ -1284,6 +1536,7 @@ class PolicyProcess(ScriptedMultiStepProcess):
         high_level_strategy: str,
         recent_actions: str,
         hitl_directive: str | None,
+        prompt_language: str = "eng",
         img_config=None,
     ) -> AgentAction | None:
         memory.begin_stage("finalize_policy")
@@ -1308,6 +1561,7 @@ class PolicyProcess(ScriptedMultiStepProcess):
                 high_level_strategy=high_level_strategy,
                 recent_actions=recent_actions,
                 hitl_directive=hitl_directive,
+                prompt_language=prompt_language,
                 img_config=img_config,
                 extra_note=(
                     "정책 종료 버튼 상태를 읽지 못했다. policy 화면을 복구하고 종료 판단을 다시 할 수 있게 "
@@ -1353,6 +1607,7 @@ class PolicyProcess(ScriptedMultiStepProcess):
             high_level_strategy=high_level_strategy,
             recent_actions=recent_actions,
             hitl_directive=hitl_directive,
+            prompt_language=prompt_language,
             img_config=img_config,
             extra_note=(
                 "정책 종료 상태가 일관되지 않다. policy 화면을 복구하고 종료 판단을 다시 할 수 있게 "
@@ -2007,6 +2262,7 @@ class PolicyProcess(ScriptedMultiStepProcess):
         high_level_strategy: str,
         recent_actions: str,
         hitl_directive: str | None,
+        prompt_language: str = "eng",
         img_config=None,
     ) -> list[AgentAction] | StageTransition | None:
         current_tab = memory.get_policy_current_tab_name()
@@ -2034,6 +2290,7 @@ class PolicyProcess(ScriptedMultiStepProcess):
             high_level_strategy=high_level_strategy,
             recent_actions=recent_actions,
             hitl_directive=hitl_directive,
+            prompt_language=prompt_language,
             img_config=img_config,
             extra_note=(
                 f"현재 탭 '{current_tab}'의 보이는 카드만 기준으로 유지 또는 교체를 한 번에 판단해.\n"
@@ -2101,6 +2358,7 @@ class PolicyProcess(ScriptedMultiStepProcess):
         high_level_strategy: str,
         recent_actions: str,
         hitl_directive: str | None,
+        prompt_language: str = "eng",
         img_config=None,
     ) -> AgentAction | list[AgentAction] | StageTransition | None:
         if memory.current_stage == "generic_fallback":
@@ -2119,6 +2377,7 @@ class PolicyProcess(ScriptedMultiStepProcess):
                 high_level_strategy=high_level_strategy,
                 recent_actions=recent_actions,
                 hitl_directive=hitl_directive,
+                prompt_language=prompt_language,
                 img_config=img_config,
                 extra_note=self.build_generic_fallback_note(memory),
             )
@@ -2141,6 +2400,7 @@ class PolicyProcess(ScriptedMultiStepProcess):
                     high_level_strategy=high_level_strategy,
                     recent_actions=recent_actions,
                     hitl_directive=hitl_directive,
+                    prompt_language=prompt_language,
                     img_config=img_config,
                     extra_note=(
                         "정책 카드 화면으로 진입하기 위한 entry branch만 처리해. "
@@ -2172,6 +2432,7 @@ class PolicyProcess(ScriptedMultiStepProcess):
                         high_level_strategy=high_level_strategy,
                         recent_actions=recent_actions,
                         hitl_directive=hitl_directive,
+                        prompt_language=prompt_language,
                         img_config=img_config,
                         extra_note=(
                             "정책 카드 화면 bootstrap에 실패했다. "
@@ -2190,6 +2451,7 @@ class PolicyProcess(ScriptedMultiStepProcess):
                     high_level_strategy=high_level_strategy,
                     recent_actions=recent_actions,
                     hitl_directive=hitl_directive,
+                    prompt_language=prompt_language,
                     img_config=img_config,
                     extra_note=(
                         "정책 카드 화면 bootstrap이 두 번 실패했다. "
@@ -2207,6 +2469,7 @@ class PolicyProcess(ScriptedMultiStepProcess):
                     high_level_strategy=high_level_strategy,
                     recent_actions=recent_actions,
                     hitl_directive=hitl_directive,
+                    prompt_language=prompt_language,
                     img_config=img_config,
                     extra_note=(
                         "방금 '모든 정책 배정' 클릭은 이미 끝났다. "
@@ -2227,6 +2490,7 @@ class PolicyProcess(ScriptedMultiStepProcess):
                 high_level_strategy=high_level_strategy,
                 recent_actions=recent_actions,
                 hitl_directive=hitl_directive,
+                prompt_language=prompt_language,
                 img_config=img_config,
             )
 
@@ -2489,6 +2753,7 @@ class PolicyProcess(ScriptedMultiStepProcess):
         high_level_strategy: str,
         recent_actions: str,
         hitl_directive: str | None,
+        prompt_language: str = "eng",
         img_config=None,
     ) -> NoProgressResolution:
         if memory.current_stage in {"calibrate_tabs", "click_cached_tab", "click_next_tab"}:
@@ -2664,7 +2929,7 @@ class CityProductionProcess(ObservationAssistedProcess):
             return True
         return super().should_observe(memory)
 
-    def build_stage_note(self, memory: ShortTermMemory) -> str:
+    def build_stage_note(self, memory: ShortTermMemory, *, prompt_language: str = "eng") -> str:
         if self._ENTRY_SUBSTEP not in memory.completed_substeps:
             return (
                 "현재 stage: production_entry\n"
@@ -3433,6 +3698,7 @@ class CityProductionProcess(ObservationAssistedProcess):
         memory: ShortTermMemory,
         *,
         normalizing_range: int,
+        prompt_language: str = "eng",
         img_config=None,
     ) -> ObservationBundle | None:
         observation = super().observe(
@@ -3440,6 +3706,7 @@ class CityProductionProcess(ObservationAssistedProcess):
             pil_image,
             memory,
             normalizing_range=normalizing_range,
+            prompt_language=prompt_language,
             img_config=img_config,
         )
         if observation is None or memory.branch != self._LIST_BRANCH:
@@ -3524,6 +3791,7 @@ class CityProductionProcess(ObservationAssistedProcess):
         high_level_strategy: str,
         recent_actions: str,
         hitl_directive: str | None,
+        prompt_language: str = "eng",
         img_config=None,
     ) -> AgentAction | list[AgentAction] | StageTransition | None:
         if self._ENTRY_SUBSTEP not in memory.completed_substeps:
@@ -3572,6 +3840,7 @@ class CityProductionProcess(ObservationAssistedProcess):
                 high_level_strategy=high_level_strategy,
                 recent_actions=recent_actions,
                 hitl_directive=hitl_directive,
+                prompt_language=prompt_language,
                 img_config=img_config,
                 extra_note=(
                     "지금은 production entry 단계다. 생산 선택 팝업 또는 배치 화면으로 진입하기 위한 "
@@ -3657,6 +3926,7 @@ class CityProductionProcess(ObservationAssistedProcess):
                     high_level_strategy=high_level_strategy,
                     recent_actions=recent_actions,
                     hitl_directive=hitl_directive,
+                    prompt_language=prompt_language,
                     img_config=img_config,
                     extra_note=(
                         "방금 도시 생산의 마지막 확인 팝업 단계다. "
@@ -3819,6 +4089,7 @@ class CityProductionProcess(ObservationAssistedProcess):
         high_level_strategy: str,
         recent_actions: str,
         hitl_directive: str | None,
+        prompt_language: str = "eng",
         img_config=None,
     ) -> NoProgressResolution:
         if memory.current_stage == "select_from_memory" and last_action.action in {"click", "double_click"}:
@@ -3960,7 +4231,7 @@ class VotingProcess(ObservationAssistedProcess):
             return False
         return memory.current_stage in {self._SCAN_STAGE, self._REFRESH_STAGE}
 
-    def build_stage_note(self, memory: ShortTermMemory) -> str:
+    def build_stage_note(self, memory: ShortTermMemory, *, prompt_language: str = "eng") -> str:
         stage = memory.current_stage or self._ENTRY_STAGE
         agenda = memory.voting_state.current_agenda_label or "현재 agenda"
         if self._ENTRY_SUBSTEP not in memory.completed_substeps or stage == self._ENTRY_STAGE:
@@ -4005,7 +4276,7 @@ class VotingProcess(ObservationAssistedProcess):
             return "현재 stage: vote_complete\n- voting primitive의 explicit terminal state다."
         return super().build_stage_note(memory)
 
-    def build_generic_fallback_note(self, memory: ShortTermMemory) -> str:
+    def build_generic_fallback_note(self, memory: ShortTermMemory, *, prompt_language: str = "eng") -> str:
         stage = memory.fallback_return_stage or memory.current_stage or self._SCAN_STAGE
         if stage == self._ENTRY_STAGE:
             return (
@@ -4441,6 +4712,7 @@ class VotingProcess(ObservationAssistedProcess):
         high_level_strategy: str,
         recent_actions: str,
         hitl_directive: str | None,
+        prompt_language: str = "eng",
         img_config=None,
     ) -> AgentAction | list[AgentAction] | StageTransition | None:
         stage = memory.current_stage or self._SCAN_STAGE
@@ -4464,6 +4736,7 @@ class VotingProcess(ObservationAssistedProcess):
                         high_level_strategy=high_level_strategy,
                         recent_actions=recent_actions,
                         hitl_directive=hitl_directive,
+                        prompt_language=prompt_language,
                         img_config=img_config,
                         extra_note=(
                             "지금은 vote entry 단계다. '투표시작' 버튼만 클릭해. 다른 agenda나 제출 버튼은 누르지 마."
@@ -4482,6 +4755,7 @@ class VotingProcess(ObservationAssistedProcess):
                         high_level_strategy=high_level_strategy,
                         recent_actions=recent_actions,
                         hitl_directive=hitl_directive,
+                        prompt_language=prompt_language,
                         img_config=img_config,
                         extra_note=(
                             "지금은 vote entry 단계다. 우하단 동그란 지구본 세계의회 버튼만 클릭해. "
@@ -4501,6 +4775,7 @@ class VotingProcess(ObservationAssistedProcess):
                     high_level_strategy=high_level_strategy,
                     recent_actions=recent_actions,
                     hitl_directive=hitl_directive,
+                    prompt_language=prompt_language,
                     img_config=img_config,
                     extra_note=(
                         "지금은 vote entry 단계다. "
@@ -4630,6 +4905,7 @@ class VotingProcess(ObservationAssistedProcess):
             high_level_strategy=high_level_strategy,
             recent_actions=recent_actions,
             hitl_directive=hitl_directive,
+            prompt_language=prompt_language,
             img_config=img_config,
         )
 
@@ -4828,6 +5104,7 @@ class VotingProcess(ObservationAssistedProcess):
         high_level_strategy: str,
         recent_actions: str,
         hitl_directive: str | None,
+        prompt_language: str = "eng",
         img_config=None,
     ) -> NoProgressResolution:
         if self._has_pending_entry_recovery(memory):
@@ -5078,6 +5355,7 @@ class GovernorProcess(ObservationAssistedProcess):
         recent_actions: str,
         hitl_directive: str | None,
         extra_note: str,
+        prompt_language: str = "eng",
         img_config=None,
     ) -> list[AgentAction] | None:
         prompt = self.build_instruction(
@@ -5086,13 +5364,23 @@ class GovernorProcess(ObservationAssistedProcess):
             high_level_strategy=high_level_strategy,
             recent_actions=recent_actions,
             hitl_directive=hitl_directive,
+            prompt_language=prompt_language,
         )
         prompt = prompt.replace(
-            JSON_FORMAT_INSTRUCTION.format(normalizing_range=normalizing_range),
-            MULTI_ACTION_SEQUENCE_JSON_FORMAT_INSTRUCTION.format(normalizing_range=normalizing_range),
+            get_json_instruction_template(prompt_language, format_kind="single").format(
+                normalizing_range=normalizing_range
+            ),
+            get_json_instruction_template(prompt_language, format_kind="multi_action").format(
+                normalizing_range=normalizing_range
+            ),
             1,
         )
-        prompt = f"{prompt}\n\n[현재 추가 지시]\n{extra_note}"
+        if normalize_prompt_language(prompt_language) == "eng" and _contains_hangul(extra_note):
+            extra_note = _generic_english_extra_note(memory)
+        extra_title = (
+            "[Current Extra Instruction]" if normalize_prompt_language(prompt_language) == "eng" else "[현재 추가 지시]"
+        )
+        prompt = f"{prompt}\n\n{extra_title}\n{extra_note}"
         return provider.analyze_multi(
             pil_image=pil_image,
             instruction=prompt,
@@ -5245,6 +5533,7 @@ class GovernorProcess(ObservationAssistedProcess):
         memory: ShortTermMemory,
         *,
         high_level_strategy: str,
+        prompt_language: str = "eng",
     ) -> bool:
         if memory.get_best_choice() is not None:
             return True
@@ -5280,17 +5569,33 @@ class GovernorProcess(ObservationAssistedProcess):
             strategy_for_decision = parts[1] if len(parts) == 2 else ""
 
         max_tokens = memory.choice_catalog_decision_max_tokens()
-        prompt = (
-            "너는 문명6 총독 선택 결정 서브에이전트야. 아래 short-term memory에 누적된 전체 총독 후보 중 "
-            "상위 전략에 가장 적합한 하나를 고르고, 진급(promote)인지 임명(appoint)인지도 결정해.\n"
-            'JSON: {"best_option_id":"stable_id","action_type":"promote|appoint","reason":"짧은 이유"}\n'
-            "- best_option_id는 후보 catalog에 적힌 id를 그대로 복사해.\n"
-            "- note에 '진급_가능'이면 action_type='promote', '임명_가능'이면 action_type='appoint'.\n"
-            "- 비활성(disabled) 후보는 고르지 마.\n\n"
-            f"Primitive: {self.primitive_name}\n"
-            f"상위 전략:\n{strategy_for_decision}\n\n"
-            f"후보 catalog:\n{memory.choice_catalog_decision_prompt()}\n"
-        )
+        if normalize_prompt_language(prompt_language) == "eng":
+            prompt = (
+                "You are a Civilization VI governor-choice decision sub-agent. "
+                "From the full governor candidate list accumulated in short-term memory below, "
+                "choose the single option that best matches the high-level strategy, "
+                "and also decide whether the action is promote or appoint.\n"
+                'JSON: {"best_option_id":"stable_id","action_type":"promote|appoint","reason":"short reason"}\n'
+                "- Copy best_option_id exactly from the candidate catalog.\n"
+                "- If note contains 'promote_available', use action_type='promote'. "
+                "If note contains 'appoint_available', use action_type='appoint'.\n"
+                "- Do not choose disabled candidates.\n\n"
+                f"Primitive: {self.primitive_name}\n"
+                f"High-level strategy:\n{strategy_for_decision}\n\n"
+                f"Candidate catalog:\n{memory.choice_catalog_decision_prompt()}\n"
+            )
+        else:
+            prompt = (
+                "너는 문명6 총독 선택 결정 서브에이전트야. 아래 short-term memory에 누적된 전체 총독 후보 중 "
+                "상위 전략에 가장 적합한 하나를 고르고, 진급(promote)인지 임명(appoint)인지도 결정해.\n"
+                'JSON: {"best_option_id":"stable_id","action_type":"promote|appoint","reason":"짧은 이유"}\n'
+                "- best_option_id는 후보 catalog에 적힌 id를 그대로 복사해.\n"
+                "- note에 '진급_가능'이면 action_type='promote', '임명_가능'이면 action_type='appoint'.\n"
+                "- 비활성(disabled) 후보는 고르지 마.\n\n"
+                f"Primitive: {self.primitive_name}\n"
+                f"상위 전략:\n{strategy_for_decision}\n\n"
+                f"후보 catalog:\n{memory.choice_catalog_decision_prompt()}\n"
+            )
         try:
             response = provider.call_vlm(
                 prompt=prompt,
@@ -5447,6 +5752,7 @@ class GovernorProcess(ObservationAssistedProcess):
         memory: ShortTermMemory,
         *,
         normalizing_range: int,
+        prompt_language: str = "eng",
         img_config=None,
     ) -> ObservationBundle | None:
         if memory.current_stage == self._APPOINT_CITY_OBSERVE:
@@ -5454,6 +5760,7 @@ class GovernorProcess(ObservationAssistedProcess):
                 self.primitive_name,
                 memory,
                 normalizing_range=normalizing_range,
+                prompt_language=prompt_language,
             )
             effective_img_config = (
                 PRESETS.get("observation_fast") if img_config is None else PRESETS.get("observation_fast", img_config)
@@ -5465,6 +5772,7 @@ class GovernorProcess(ObservationAssistedProcess):
             pil_image,
             memory,
             normalizing_range=normalizing_range,
+            prompt_language=prompt_language,
             img_config=img_config,
         )
 
@@ -5517,7 +5825,7 @@ class GovernorProcess(ObservationAssistedProcess):
     # ------------------------------------------------------------------
     # Stage notes
     # ------------------------------------------------------------------
-    def build_stage_note(self, memory: ShortTermMemory) -> str:
+    def build_stage_note(self, memory: ShortTermMemory, *, prompt_language: str = "eng") -> str:
         stage = memory.current_stage or self._ENTRY_STAGE
 
         if self._ENTRY_SUBSTEP not in memory.completed_substeps:
@@ -5627,7 +5935,7 @@ class GovernorProcess(ObservationAssistedProcess):
 
         return super().build_stage_note(memory)
 
-    def build_generic_fallback_note(self, memory: ShortTermMemory) -> str:
+    def build_generic_fallback_note(self, memory: ShortTermMemory, *, prompt_language: str = "eng") -> str:
         stage = memory.fallback_return_stage or memory.current_stage or self._ENTRY_STAGE
         return (
             f"현재 멀티스텝 stage '{stage}' 에서 총독 화면 진행이 막혔다. "
@@ -5795,6 +6103,7 @@ class GovernorProcess(ObservationAssistedProcess):
         high_level_strategy: str,
         recent_actions: str,
         hitl_directive: str | None,
+        prompt_language: str = "eng",
         img_config=None,
     ) -> AgentAction | list[AgentAction] | StageTransition | None:
         # 1. Entry gate (ONE-TIME VLM state check)
@@ -5821,6 +6130,7 @@ class GovernorProcess(ObservationAssistedProcess):
                 high_level_strategy=high_level_strategy,
                 recent_actions=recent_actions,
                 hitl_directive=hitl_directive,
+                prompt_language=prompt_language,
                 img_config=img_config,
                 extra_note=(
                     "지금은 governor entry 단계다. 실제 총독 화면으로 진입하기 위한 가장 안전한 단일 action만 수행해. "
@@ -5908,6 +6218,7 @@ class GovernorProcess(ObservationAssistedProcess):
             high_level_strategy=high_level_strategy,
             recent_actions=recent_actions,
             hitl_directive=hitl_directive,
+            prompt_language=prompt_language,
             img_config=img_config,
         )
 
@@ -5924,6 +6235,7 @@ class GovernorProcess(ObservationAssistedProcess):
         high_level_strategy: str,
         recent_actions: str,
         hitl_directive: str | None,
+        prompt_language: str = "eng",
         img_config=None,
     ) -> AgentAction | list[AgentAction] | StageTransition | None:
         stage = memory.current_stage
@@ -6287,6 +6599,7 @@ class GovernorProcess(ObservationAssistedProcess):
         high_level_strategy: str,
         recent_actions: str,
         hitl_directive: str | None,
+        prompt_language: str = "eng",
         img_config=None,
     ) -> NoProgressResolution:
         if memory.branch == self._APPOINT_BRANCH and memory.current_stage in {
@@ -6321,6 +6634,7 @@ class GovernorProcess(ObservationAssistedProcess):
             high_level_strategy=high_level_strategy,
             recent_actions=recent_actions,
             hitl_directive=hitl_directive,
+            prompt_language=prompt_language,
             img_config=img_config,
         )
 
@@ -6430,7 +6744,7 @@ class CultureDecisionProcess(ScriptedMultiStepProcess):
         if not memory.current_stage:
             memory.begin_stage(self._ENTRY_STAGE)
 
-    def build_stage_note(self, memory: ShortTermMemory) -> str:
+    def build_stage_note(self, memory: ShortTermMemory, *, prompt_language: str = "eng") -> str:
         if self._ENTRY_SUBSTEP not in memory.completed_substeps:
             return (
                 "현재 stage: culture_entry\n"
@@ -6467,6 +6781,7 @@ class CultureDecisionProcess(ScriptedMultiStepProcess):
         high_level_strategy: str,
         recent_actions: str,
         hitl_directive: str | None,
+        prompt_language: str = "eng",
         img_config=None,
     ) -> AgentAction | list[AgentAction] | StageTransition | None:
         if self._ENTRY_SUBSTEP not in memory.completed_substeps:
@@ -6494,6 +6809,7 @@ class CultureDecisionProcess(ScriptedMultiStepProcess):
             high_level_strategy=high_level_strategy,
             recent_actions=recent_actions,
             hitl_directive=hitl_directive,
+            prompt_language=prompt_language,
             img_config=img_config,
         )
 
@@ -6968,7 +7284,7 @@ class ReligionProcess(ObservationAssistedProcess):
             reason="종교관 목록 중앙 hover를 먼저 고정한 뒤 아래로 스크롤해 숨은 종교관을 확인",
         )
 
-    def build_stage_note(self, memory: ShortTermMemory) -> str:
+    def build_stage_note(self, memory: ShortTermMemory, *, prompt_language: str = "eng") -> str:
         if self._ENTRY_SUBSTEP not in memory.completed_substeps:
             return (
                 "현재 stage: religion_entry\n"
@@ -7105,6 +7421,7 @@ class ReligionProcess(ObservationAssistedProcess):
         high_level_strategy: str,
         recent_actions: str,
         hitl_directive: str | None,
+        prompt_language: str = "eng",
         img_config=None,
     ) -> AgentAction | list[AgentAction] | StageTransition | None:
         if self._ENTRY_SUBSTEP not in memory.completed_substeps:
@@ -7198,6 +7515,7 @@ class ReligionProcess(ObservationAssistedProcess):
             high_level_strategy=high_level_strategy,
             recent_actions=recent_actions,
             hitl_directive=hitl_directive,
+            prompt_language=prompt_language,
             img_config=img_config,
         )
 
@@ -7490,7 +7808,7 @@ class ResearchSelectProcess(ScriptedMultiStepProcess):
         if not memory.current_stage:
             memory.begin_stage(self._ENTRY_STAGE)
 
-    def build_stage_note(self, memory: ShortTermMemory) -> str:
+    def build_stage_note(self, memory: ShortTermMemory, *, prompt_language: str = "eng") -> str:
         if self._ENTRY_SUBSTEP not in memory.completed_substeps:
             return (
                 "현재 stage: research_entry\n"
@@ -7530,6 +7848,7 @@ class ResearchSelectProcess(ScriptedMultiStepProcess):
         high_level_strategy: str,
         recent_actions: str,
         hitl_directive: str | None,
+        prompt_language: str = "eng",
         img_config=None,
     ) -> AgentAction | list[AgentAction] | StageTransition | None:
         if self._ENTRY_SUBSTEP not in memory.completed_substeps:
@@ -7557,6 +7876,7 @@ class ResearchSelectProcess(ScriptedMultiStepProcess):
             high_level_strategy=high_level_strategy,
             recent_actions=recent_actions,
             hitl_directive=hitl_directive,
+            prompt_language=prompt_language,
             img_config=img_config,
         )
 

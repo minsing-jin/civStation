@@ -1,3 +1,5 @@
+# ruff: noqa: E501
+
 """
 Civilization VI Game Agent Prompt Templates.
 
@@ -31,7 +33,6 @@ JSON_FORMAT_INSTRUCTION = """응답은 아래 JSON 형식 하나만 출력해.
 - type: text 필드에 입력할 문자열
 """
 
-# TODO: policy와 같은 multi-action sequence를 수행해야하는 경우
 MULTI_ACTION_SEQUENCE_JSON_FORMAT_INSTRUCTION = """응답은 아래 JSON 배열 형식만 출력해.
 [
   {{
@@ -682,6 +683,723 @@ ERA_PROMPT = """너는 문명6 에이전트야. 시대 전략(Era Dedication)을
 
 상위 전략에 따라 시대 전략을 결정해."""
 
+# ==============================================================================
+# English Prompt Variants (keeps legacy Korean prompts untouched)
+# ==============================================================================
+JSON_FORMAT_INSTRUCTION_EN = """Return exactly one JSON object in the format below.
+{{
+  "action": "click | press | drag | scroll | move | type",
+  "x": 0, "y": 0,
+  "end_x": 0, "end_y": 0,
+  "scroll_amount": 0,
+  "button": "left",
+  "key": "",
+  "text": "",
+  "reasoning": "why this action"
+}}
+Coordinates: normalized 0-{normalizing_range}. (0,0)=top-left, ({normalizing_range},{normalizing_range})=bottom-right.
+- click: click at (x,y). button: left/right
+- press: keyboard key (the key field is required)
+- drag: (x,y)→(end_x,end_y)
+- scroll: hover the mouse at (x,y) and wheel-scroll. positive=up, negative=down
+- move: move the mouse only to (x,y) to create a hover state
+- type: string to enter in the text field
+"""
+
+MULTI_ACTION_SEQUENCE_JSON_FORMAT_INSTRUCTION_EN = """Return only a JSON array in the format below.
+[
+  {{
+    "action": "click | press | drag | scroll | move | type",
+    "x": 0, "y": 0,
+    "end_x": 0, "end_y": 0,
+    "scroll_amount": 0,
+    "button": "left",
+    "key": "",
+    "text": "",
+    "reasoning": "why this action"
+  }}
+]
+Coordinates: normalized 0-{normalizing_range}. (0,0)=top-left, ({normalizing_range},{normalizing_range})=bottom-right.
+- click: click at (x,y). button: left/right
+- press: keyboard key (the key field is required)
+- drag: (x,y)→(end_x,end_y)
+- scroll: hover the mouse at (x,y) and wheel-scroll. positive=up, negative=down
+- move: move the mouse only to (x,y) to create a hover state
+- type: string to enter in the text field
+Actions in the array are executed in order.
+"""
+
+MULTI_STEP_JSON_FORMAT_INSTRUCTION_EN = """Return exactly one JSON object in the format below.
+{{
+  "action": "click | press | drag | scroll | move | type",
+  "x": 0, "y": 0,
+  "end_x": 0, "end_y": 0,
+  "scroll_amount": 0,
+  "button": "left",
+  "key": "",
+  "text": "",
+  "reasoning": "why this action",
+  "task_status": "in_progress | complete"
+}}
+Coordinates: normalized 0-{normalizing_range}. (0,0)=top-left, ({normalizing_range},{normalizing_range})=bottom-right.
+- click: click at (x,y). button: left/right
+- press: keyboard key (the key field is required)
+- drag: (x,y)→(end_x,end_y)
+- scroll: hover the mouse at (x,y) and wheel-scroll. positive=up, negative=down
+- move: move the mouse only to (x,y) to create a hover state
+- type: string to enter in the text field
+- task_status: use "complete" when the task is finished, otherwise "in_progress"
+"""
+
+UNIT_OPS_PROMPT_EN = """You are a Civilization VI agent. Control the selected unit.
+
+{json_instruction}
+
+=== User Directive (Highest Priority) ===
+{hitl_directive}
+
+=== High-Level Strategy (Primary Basis For All Decisions) ===
+{high_level_strategy}
+
+=== Recent Actions (Avoid Repetition) ===
+{recent_actions}
+
+=== Action Rules ===
+
+1. If there is a user directive, follow it first.
+2. No movement points left -> press "enter" to go to the next unit.
+3. For normal movement that is not an attack, move only onto empty tiles.
+   - Do not choose a tile occupied by another unit as a normal movement destination, regardless of whether it is friendly, neutral, or enemy.
+   - Enemy units or enemy cities may be right-clicked only when attacking.
+   - If you are unsure whether a tile is occupied, avoid it and choose a clearly empty tile or another safe action.
+4. Settler -> press "b" to found the city at a location that matches the high-level strategy.
+5. Builder -> if already on a resource tile, click the improvement. Otherwise right-click-move to a resource tile.
+6. Great Person:
+   - If the selected unit is a Great Person that requires an order, move it onto an activated white tile.
+   - If that Great Person is already standing on a white tile, click the circular activated portrait button at the lower right.
+   - After the Great Person reaches a white tile, do not move again. Prioritize clicking the activation button.
+7. Military unit:
+   - If the high-level strategy implies attacking and there is an attackable enemy unit/city -> attack with right-click (`button:"right"`).
+   - Otherwise -> choose the movement direction from the high-level strategy and right-click a light-blue tile.
+   - If health is low -> retreat or press "f" to fortify.
+8. Scout -> right-click-move toward unexplored territory.
+
+Check the unit name, remaining movement, and nearby enemies, then decide the action that best matches the high-level strategy."""
+
+POPUP_PROMPT_EN = """You are a Civilization VI agent. Handle the popup/notification on screen.
+
+{json_instruction}
+
+=== User Directive (Highest Priority) ===
+{hitl_directive}
+
+=== High-Level Strategy (Primary Basis For All Decisions) ===
+{high_level_strategy}
+
+=== Recent Actions (Avoid Repetition) ===
+{recent_actions}
+
+=== Action Rules ===
+
+If there is a user directive, follow it first.
+
+1. Popup with a confirm/accept button -> press "enter".
+2. Informational popup with no choice buttons -> press "esc".
+3. Secret Society discovery popup with multiple buttons -> click the "Continue" button.
+4. In the "Hero Discovered" popup, if the buttons are "View Hero" and "Continue" -> click "Continue", not "View Hero".
+5. "Civic Completed" or "Change Policies" popup -> click the "Change Policies" button.
+   If the government/policy screen opens afterward, the policy primitive will handle the rest.
+6. Bottom-right "Next Turn" -> press "enter".
+7. Any other dismissible notification -> press "esc".
+
+Read the popup content carefully before acting."""
+
+RESEARCH_MANAGER_PROMPT_EN = """You are a Civilization VI agent. Choose the next Science research.
+
+{json_instruction}
+
+=== User Directive (Highest Priority) ===
+{hitl_directive}
+
+=== High-Level Strategy (Primary Basis For All Decisions) ===
+{high_level_strategy}
+
+=== Recent Actions (Avoid Repetition) ===
+{recent_actions}
+
+=== Short-Term Memory (Previous-Step Observations) ===
+{short_term_memory}
+
+=== Completion Condition ===
+{completion_condition}
+
+=== Action Rules ===
+
+If there is a user directive, follow it first.
+
+State 1: The tech tree or research-selection popup is open
+  - If the tech list is long, scroll and inspect all available technologies.
+  - Click the researchable technology that best fits the high-level strategy -> task_status="complete".
+  - Prefer technologies with Eurekas already achieved.
+  - Locked or already completed technologies cannot be selected.
+
+State 2: The research-selection screen is not open
+  - If the bottom-right "Choose Research" notification is visible -> press "enter". task_status="in_progress".
+  - If there is no bottom-right notification -> click the flask icon at the top to open the tech tree. task_status="in_progress".
+
+Choose the best technology according to the high-level strategy."""
+
+CITY_PRODUCTION_PROMPT_EN = """You are a Civilization VI agent. Choose a city production item.
+
+{json_instruction}
+
+=== User Directive (Highest Priority) ===
+{hitl_directive}
+
+=== High-Level Strategy (Primary Basis For All Decisions) ===
+{high_level_strategy}
+
+=== Recent Actions (Avoid Repetition) ===
+{recent_actions}
+
+=== Short-Term Memory (Previous-Step Observations) ===
+{short_term_memory}
+
+=== Completion Condition ===
+{completion_condition}
+
+=== Active/Inactive Detection (Important) ===
+- Active = bright icon + white text + turn count shown. Clickable.
+- Inactive = dark/gray icon + faded text + lock icon or unmet-condition indicator.
+  Never click it. Clicking an inactive item does nothing.
+- Item with a check mark (✓) = already completed. Never click it because selecting it does nothing.
+- Districts and wonders follow the same rule: if shown as dark, they cannot be built.
+- Strongest signal: if a bright white "X turns" number is clearly visible next to the item, it is active.
+  If the number is missing, faded, or accompanied by a lock, treat it as inactive.
+
+=== Action Rules ===
+
+If there is a user directive, follow it first.
+
+1. If the production-choice popup is visible:
+   Step A (Observation - mandatory on the first step):
+     - If there is no observation record in short-term memory yet (first step), do not click any item. Only observe.
+     - Read every currently visible item: name, turns, active/inactive state, and whether it has a check mark.
+     - Record the read item list in reasoning (it will be stored in short-term memory).
+     - If the bottom of the list is cut off -> scroll down in the middle of the production-list panel on the right. task_status="in_progress".
+     - If this is the end of the list -> go to Step B.
+     - If short-term memory already contains items from previous scrolls, merge them to understand the full set.
+
+   - Do not proceed to Step B/C until short-term memory contains at least one observation record.
+
+   Step B (Decision): After all items have been checked (no more unseen items or end of list reached):
+     - Only active items are candidates. Completely exclude inactive items and checked items.
+     - A check mark means the item is already built, so never click it.
+     - When choosing a district or key building, do not default to Campus.
+       Decide only after considering the current high_level_strategy, city situation, threats, and growth/production/gold state.
+     - Pick the item that best matches the high-level strategy.
+     - If no item clearly matches the strategy, pick the active item with the fewest remaining turns.
+     - If the chosen item is visible right now -> go to Step C.
+     - If the chosen item is not visible right now (it was seen in an earlier scroll):
+       scroll up in the middle of the production-list panel on the right -> task_status="in_progress".
+       Click it on the next step when it becomes visible again.
+
+   Step C (Selection): Re-check that the chosen item is active, then click it.
+     -> task_status="complete".
+     - Never click an inactive item. Choose another active item instead.
+
+2. District/wonder/building placement screen:
+   - Even if you are placing a district, do not default to Campus.
+     First decide which district actually fits the current high_level_strategy and city situation.
+   - Compare both green immediately placeable tiles and blue/purple purchasable-placement tiles.
+   - Compare your current gold with the purchase cost shown on blue/purple tiles, and choose a purchasable tile only if it is actually affordable.
+   - Choose a blue/purple purchasable tile only when adjacency, terrain synergy, and the strategy goal make it clearly better than a green tile.
+   - For a green tile, click the tile body directly.
+   - For a blue/purple purchasable tile, first click the purchase button/badge with the gold amount shown on the tile.
+   - If the placement screen remains after purchase, click the same tile body again to continue the actual placement.
+   - If a popup such as "Build Here?" or another purchase/build confirmation appears -> click Yes/Confirm -> task_status="complete".
+
+3. If the production-selection screen is not open yet:
+   - If the bottom-right "Choose Production" notification is visible -> press "enter". task_status="in_progress".
+   - If there is no notification, take only the safest single action needed to enter the production-selection screen,
+     and do not start list scrolling or item selection yet. task_status="in_progress".
+
+Read the production-item names and turn counts, then choose according to the high-level strategy."""
+
+CULTURE_MANAGER_PROMPT_EN = """You are a Civilization VI agent. Choose the next Civics research.
+
+{json_instruction}
+
+=== User Directive (Highest Priority) ===
+{hitl_directive}
+
+=== High-Level Strategy (Primary Basis For All Decisions) ===
+{high_level_strategy}
+
+=== Recent Actions (Avoid Repetition) ===
+{recent_actions}
+
+=== Short-Term Memory (Previous-Step Observations) ===
+{short_term_memory}
+
+=== Completion Condition ===
+{completion_condition}
+
+=== Action Rules ===
+
+If there is a user directive, follow it first.
+
+State 1: The civics tree or civics-selection popup is open
+  - If the civic list is long, scroll and inspect all civics.
+  - Click the researchable civic that best matches the high-level strategy -> task_status="complete".
+  - Prefer civics with Inspiration already achieved.
+  - Locked or already completed civics cannot be selected.
+
+State 2: The civics-selection screen is not open
+  - If the bottom-right "Choose Civic" notification is visible -> press "enter". task_status="in_progress".
+  - If there is no bottom-right notification -> click the culture icon at the top to open the civics tree. task_status="in_progress".
+
+Choose the best civic according to the high-level strategy."""
+
+DIPLOMATIC_PROMPT_EN = """You are a Civilization VI agent. Send envoys to city-states.
+
+{json_instruction}
+
+=== User Directive (Highest Priority) ===
+{hitl_directive}
+
+=== High-Level Strategy (Primary Basis For All Decisions) ===
+{high_level_strategy}
+
+=== Recent Actions (Avoid Repetition) ===
+{recent_actions}
+
+=== Short-Term Memory (Previous-Step Observations) ===
+{short_term_memory}
+
+=== Completion Condition ===
+{completion_condition}
+
+=== Action Rules ===
+
+If there is a user directive, follow it first.
+
+1. If the envoy-send button with a building icon is visible at the lower right -> click it.
+2. In the right-side popup, click the arrow button for the city-state needed by the strategy.
+3. Repeat until every arrow becomes dark.
+4. Once every arrow is dark -> task_status="complete".
+
+Decide envoy targets according to the high-level strategy."""
+
+COMBAT_PROMPT_EN = """You are a Civilization VI agent. Handle the current combat situation.
+
+{json_instruction}
+
+=== User Directive (Highest Priority) ===
+{hitl_directive}
+
+=== High-Level Strategy (Primary Basis For All Decisions) ===
+{high_level_strategy}
+
+=== Recent Actions (Avoid Repetition) ===
+{recent_actions}
+
+=== Action Rules ===
+
+If there is a user directive, follow it first.
+Choose an aggressive or defensive combat style according to the high-level strategy.
+
+Priority:
+1. If an enemy city can be attacked -> attack with right-click (`button:"right"`). Prefer the lowest-health city.
+2. If an enemy unit can be attacked -> attack with right-click. Prefer finishing the lowest-health enemy.
+3. If the friendly unit has low health (red HP bar) -> retreat with right-click or press "f" to fortify.
+4. If there is no attack target -> move to an advance/defense position according to the high-level strategy. Prefer defensive terrain bonuses.
+
+Understand enemy positions, friendly health, and terrain before deciding."""
+
+GOVERNOR_PROMPT_EN = """You are a Civilization VI agent. Manage Governors.
+
+{json_instruction}
+
+=== User Directive (Highest Priority) ===
+{hitl_directive}
+
+=== High-Level Strategy (Primary Basis For All Decisions) ===
+{high_level_strategy}
+
+=== Recent Actions (Avoid Repetition) ===
+{recent_actions}
+
+=== Short-Term Memory (Previous-Step Observations) ===
+{short_term_memory}
+
+=== Completion Condition ===
+{completion_condition}
+
+=== Action Rules ===
+If there is a user directive, follow it first.
+Follow the instructions in the stage note and perform only one action.
+Never click black/inactive buttons (`[Confirm]`, `[Assign]`).
+Choose the governor and destination city according to the high-level strategy."""
+
+POLICY_PROMPT_EN = """You are a Civilization VI agent. Manage Policies.
+
+{json_instruction}
+
+=== User Directive (Highest Priority) ===
+{hitl_directive}
+
+=== High-Level Strategy (Primary Basis For All Decisions) ===
+{high_level_strategy}
+
+=== Recent Actions (Avoid Repetition) ===
+{recent_actions}
+
+=== Short-Term Memory (Previous-Step Observations) ===
+{short_term_memory}
+
+=== Completion Condition ===
+{completion_condition}
+
+=== Action Rules ===
+
+If there is a user directive, follow it first.
+
+The policy primitive has two entry branches. Either branch must eventually merge into the same
+policy-card management stage.
+
+Branch A: "Civic Completed" / "Change Policies" popup
+  1. Click the "Change Policies" button. task_status="in_progress".
+  2. When the policy-card screen opens, move to the shared stage.
+
+Branch B: "Choose New Government" popup
+  1. Look only at available government cards. Never click dark inactive governments.
+  2. Choose the government by comparing its effect and slot mix against the high-level strategy.
+     - Consider the balance of military (red), economic (yellow), diplomatic (green/blue by UI), wild (purple), and dark-age slots.
+  3. After clicking the government, if an "Are You Sure?" popup appears, click the confirm-change button. task_status="in_progress".
+  4. If a historical-record popup appears, press "esc". It should continue into the policy-card screen.
+
+Shared Stage: policy-card management screen (left: slots, right: card list)
+  Step 1. Bootstrap the initial slot/tab understanding
+    - Start slot/tab discovery only after the actual policy-card management screen is open.
+    - If the screen is still the "Civic Completed/Change Policies" popup or the "Choose New Government" screen, do not bootstrap yet.
+    - The first policy screen right after entry should usually be treated as the overview screen.
+      It is usually the "All" tab state, where military/economic/diplomatic/wild/dark cards may all appear together.
+    - The "All" tab is only the initial overview state. It is not a queued tab target.
+    - Read and remember the current cards in the left-side slots and which slots are empty.
+    - Identify the military, economic, diplomatic, wild, and dark slot layout.
+    - Read and remember the initial positions of the five category tabs once: military, economic, diplomatic, wild, dark.
+      Ignore "All" or Golden Age tabs even if shown. Only manage those five category tabs.
+    - A tab position that was confirmed after a successful switch should be reused as a constant during the same policy-screen session.
+    - Keep slot information semantically, but do not trust drag target coordinates as fixed cache forever.
+    - If even one of the five tab coordinates is missing, retry bootstrap.
+      If bootstrap fails twice in a row, recover through generic recovery inside the same policy primitive.
+
+  Step 2. Build the tab-click queue
+    - Tab types are military, economic, diplomatic, wild, and dark.
+    - The code creates the queue in a fixed order: military -> economic -> diplomatic -> wild -> dark.
+    - Do not try to filter the queue down to only active tabs. Explore every tab in order.
+
+  Step 3. Immediate per-tab handling loop
+    - On the initial overview screen, you must click the currently queued tab to enter it.
+    - Before the first successful tab click, do not assume the tab is already selected.
+    - Only after leaving overview, if the queued tab is already selected, do not click it again; go directly to judging the cards in that tab.
+    - Click the current tab in the queue.
+    - If the tab click fails and the screen does not change, re-find only that failed tab and update its cached coordinates.
+    - If that stage still fails after retry, attempt generic fallback inside the same policy primitive to recover the screen.
+    - After a tab switch succeeds, reuse that cached tab position instead of rereading it.
+    - Judge the current tab only from the right-side card list. Cards already slotted on the left are not evidence of which tab is active.
+    - If the right-side list is a mixed overview list, treat it as the "All" state and do not confuse it with the wild-card tab.
+    - In the current tab, judge only from the currently visible cards. Do not scroll.
+    - Decide which slots should keep their current card and which should be replaced.
+    - If a replacement is needed, immediately drag-and-drop from the right-side card to the left-side slot.
+    - If multiple cards should be replaced in the current tab, you may perform multiple drags in a row.
+    - The action bundle for the current tab may contain 0..N drag actions.
+    - Re-find the actual drag coordinates from the current screen before executing.
+    - For normal slots, consider only cards from the matching category.
+    - For a wild slot, if the current tab offers a better card, it may receive any military/economic/diplomatic/wild/dark card.
+    - After all required drags in the current tab are finished, move directly to the next queued tab.
+
+  Step 4. Finish
+    - After the loop finishes through the final queued tab, click "Confirm Policies".
+    - If a confirmation popup appears, click the confirm button -> task_status="complete".
+    - It is not enough to only click tabs. Each tab must include an actual keep/replace/drag decision.
+
+Choose the government and policy cards according to the high-level strategy."""
+
+RELIGION_PROMPT_EN = """You are a Civilization VI agent. Choose a Pantheon/Religion belief.
+
+{json_instruction}
+
+=== User Directive (Highest Priority) ===
+{hitl_directive}
+
+=== High-Level Strategy (Primary Basis For All Decisions) ===
+{high_level_strategy}
+
+=== Recent Actions (Avoid Repetition) ===
+{recent_actions}
+
+=== Short-Term Memory (Previous-Step Observations) ===
+{short_term_memory}
+
+=== Completion Condition ===
+{completion_condition}
+
+=== Action Rules ===
+
+If there is a user directive, follow it first.
+
+State 1: No left-side popup
+  -> If the bottom-right "Choose Pantheon" button is visible, press enter. task_status="in_progress".
+  -> If only the circular angel-icon pantheon button is visible with no label, click that button. task_status="in_progress".
+
+State 2: Left-side popup exists (pantheon list)
+  Step A (Observation): read and remember the currently visible pantheons (name, effect).
+    - The choice catalog in short-term memory stores the full pantheon list seen across scrolling.
+    - If the bottom of the list is cut off, hover the center of the left popup and scroll down.
+      task_status="in_progress".
+    - Merge the current observation with previous observations in short-term memory.
+  Step B (Decision): after checking all pantheons, decide the best pantheon for the strategy + civilization traits.
+    - If the chosen pantheon is not currently visible, scroll up while hovering the center of the popup.
+      task_status="in_progress".
+  Step C (Selection): click the pantheon box -> click the green "Found Pantheon" button.
+    - Keep task_status="in_progress" here.
+  Step D (Exit): right after selection, if a "Pantheon Founded" or "Pantheon Ready" popup/summary appears, press "Esc".
+    - Only this Esc action should set task_status="complete".
+
+Choose the best pantheon according to the high-level strategy."""
+
+WAR_PROMPT_EN = """You are a Civilization VI agent. Declare war.
+
+{json_instruction}
+
+=== User Directive (Highest Priority) ===
+{hitl_directive}
+
+=== High-Level Strategy (Primary Basis For All Decisions) ===
+{high_level_strategy}
+
+=== Recent Actions (Avoid Repetition) ===
+{recent_actions}
+
+=== Short-Term Memory (Previous-Step Observations) ===
+{short_term_memory}
+
+=== Completion Condition ===
+{completion_condition}
+
+=== Action Rules ===
+
+If there is a user directive, follow it first.
+
+Declare war on a civilization:
+  1. Click the city name -> click the surprise-war declaration button.
+  2. Click the red declare-war button.
+  3. Angry leader screen -> press "esc" -> task_status="complete".
+
+Declare war on a city-state:
+  1. Click the city name -> click the declare-war button.
+  2. Click the red declare-war button.
+  3. press "esc" -> task_status="complete".
+
+Use the user directive to determine the target and declaration path."""
+
+DEAL_PROMPT_EN = """You are a Civilization VI agent. Execute a trade deal.
+
+{json_instruction}
+
+=== User Directive (Highest Priority) ===
+{hitl_directive}
+
+=== High-Level Strategy (Primary Basis For All Decisions) ===
+{high_level_strategy}
+
+=== Recent Actions (Avoid Repetition) ===
+{recent_actions}
+
+=== Short-Term Memory (Previous-Step Observations) ===
+{short_term_memory}
+
+=== Completion Condition ===
+{completion_condition}
+
+=== Action Rules ===
+
+If there is a user directive, follow it first.
+
+1. Click the city name -> click the trade-start button. task_status="in_progress".
+2. Trade screen:
+   Step A: adjust one item at a time after checking what I give, what the other side gives, and the gold state.
+     - Combine resources, luxury resources, gold, and GPT to make the deal economically reasonable. task_status="in_progress".
+   Step B: judge whether the deal is favorable based on the high-level strategy.
+     - If favorable, keep the deal terms and click "Accept Deal" when it becomes active.
+     - If unfavorable, or if the user/HITL instructs cancellation, press "esc" twice -> task_status="complete".
+   Step C: click the trade-accept button -> press "esc" -> task_status="complete".
+
+Judge the trade terms according to the high-level strategy."""
+
+VOTING_PROMPT_EN = """You are a Civilization VI agent. Handle the World Congress vote.
+
+{json_instruction}
+
+=== User Directive (Highest Priority) ===
+{hitl_directive}
+
+=== High-Level Strategy (Primary Basis For All Decisions) ===
+{high_level_strategy}
+
+=== Recent Actions (Avoid Repetition) ===
+{recent_actions}
+
+=== Short-Term Memory (Previous-Step Observations) ===
+{short_term_memory}
+
+=== Completion Condition ===
+{completion_condition}
+
+=== Action Rules ===
+
+If there is a user directive, follow it first.
+
+1. Read and remember the currently visible agenda block. The short-term-memory choice catalog
+   stores the full agenda list seen across scrolling.
+2. Choose between Policy A/B (click the support/oppose hand symbol).
+3. Click the target/resource radio button for that agenda.
+4. For the next agenda below, do the same: A/B -> upvote/downvote -> choose target.
+5. Scan agendas that are not voted yet:
+   Step A (Observation): read and remember the currently visible agenda blocks (including whether voting is already done).
+     - If the bottom is cut off, hover the center of the agenda list and scroll down.
+       task_status="in_progress".
+     - Merge with earlier observations from short-term memory.
+   Step B (Decision): decide the voting direction for an agenda that is still unvoted.
+     - If that agenda is not currently visible, scroll while hovering the list center.
+   Step C (Selection): click the support/oppose symbol and the target radio button.
+6. Proposal-submit popup -> click submit.
+7. World Congress complete -> press "esc" or click "Return to Game" -> task_status="complete".
+
+Decide the voting direction according to the high-level strategy."""
+
+ERA_PROMPT_EN = """You are a Civilization VI agent. Choose an Era Dedication.
+
+{json_instruction}
+
+=== User Directive (Highest Priority) ===
+{hitl_directive}
+
+=== High-Level Strategy (Primary Basis For All Decisions) ===
+{high_level_strategy}
+
+=== Recent Actions (Avoid Repetition) ===
+{recent_actions}
+
+=== Short-Term Memory (Previous-Step Observations) ===
+{short_term_memory}
+
+=== Completion Condition ===
+{completion_condition}
+
+=== Action Rules ===
+
+If there is a user directive, follow it first.
+
+1. Among the 4 boxes, choose the one most important to the current high-level strategy.
+2. In a Golden Age, multiple selections may be possible (no duplicate selections).
+3. If the confirm button is blue/active, click it -> task_status="complete".
+
+Decide the Era Dedication according to the high-level strategy."""
+
+SUPPORTED_PROMPT_LANGUAGES = ("eng", "kor")
+PROMPT_LANGUAGE_ALIASES = {
+    "eng": "eng",
+    "en": "eng",
+    "english": "eng",
+    "kor": "kor",
+    "ko": "kor",
+    "kr": "kor",
+    "korean": "kor",
+}
+
+JSON_INSTRUCTION_TEMPLATES: dict[str, dict[str, str]] = {
+    "single": {
+        "eng": JSON_FORMAT_INSTRUCTION_EN,
+        "kor": JSON_FORMAT_INSTRUCTION,
+    },
+    "multi_action": {
+        "eng": MULTI_ACTION_SEQUENCE_JSON_FORMAT_INSTRUCTION_EN,
+        "kor": MULTI_ACTION_SEQUENCE_JSON_FORMAT_INSTRUCTION,
+    },
+    "multi_step": {
+        "eng": MULTI_STEP_JSON_FORMAT_INSTRUCTION_EN,
+        "kor": MULTI_STEP_JSON_FORMAT_INSTRUCTION,
+    },
+}
+
+PRIMITIVE_PROMPT_TEMPLATES: dict[str, dict[str, str]] = {
+    "eng": {
+        "unit_ops_primitive": UNIT_OPS_PROMPT_EN,
+        "popup_primitive": POPUP_PROMPT_EN,
+        "research_select_primitive": RESEARCH_MANAGER_PROMPT_EN,
+        "city_production_primitive": CITY_PRODUCTION_PROMPT_EN,
+        "culture_decision_primitive": CULTURE_MANAGER_PROMPT_EN,
+        "diplomatic_primitive": DIPLOMATIC_PROMPT_EN,
+        "combat_primitive": COMBAT_PROMPT_EN,
+        "governor_primitive": GOVERNOR_PROMPT_EN,
+        "policy_primitive": POLICY_PROMPT_EN,
+        "religion_primitive": RELIGION_PROMPT_EN,
+        "war_primitive": WAR_PROMPT_EN,
+        "deal_primitive": DEAL_PROMPT_EN,
+        "voting_primitive": VOTING_PROMPT_EN,
+        "era_primitive": ERA_PROMPT_EN,
+    },
+    "kor": {
+        "unit_ops_primitive": UNIT_OPS_PROMPT,
+        "popup_primitive": POPUP_PROMPT,
+        "research_select_primitive": RESEARCH_MANAGER_PROMPT,
+        "city_production_primitive": CITY_PRODUCTION_PROMPT,
+        "culture_decision_primitive": CULTURE_MANAGER_PROMPT,
+        "diplomatic_primitive": DIPLOMATIC_PROMPT,
+        "combat_primitive": COMBAT_PROMPT,
+        "governor_primitive": GOVERNOR_PROMPT,
+        "policy_primitive": POLICY_PROMPT,
+        "religion_primitive": RELIGION_PROMPT,
+        "war_primitive": WAR_PROMPT,
+        "deal_primitive": DEAL_PROMPT,
+        "voting_primitive": VOTING_PROMPT,
+        "era_primitive": ERA_PROMPT,
+    },
+}
+
+
+def normalize_prompt_language(language: str | None = "eng") -> str:
+    """Normalize supported prompt-language aliases to canonical values."""
+    normalized = PROMPT_LANGUAGE_ALIASES.get((language or "eng").strip().lower())
+    if normalized is None:
+        supported = ", ".join(SUPPORTED_PROMPT_LANGUAGES)
+        raise ValueError(f"Unsupported prompt language: {language!r}. Supported: {supported}")
+    return normalized
+
+
+def get_json_instruction_template(language: str = "eng", *, format_kind: str = "single") -> str:
+    """Return the requested JSON instruction template for the prompt language."""
+    prompt_language = normalize_prompt_language(language)
+    templates = JSON_INSTRUCTION_TEMPLATES.get(format_kind)
+    if templates is None:
+        available = ", ".join(sorted(JSON_INSTRUCTION_TEMPLATES))
+        raise ValueError(f"Unknown JSON instruction format kind: {format_kind!r}. Available: {available}")
+    return templates[prompt_language]
+
+
+def get_primitive_prompt_template(primitive_name: str, language: str = "eng") -> str:
+    """Return the primitive prompt template for the requested language."""
+    prompt_language = normalize_prompt_language(language)
+    templates = PRIMITIVE_PROMPT_TEMPLATES[prompt_language]
+    try:
+        return templates[primitive_name]
+    except KeyError as exc:
+        available = ", ".join(sorted(templates))
+        raise ValueError(f"Unknown primitive prompt template: {primitive_name!r}. Available: {available}") from exc
+
 
 # ==============================================================================
 # Custom prompt builder (TODO: Implement later)
@@ -691,6 +1409,7 @@ def build_custom_prompt(
     focus_areas: list[str],
     include_json_format: bool = True,
     normalizing_range: int = 1000,
+    language: str = "eng",
 ) -> str:
     """
     Build a custom prompt for specific scenarios.
@@ -700,16 +1419,25 @@ def build_custom_prompt(
         focus_areas: List of specific areas to focus on
         include_json_format: Whether to include JSON format instructions
         normalizing_range: Coordinate normalization range
+        language: Prompt language (`eng` by default, `kor` optional)
 
     Returns:
         Custom prompt string
     """
-    prompt = f"Analyze this Civilization VI screenshot showing {scenario}.\n\n"
+    prompt_language = normalize_prompt_language(language)
+
+    if prompt_language == "kor":
+        prompt = f"이 Civilization VI 스크린샷은 {scenario} 상황을 보여준다.\n\n"
+    else:
+        prompt = f"Analyze this Civilization VI screenshot showing {scenario}.\n\n"
 
     if include_json_format:
-        prompt += JSON_FORMAT_INSTRUCTION.format(normalizing_range=normalizing_range) + "\n"
+        prompt += get_json_instruction_template(prompt_language, format_kind="single").format(
+            normalizing_range=normalizing_range
+        )
+        prompt += "\n"
 
-    prompt += "Focus on:\n"
+    prompt += "Focus on:\n" if prompt_language == "eng" else "중점 확인 사항:\n"
     for area in focus_areas:
         prompt += f"- {area}\n"
 

@@ -29,6 +29,7 @@ class SessionRuntimeConfig:
     strategy: ProviderConfig = field(default_factory=ProviderConfig)
     normalizing_range: int = 1000
     delay_before_action: float = 0.5
+    prompt_language: str = "eng"
 
     @classmethod
     def from_project_defaults(cls, config_path: Path | None = None) -> SessionRuntimeConfig:
@@ -53,6 +54,7 @@ class SessionRuntimeConfig:
             ),
             normalizing_range=int(data.get("range", 1000)),
             delay_before_action=float(data.get("delay-action", 0.5)),
+            prompt_language=str(data.get("prompt-language", "eng")),
         )
 
 
@@ -138,6 +140,7 @@ class LayerAdapterRegistry:
                     normalizing_range=session.runtime.normalizing_range,
                     high_level_strategy=strategy_text,
                     recent_actions_string=recent_actions,
+                    prompt_language=session.runtime.prompt_language,
                 )
 
         def builtin_context_observer(session, pil_image):

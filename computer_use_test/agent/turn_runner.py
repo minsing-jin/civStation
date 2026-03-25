@@ -69,6 +69,12 @@ def parse_args() -> configargparse.Namespace:
     exec_group.add_argument("--delay-action", type=float, default=0.5, help="Action delay (sec)")
     exec_group.add_argument("--delay-turn", type=float, default=1.0, help="Turn delay (sec)")
     exec_group.add_argument(
+        "--prompt-language",
+        choices=["eng", "kor"],
+        default="eng",
+        help="Primitive prompt language (default: eng)",
+    )
+    exec_group.add_argument(
         "--debug",
         default="",
         help=(
@@ -569,6 +575,7 @@ def main():
             "planner_provider": planner_provider,
             "normalizing_range": args.range,
             "delay_before_action": args.delay_action,
+            "prompt_language": args.prompt_language,
             "high_level_strategy": args.strategy,
             "context_manager": ctx,
             "strategy_planner": strategy_planner,

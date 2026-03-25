@@ -1,6 +1,7 @@
 """Unit tests for class-based multi-step processes."""
 
 import json
+import re
 
 from PIL import Image
 
@@ -151,7 +152,7 @@ class TestObservationAssistedProcess:
         )
 
         assert observation is not None
-        assert "0-777 normalized coordinates" in provider.last_text
+        assert "0-777 range" in provider.last_text
 
     def test_city_production_observer_prompt_does_not_echo_full_choice_catalog(self):
         process = get_multi_step_process("city_production_primitive", "")
@@ -351,7 +352,7 @@ class TestObservationAssistedProcess:
         assert decided is True
         assert memory.get_best_choice() is not None
         assert memory.get_best_choice().id == "market"
-        assert "상위 전략" in provider.last_text
+        assert "High-level strategy" in provider.last_text
         assert "캠퍼스" not in provider.last_text
 
     def test_governor_decide_from_memory_applies_task_hitl_before_vlm(self):
@@ -385,14 +386,30 @@ class TestObservationAssistedProcess:
 
 
 class TestPromptUpdates:
-    def test_unit_ops_prompt_forbids_moving_onto_occupied_tiles(self):
+    def test_english_primitive_prompts_do_not_contain_hangul(self):
+        for primitive_name in PRIMITIVE_REGISTRY:
+            prompt = get_primitive_prompt(primitive_name, language="eng")
+            assert re.search(r"[가-힣]", prompt) is None, primitive_name
+
+    def test_default_primitive_prompt_language_is_english(self):
         prompt = get_primitive_prompt("unit_ops_primitive")
+        assert "You are a Civilization VI agent." in prompt
+        assert "=== User Directive (Highest Priority) ===" in prompt
+        assert "=== Action Rules ===" in prompt
+
+    def test_explicit_korean_primitive_prompt_language_preserves_legacy_prompt(self):
+        prompt = get_primitive_prompt("unit_ops_primitive", language="kor")
+        assert "너는 문명6 에이전트야." in prompt
+        assert "=== 사용자 지시 (최우선) ===" in prompt
+
+    def test_unit_ops_prompt_forbids_moving_onto_occupied_tiles(self):
+        prompt = get_primitive_prompt("unit_ops_primitive", language="kor")
         assert "빈 타일로만" in prompt
         assert "다른 유닛이 서 있는 타일" in prompt
         assert "공격일 때만" in prompt
 
     def test_unit_ops_prompt_handles_great_person_white_tile_activation(self):
-        prompt = get_primitive_prompt("unit_ops_primitive")
+        prompt = get_primitive_prompt("unit_ops_primitive", language="kor")
         assert "위대한 위인" in prompt
         assert "명령이 필요한" in prompt
         assert "하얀색 타일" in prompt
@@ -400,7 +417,7 @@ class TestPromptUpdates:
         assert "사람 흉상" in prompt
 
     def test_governor_prompt_stage_note_driven(self):
-        prompt = get_primitive_prompt("governor_primitive")
+        prompt = get_primitive_prompt("governor_primitive", language="kor")
         assert "stage note" in prompt
         assert "확정" in prompt
         assert "배정" in prompt
@@ -418,20 +435,20 @@ class TestPromptUpdates:
         assert "원형" in criteria
 
     def test_governor_prompt_contains_essential_rules(self):
-        prompt = get_primitive_prompt("governor_primitive")
+        prompt = get_primitive_prompt("governor_primitive", language="kor")
         assert "확정" in prompt
         assert "비활성" in prompt
         assert "배정" in prompt
 
     def test_religion_prompt_mentions_angel_icon_entry_and_esc_exit(self):
-        prompt = get_primitive_prompt("religion_primitive")
+        prompt = get_primitive_prompt("religion_primitive", language="kor")
         assert "천사 문양" in prompt
         assert "종교관 준비" in prompt
         assert "Esc" in prompt
         assert 'task_status="complete"' in prompt
 
     def test_policy_prompt_contains_two_entry_branches(self):
-        prompt = get_primitive_prompt("policy_primitive")
+        prompt = get_primitive_prompt("policy_primitive", language="kor")
         assert "사회제도 완성" in prompt
         assert "새 정부 선택" in prompt
         assert "모든 정책 배정" in prompt
@@ -456,24 +473,24 @@ class TestPromptUpdates:
         assert iteration_limit > 20
 
     def test_popup_prompt_handles_policy_change_popup(self):
-        prompt = get_primitive_prompt("popup_primitive")
+        prompt = get_primitive_prompt("popup_primitive", language="kor")
         assert "정책변경" in prompt
 
     def test_popup_prompt_handles_hero_discovery_continue_button(self):
-        prompt = get_primitive_prompt("popup_primitive")
+        prompt = get_primitive_prompt("popup_primitive", language="kor")
         assert "발견된 영웅" in prompt
         assert "영웅을 보라" in prompt
         assert "계속" in prompt
         assert "클릭" in prompt
 
     def test_popup_prompt_handles_secret_society_discovery_with_continue_button(self):
-        prompt = get_primitive_prompt("popup_primitive")
+        prompt = get_primitive_prompt("popup_primitive", language="kor")
         assert "결사 발견" in prompt
         assert "계속" in prompt
         assert "총독화면으로 이동" not in prompt
 
     def test_popup_prompt_does_not_own_lower_right_screen_entry_buttons(self):
-        prompt = get_primitive_prompt("popup_primitive")
+        prompt = get_primitive_prompt("popup_primitive", language="kor")
         assert "우하단 '연구 선택'" not in prompt
         assert "우하단 '생산 품목'" not in prompt
         assert "우하단 '사회 제도 선택'" not in prompt
@@ -1272,10 +1289,10 @@ class TestEntryGatedProcesses:
         )
 
         assert observation is not None
-        assert "왼쪽 팝업창" in provider.last_text
-        assert "도시 이름 왼쪽 동그라미" in provider.last_text
-        assert "총독 얼굴" in provider.last_text
-        assert "비어 있으면" in provider.last_text
+        assert "left popup" in provider.last_text
+        assert "city name" in provider.last_text
+        assert "governor face" in provider.last_text
+        assert "empty" in provider.last_text
 
     def test_governor_appoint_branch_observes_city_blocks_before_clicking_city(self):
         process = get_multi_step_process("governor_primitive", "")
@@ -3521,6 +3538,7 @@ class TestEntryGatedProcesses:
             high_level_strategy="과학 승리",
             recent_actions="없음",
             hitl_directive=None,
+            prompt_language="kor",
         )
 
         assert "현재 보유 골드" in instruction
@@ -4010,6 +4028,7 @@ class TestEntryGatedProcesses:
             high_level_strategy="과학 승리",
             recent_actions="없음",
             hitl_directive=None,
+            prompt_language="kor",
         )
 
         assert action is not None
@@ -4764,6 +4783,7 @@ class TestPolicyProcess:
             high_level_strategy="과학 승리",
             recent_actions="없음",
             hitl_directive=None,
+            prompt_language="kor",
         )
 
         assert planned is None
@@ -4807,6 +4827,7 @@ class TestPolicyProcess:
             high_level_strategy="과학 승리",
             recent_actions="없음",
             hitl_directive=None,
+            prompt_language="kor",
         )
 
         assert isinstance(planned, StageTransition)
@@ -5253,6 +5274,7 @@ class TestPolicyProcess:
             high_level_strategy="과학 승리",
             recent_actions="없음",
             hitl_directive=None,
+            prompt_language="kor",
         )
 
         assert action is not None
@@ -5295,6 +5317,7 @@ class TestPolicyProcess:
             high_level_strategy="과학 승리",
             recent_actions="없음",
             hitl_directive=None,
+            prompt_language="kor",
         )
 
         assert "=== 현재 프로세스 상태 ===" in provider.last_text
