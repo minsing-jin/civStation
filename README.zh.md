@@ -12,8 +12,8 @@
 
 当前包名和模块名仍然是：
 
-- Python package: `computer-use-test`
-- Python module: `computer_use_test`
+- Python package: `civStation`
+- Python module: `civStation`
 
 <div align="center">
 
@@ -26,7 +26,7 @@
 ## 📚 Index
 
 - [🚀 Quick Start](#-quick-start)
-- [🎮 通过 `tacticall` 控制器玩 Civ6](#-通过-tacticall-控制器玩-civ6)
+- [🎮 通过 `civ6_tacticall` 手机二维码控制器玩 Civ6](#-通过-civ6_tacticall-手机二维码控制器玩-civ6)
 - [✨ Why CivStation?](#-why-civstation)
 - [🏗️ Architecture](#-architecture)
 - [🕹️ HitL 控制面](#-hitl-控制面)
@@ -65,7 +65,7 @@
 ### 3. 以 wait mode 启动 CivStation 代理服务器
 
 ```bash
-python -m computer_use_test.agent.turn_runner \
+python -m civStation.agent.turn_runner \
   --provider gemini \
   --model gemini-3-flash \
   --turns 100 \
@@ -87,28 +87,28 @@ python -m computer_use_test.agent.turn_runner \
 http://127.0.0.1:8765
 ```
 
-### 4. 启动 `tacticall` 控制器
+### 4. 启动 `civ6_tacticall` 手机控制器
 
-控制器位于独立仓库 [`minsing-jin/tacticall`](https://github.com/minsing-jin/tacticall) 的 `controller/` 目录中。
+手机二维码控制器位于独立仓库 [`minsing-jin/civ6_tacticall`](https://github.com/minsing-jin/civ6_tacticall.git)。
 
 ```bash
-git clone https://github.com/minsing-jin/tacticall.git
-cd tacticall/controller
+git clone https://github.com/minsing-jin/civ6_tacticall.git
+cd civ6_tacticall
 npm install
 npm start
 ```
 
-这会启动控制器 UI 和 relay：
+这会启动二维码移动控制器 UI 和 relay：
 
 ```text
 http://127.0.0.1:8787
 ws://127.0.0.1:8787/ws
 ```
 
-### 5. 配置 `tacticall` 与 CivStation 之间的 bridge
+### 5. 配置 `civ6_tacticall` 与 CivStation 之间的 bridge
 
 ```bash
-cd tacticall/controller
+cd civ6_tacticall
 cp host-config.example.json host-config.json
 ```
 
@@ -137,13 +137,13 @@ cp host-config.example.json host-config.json
 ### 6. 启动 bridge
 
 ```bash
-cd tacticall/controller
+cd civ6_tacticall
 npm run host
 ```
 
 bridge 会做这些事：
 
-1. 以 host 身份连接到 `tacticall` relay
+1. 以 host 身份连接到 `civ6_tacticall` relay
 2. 连接本地 CivStation WebSocket 服务器
 3. 打印控制器配对二维码
 
@@ -164,7 +164,7 @@ bridge 会做这些事：
 
 等价的启动方式：
 
-- 在 `tacticall` 控制器中点击 `Start`
+- 在 `civ6_tacticall` 控制器中点击 `Start`
 - 在本地 CivStation dashboard 中点击 `Start`
 - 调用 `POST /api/agent/start`
 - 发送 WebSocket `{ "type": "control", "action": "start" }`
@@ -188,23 +188,23 @@ bridge 会做这些事：
 - 或调用 `POST /api/agent/stop`
 - 或在本地 dashboard 中停止
 
-## 🎮 通过 `tacticall` 控制器玩 Civ6
+## 🎮 通过 `civ6_tacticall` 手机二维码控制器玩 Civ6
 
 ### 关系
 
 ```text
 Civilization VI game window
   <- screen capture + action execution -> CivStation
-  <- local WebSocket/API bridge -> tacticall/controller
-  <- remote UI -> phone or browser
+  <- local WebSocket/API bridge -> civ6_tacticall
+  <- 远程移动端 UI -> 通过二维码配对的手机浏览器
 ```
 
 ### 端到端控制流
 
 ```text
 Phone / Browser
-  -> tacticall controller
-  -> tacticall relay
+  -> civ6_tacticall controller
+  -> civ6_tacticall relay
   -> bridge.js on host
   -> CivStation WebSocket/API
   -> AgentGate / CommandQueue / Discussion API
@@ -228,6 +228,7 @@ Controller Start button
 - 让 Civ6 始终在主屏幕可见。
 - 不要让本地控制器 UI 覆盖游戏窗口。
 - 尽量用手机或第二台设备操作控制器。
+- 推荐使用 `npm run host` 打印出的二维码，让手机浏览器完成配对。
 - 在 macOS 上，如果想稳定使用自动窗口裁剪，推荐 windowed 或 borderless 模式。
 - 运行过程中尽量不要改变分辨率。
 
@@ -246,20 +247,20 @@ Controller Start button
 
 | 层 | 核心问题 | 主要代码 | 详细文档 |
 |---|---|---|---|
-| `Context` | 当前屏幕和游戏状态是什么？ | `computer_use_test/agent/modules/context/` | [Context README](computer_use_test/agent/modules/context/README.md) |
-| `Strategy` | 在当前状态和人的意图下，下一步应该优先什么？ | `computer_use_test/agent/modules/strategy/` | [Strategy README](computer_use_test/agent/modules/strategy/README.md) |
-| `Action` | 当前画面应该由哪个 primitive 处理，下一步动作是什么？ | `computer_use_test/agent/modules/router/`, `computer_use_test/agent/modules/primitive/` | [Router README](computer_use_test/agent/modules/router/README.md), [Primitive README](computer_use_test/agent/modules/primitive/README.md) |
-| `HitL` | 人如何在运行中介入代理？ | `computer_use_test/agent/modules/hitl/` | [HitL README](computer_use_test/agent/modules/hitl/README.md) |
+| `Context` | 当前屏幕和游戏状态是什么？ | `civStation/agent/modules/context/` | [Context README](civStation/agent/modules/context/README.md) |
+| `Strategy` | 在当前状态和人的意图下，下一步应该优先什么？ | `civStation/agent/modules/strategy/` | [Strategy README](civStation/agent/modules/strategy/README.md) |
+| `Action` | 当前画面应该由哪个 primitive 处理，下一步动作是什么？ | `civStation/agent/modules/router/`, `civStation/agent/modules/primitive/` | [Router README](civStation/agent/modules/router/README.md), [Primitive README](civStation/agent/modules/primitive/README.md) |
+| `HitL` | 人如何在运行中介入代理？ | `civStation/agent/modules/hitl/` | [HitL README](civStation/agent/modules/hitl/README.md) |
 
 ### 文件夹映射
 
 是的，现在这些抽象模块和文件夹是一一对应的。
 
-- `Context` -> `computer_use_test/agent/modules/context/`
-- `Strategy` -> `computer_use_test/agent/modules/strategy/`
-- `HitL` -> `computer_use_test/agent/modules/hitl/`
+- `Context` -> `civStation/agent/modules/context/`
+- `Strategy` -> `civStation/agent/modules/strategy/`
+- `HitL` -> `civStation/agent/modules/hitl/`
 - `Action` 是唯一刻意拆开的部分：
-  它分布在 `computer_use_test/agent/modules/router/` 和 `computer_use_test/agent/modules/primitive/`
+  它分布在 `civStation/agent/modules/router/` 和 `civStation/agent/modules/primitive/`
 
 这是有意的设计，因为“决定由哪个 primitive 处理屏幕”和“真正规划/执行 primitive 动作”是两个不同职责。
 
@@ -308,8 +309,8 @@ ws://127.0.0.1:8765/ws
 
 ### 远程控制器
 
-- [`minsing-jin/tacticall`](https://github.com/minsing-jin/tacticall)
-- `controller/`
+- [`minsing-jin/civ6_tacticall`](https://github.com/minsing-jin/civ6_tacticall.git)
+- 手机二维码控制器 + relay + bridge
 
 ## 🧩 MCP 与 Skill 可扩展性
 
@@ -329,12 +330,12 @@ ws://127.0.0.1:8765/ws
 运行方式：
 
 ```bash
-python -m computer_use_test.mcp.server
+python -m civStation.mcp.server
 ```
 
 文档：
 
-- [MCP README](computer_use_test/mcp/README.md)
+- [MCP README](civStation/mcp/README.md)
 - [Layered MCP Tool Map](docs/layered_mcp.md)
 
 ### Adapter 可扩展性
@@ -375,12 +376,12 @@ MCP 运行时是 adapter 驱动的。
 
 详细层级文档：
 
-- [Context README](computer_use_test/agent/modules/context/README.md)
-- [Strategy README](computer_use_test/agent/modules/strategy/README.md)
-- [Router README](computer_use_test/agent/modules/router/README.md)
-- [Primitive README](computer_use_test/agent/modules/primitive/README.md)
-- [HitL README](computer_use_test/agent/modules/hitl/README.md)
-- [MCP README](computer_use_test/mcp/README.md)
+- [Context README](civStation/agent/modules/context/README.md)
+- [Strategy README](civStation/agent/modules/strategy/README.md)
+- [Router README](civStation/agent/modules/router/README.md)
+- [Primitive README](civStation/agent/modules/primitive/README.md)
+- [HitL README](civStation/agent/modules/hitl/README.md)
+- [MCP README](civStation/mcp/README.md)
 
 其他语言：
 

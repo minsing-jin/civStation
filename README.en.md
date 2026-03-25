@@ -12,8 +12,8 @@ Canonical GitHub repository:
 
 Current package and module names are still:
 
-- Python package: `computer-use-test`
-- Python module: `computer_use_test`
+- Python package: `civStation`
+- Python module: `civStation`
 
 <div align="center">
 
@@ -26,7 +26,7 @@ Current package and module names are still:
 ## 📚 Index
 
 - [🚀 Quick Start](#-quick-start)
-- [🎮 Playing Civ6 With The `tacticall` Controller](#-playing-civ6-with-the-tacticall-controller)
+- [🎮 Playing Civ6 With `civ6_tacticall` Mobile QR Control](#-playing-civ6-with-civ6_tacticall-mobile-qr-control)
 - [✨ Why CivStation?](#-why-civstation)
 - [🏗️ Architecture](#-architecture)
 - [🕹️ HitL Control Surfaces](#-hitl-control-surfaces)
@@ -65,7 +65,7 @@ Why this matters:
 ### 3. Start the CivStation agent server in wait mode
 
 ```bash
-python -m computer_use_test.agent.turn_runner \
+python -m civStation.agent.turn_runner \
   --provider gemini \
   --model gemini-3-flash \
   --turns 100 \
@@ -87,28 +87,28 @@ Open the built-in dashboard:
 http://127.0.0.1:8765
 ```
 
-### 4. Start the `tacticall` controller
+### 4. Start the `civ6_tacticall` mobile controller
 
-The controller lives in the separate [`minsing-jin/tacticall`](https://github.com/minsing-jin/tacticall) repo under `controller/`.
+The mobile QR controller lives in the separate [`minsing-jin/civ6_tacticall`](https://github.com/minsing-jin/civ6_tacticall.git) repo.
 
 ```bash
-git clone https://github.com/minsing-jin/tacticall.git
-cd tacticall/controller
+git clone https://github.com/minsing-jin/civ6_tacticall.git
+cd civ6_tacticall
 npm install
 npm start
 ```
 
-This starts the controller UI and relay:
+This starts the QR-ready mobile controller UI and relay:
 
 ```text
 http://127.0.0.1:8787
 ws://127.0.0.1:8787/ws
 ```
 
-### 5. Configure the bridge between `tacticall` and CivStation
+### 5. Configure the bridge between `civ6_tacticall` and CivStation
 
 ```bash
-cd tacticall/controller
+cd civ6_tacticall
 cp host-config.example.json host-config.json
 ```
 
@@ -137,13 +137,13 @@ Important:
 ### 6. Start the bridge
 
 ```bash
-cd tacticall/controller
+cd civ6_tacticall
 npm run host
 ```
 
 What the bridge does:
 
-1. connects to the `tacticall` relay as the host
+1. connects to the `civ6_tacticall` relay as the host
 2. connects to the local CivStation WebSocket server
 3. prints a QR code for controller pairing
 
@@ -164,7 +164,7 @@ This is the step people miss:
 
 Equivalent ways to start the run:
 
-- press `Start` in the `tacticall` controller
+- press `Start` in the `civ6_tacticall` controller
 - press `Start` in the local CivStation dashboard
 - call `POST /api/agent/start`
 - send WebSocket `{ "type": "control", "action": "start" }`
@@ -188,23 +188,23 @@ When you want the run to end:
 - or use `POST /api/agent/stop`
 - or stop from the local dashboard
 
-## 🎮 Playing Civ6 With The `tacticall` Controller
+## 🎮 Playing Civ6 With `civ6_tacticall` Mobile QR Control
 
 ### Relationship
 
 ```text
 Civilization VI game window
   <- screen capture + action execution -> CivStation
-  <- local WebSocket/API bridge -> tacticall/controller
-  <- remote UI -> phone or browser
+  <- local WebSocket/API bridge -> civ6_tacticall
+  <- remote mobile UI -> phone browser via QR
 ```
 
 ### End-to-end control flow
 
 ```text
 Phone / Browser
-  -> tacticall controller
-  -> tacticall relay
+  -> civ6_tacticall controller
+  -> civ6_tacticall relay
   -> bridge.js on host
   -> CivStation WebSocket/API
   -> AgentGate / CommandQueue / Discussion API
@@ -228,6 +228,7 @@ Controller Start button
 - Keep Civ6 on the main display and visible at all times.
 - Do not cover the game window with the local controller UI.
 - Prefer controlling from a phone or secondary device.
+- Pair the mobile browser by scanning the QR code printed by `npm run host`.
 - Use windowed or borderless mode if you want reliable automatic game-window cropping on macOS.
 - Keep the game at a stable resolution during a run.
 
@@ -246,20 +247,20 @@ Controller Start button
 
 | Layer | Core question | Main code | Details |
 |---|---|---|---|
-| `Context` | What is on the screen and what is the current game state? | `computer_use_test/agent/modules/context/` | [Context README](computer_use_test/agent/modules/context/README.md) |
-| `Strategy` | Given the state and human intent, what should matter next? | `computer_use_test/agent/modules/strategy/` | [Strategy README](computer_use_test/agent/modules/strategy/README.md) |
-| `Action` | Which primitive should handle this screen, and what action should it take? | `computer_use_test/agent/modules/router/`, `computer_use_test/agent/modules/primitive/` | [Router README](computer_use_test/agent/modules/router/README.md), [Primitive README](computer_use_test/agent/modules/primitive/README.md) |
-| `HitL` | How can a human intervene while the agent is running? | `computer_use_test/agent/modules/hitl/` | [HitL README](computer_use_test/agent/modules/hitl/README.md) |
+| `Context` | What is on the screen and what is the current game state? | `civStation/agent/modules/context/` | [Context README](civStation/agent/modules/context/README.md) |
+| `Strategy` | Given the state and human intent, what should matter next? | `civStation/agent/modules/strategy/` | [Strategy README](civStation/agent/modules/strategy/README.md) |
+| `Action` | Which primitive should handle this screen, and what action should it take? | `civStation/agent/modules/router/`, `civStation/agent/modules/primitive/` | [Router README](civStation/agent/modules/router/README.md), [Primitive README](civStation/agent/modules/primitive/README.md) |
+| `HitL` | How can a human intervene while the agent is running? | `civStation/agent/modules/hitl/` | [HitL README](civStation/agent/modules/hitl/README.md) |
 
 ### Folder Mapping
 
 Yes, the abstractions now map directly to folders.
 
-- `Context` lives in `computer_use_test/agent/modules/context/`
-- `Strategy` lives in `computer_use_test/agent/modules/strategy/`
-- `HitL` lives in `computer_use_test/agent/modules/hitl/`
+- `Context` lives in `civStation/agent/modules/context/`
+- `Strategy` lives in `civStation/agent/modules/strategy/`
+- `HitL` lives in `civStation/agent/modules/hitl/`
 - `Action` is the one deliberate split:
-  it lives across `computer_use_test/agent/modules/router/` and `computer_use_test/agent/modules/primitive/`
+  it lives across `civStation/agent/modules/router/` and `civStation/agent/modules/primitive/`
 
 That split is intentional: routing and primitive execution are separate responsibilities.
 
@@ -308,8 +309,8 @@ Supported messages:
 
 ### Remote controller
 
-- [`minsing-jin/tacticall`](https://github.com/minsing-jin/tacticall)
-- `controller/`
+- [`minsing-jin/civ6_tacticall`](https://github.com/minsing-jin/civ6_tacticall.git)
+- mobile QR controller + relay + bridge
 
 ## 🧩 MCP and Skill Extensibility
 
@@ -329,12 +330,12 @@ Tool groups:
 Run it with:
 
 ```bash
-python -m computer_use_test.mcp.server
+python -m civStation.mcp.server
 ```
 
 Docs:
 
-- [MCP README](computer_use_test/mcp/README.md)
+- [MCP README](civStation/mcp/README.md)
 - [Layered MCP Tool Map](docs/layered_mcp.md)
 
 ### Adapter extensibility
@@ -375,12 +376,12 @@ Recommended pattern:
 
 Detailed layer docs:
 
-- [Context README](computer_use_test/agent/modules/context/README.md)
-- [Strategy README](computer_use_test/agent/modules/strategy/README.md)
-- [Router README](computer_use_test/agent/modules/router/README.md)
-- [Primitive README](computer_use_test/agent/modules/primitive/README.md)
-- [HitL README](computer_use_test/agent/modules/hitl/README.md)
-- [MCP README](computer_use_test/mcp/README.md)
+- [Context README](civStation/agent/modules/context/README.md)
+- [Strategy README](civStation/agent/modules/strategy/README.md)
+- [Router README](civStation/agent/modules/router/README.md)
+- [Primitive README](civStation/agent/modules/primitive/README.md)
+- [HitL README](civStation/agent/modules/hitl/README.md)
+- [MCP README](civStation/mcp/README.md)
 
 Other languages:
 

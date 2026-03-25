@@ -12,8 +12,8 @@
 
 현재 패키지/모듈 이름은 아직 다음과 같습니다:
 
-- Python package: `computer-use-test`
-- Python module: `computer_use_test`
+- Python package: `civStation`
+- Python module: `civStation`
 
 <div align="center">
 
@@ -26,7 +26,7 @@
 ## 📚 Index
 
 - [🚀 Quick Start](#-quick-start)
-- [🎮 `tacticall` 컨트롤러로 Civ6 플레이하기](#-tacticall-컨트롤러로-civ6-플레이하기)
+- [🎮 `civ6_tacticall` 모바일 QR 컨트롤러로 Civ6 플레이하기](#-civ6_tacticall-모바일-qr-컨트롤러로-civ6-플레이하기)
 - [✨ Why CivStation?](#-why-civstation)
 - [🏗️ Architecture](#-architecture)
 - [🕹️ HitL 제어면](#-hitl-제어면)
@@ -65,7 +65,7 @@
 ### 3. CivStation 에이전트 서버를 wait mode로 실행
 
 ```bash
-python -m computer_use_test.agent.turn_runner \
+python -m civStation.agent.turn_runner \
   --provider gemini \
   --model gemini-3-flash \
   --turns 100 \
@@ -87,28 +87,28 @@ python -m computer_use_test.agent.turn_runner \
 http://127.0.0.1:8765
 ```
 
-### 4. `tacticall` 컨트롤러 실행
+### 4. `civ6_tacticall` 모바일 컨트롤러 실행
 
-컨트롤러는 별도 저장소 [`minsing-jin/tacticall`](https://github.com/minsing-jin/tacticall) 의 `controller/` 아래에 있습니다.
+모바일 QR 컨트롤러는 별도 저장소 [`minsing-jin/civ6_tacticall`](https://github.com/minsing-jin/civ6_tacticall.git)에 있습니다.
 
 ```bash
-git clone https://github.com/minsing-jin/tacticall.git
-cd tacticall/controller
+git clone https://github.com/minsing-jin/civ6_tacticall.git
+cd civ6_tacticall
 npm install
 npm start
 ```
 
-이렇게 하면 컨트롤러 UI와 relay가 실행됩니다:
+이렇게 하면 QR 기반 모바일 컨트롤러 UI와 relay가 실행됩니다:
 
 ```text
 http://127.0.0.1:8787
 ws://127.0.0.1:8787/ws
 ```
 
-### 5. `tacticall`과 CivStation 사이 bridge 설정
+### 5. `civ6_tacticall`과 CivStation 사이 bridge 설정
 
 ```bash
-cd tacticall/controller
+cd civ6_tacticall
 cp host-config.example.json host-config.json
 ```
 
@@ -137,13 +137,13 @@ cp host-config.example.json host-config.json
 ### 6. bridge 실행
 
 ```bash
-cd tacticall/controller
+cd civ6_tacticall
 npm run host
 ```
 
 bridge가 하는 일:
 
-1. `tacticall` relay에 host로 접속
+1. `civ6_tacticall` relay에 host로 접속
 2. 로컬 CivStation WebSocket 서버에 접속
 3. 컨트롤러 pairing용 QR 코드를 출력
 
@@ -164,7 +164,7 @@ bridge가 하는 일:
 
 동일한 시작 방법:
 
-- `tacticall` 컨트롤러에서 `Start` 누르기
+- `civ6_tacticall` 컨트롤러에서 `Start` 누르기
 - 로컬 CivStation dashboard에서 `Start` 누르기
 - `POST /api/agent/start` 호출
 - WebSocket `{ "type": "control", "action": "start" }` 전송
@@ -188,23 +188,23 @@ bridge가 하는 일:
 - 또는 `POST /api/agent/stop`
 - 또는 로컬 dashboard에서 `stop`
 
-## 🎮 `tacticall` 컨트롤러로 Civ6 플레이하기
+## 🎮 `civ6_tacticall` 모바일 QR 컨트롤러로 Civ6 플레이하기
 
 ### 관계
 
 ```text
 Civilization VI game window
   <- screen capture + action execution -> CivStation
-  <- local WebSocket/API bridge -> tacticall/controller
-  <- remote UI -> phone or browser
+  <- local WebSocket/API bridge -> civ6_tacticall
+  <- 원격 모바일 UI -> QR로 연결된 휴대폰 브라우저
 ```
 
 ### end-to-end 제어 흐름
 
 ```text
 Phone / Browser
-  -> tacticall controller
-  -> tacticall relay
+  -> civ6_tacticall controller
+  -> civ6_tacticall relay
   -> bridge.js on host
   -> CivStation WebSocket/API
   -> AgentGate / CommandQueue / Discussion API
@@ -228,6 +228,7 @@ Controller Start button
 - Civ6는 메인 화면에서 항상 보여야 합니다.
 - 로컬 컨트롤러 UI가 게임 창 위를 덮지 않도록 합니다.
 - 가능하면 휴대폰이나 보조 기기에서 조작합니다.
+- `npm run host`가 출력한 QR 코드를 휴대폰으로 스캔해 모바일 브라우저를 pairing하는 방식을 권장합니다.
 - macOS에서 자동 게임창 크롭을 쓰려면 windowed 또는 borderless 모드를 권장합니다.
 - 실행 중에는 해상도를 바꾸지 않는 편이 좋습니다.
 
@@ -246,20 +247,20 @@ Controller Start button
 
 | 레이어 | 핵심 질문 | 대표 코드 | 상세 문서 |
 |---|---|---|---|
-| `Context` | 지금 화면과 게임 상태를 무엇으로 이해하고 있나? | `computer_use_test/agent/modules/context/` | [Context README](computer_use_test/agent/modules/context/README.md) |
-| `Strategy` | 이 상태에서 무엇을 우선해야 하나? | `computer_use_test/agent/modules/strategy/` | [Strategy README](computer_use_test/agent/modules/strategy/README.md) |
-| `Action` | 어떤 primitive가 이 화면을 처리하고, 다음 행동은 무엇인가? | `computer_use_test/agent/modules/router/`, `computer_use_test/agent/modules/primitive/` | [Router README](computer_use_test/agent/modules/router/README.md), [Primitive README](computer_use_test/agent/modules/primitive/README.md) |
-| `HitL` | 사람이 어떻게 실행 중 개입할 수 있나? | `computer_use_test/agent/modules/hitl/` | [HitL README](computer_use_test/agent/modules/hitl/README.md) |
+| `Context` | 지금 화면과 게임 상태를 무엇으로 이해하고 있나? | `civStation/agent/modules/context/` | [Context README](civStation/agent/modules/context/README.md) |
+| `Strategy` | 이 상태에서 무엇을 우선해야 하나? | `civStation/agent/modules/strategy/` | [Strategy README](civStation/agent/modules/strategy/README.md) |
+| `Action` | 어떤 primitive가 이 화면을 처리하고, 다음 행동은 무엇인가? | `civStation/agent/modules/router/`, `civStation/agent/modules/primitive/` | [Router README](civStation/agent/modules/router/README.md), [Primitive README](civStation/agent/modules/primitive/README.md) |
+| `HitL` | 사람이 어떻게 실행 중 개입할 수 있나? | `civStation/agent/modules/hitl/` | [HitL README](civStation/agent/modules/hitl/README.md) |
 
 ### 폴더 매핑
 
 네. 지금 추상화된 모듈은 폴더 기준으로 직접 대응됩니다.
 
-- `Context` -> `computer_use_test/agent/modules/context/`
-- `Strategy` -> `computer_use_test/agent/modules/strategy/`
-- `HitL` -> `computer_use_test/agent/modules/hitl/`
+- `Context` -> `civStation/agent/modules/context/`
+- `Strategy` -> `civStation/agent/modules/strategy/`
+- `HitL` -> `civStation/agent/modules/hitl/`
 - `Action`만 예외적으로 둘로 나뉩니다:
-  `computer_use_test/agent/modules/router/` + `computer_use_test/agent/modules/primitive/`
+  `civStation/agent/modules/router/` + `civStation/agent/modules/primitive/`
 
 이 분리는 의도적인 설계입니다. 화면을 어떤 primitive가 처리할지 고르는 책임과, 실제 primitive 행동을 계획/실행하는 책임이 다르기 때문입니다.
 
@@ -308,8 +309,8 @@ ws://127.0.0.1:8765/ws
 
 ### 원격 컨트롤러
 
-- [`minsing-jin/tacticall`](https://github.com/minsing-jin/tacticall)
-- `controller/`
+- [`minsing-jin/civ6_tacticall`](https://github.com/minsing-jin/civ6_tacticall.git)
+- 모바일 QR 컨트롤러 + relay + bridge
 
 ## 🧩 MCP와 Skill 확장성
 
@@ -329,12 +330,12 @@ ws://127.0.0.1:8765/ws
 실행:
 
 ```bash
-python -m computer_use_test.mcp.server
+python -m civStation.mcp.server
 ```
 
 문서:
 
-- [MCP README](computer_use_test/mcp/README.md)
+- [MCP README](civStation/mcp/README.md)
 - [Layered MCP Tool Map](docs/layered_mcp.md)
 
 ### Adapter 확장성
@@ -375,12 +376,12 @@ MCP 런타임은 adapter 중심으로 설계되어 있습니다.
 
 상세 레이어 문서:
 
-- [Context README](computer_use_test/agent/modules/context/README.md)
-- [Strategy README](computer_use_test/agent/modules/strategy/README.md)
-- [Router README](computer_use_test/agent/modules/router/README.md)
-- [Primitive README](computer_use_test/agent/modules/primitive/README.md)
-- [HitL README](computer_use_test/agent/modules/hitl/README.md)
-- [MCP README](computer_use_test/mcp/README.md)
+- [Context README](civStation/agent/modules/context/README.md)
+- [Strategy README](civStation/agent/modules/strategy/README.md)
+- [Router README](civStation/agent/modules/router/README.md)
+- [Primitive README](civStation/agent/modules/primitive/README.md)
+- [HitL README](civStation/agent/modules/hitl/README.md)
+- [MCP README](civStation/mcp/README.md)
 
 다른 언어:
 
