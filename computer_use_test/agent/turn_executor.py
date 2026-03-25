@@ -22,6 +22,7 @@ Contains the pure execution functions that run the agent loop:
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 import time
@@ -582,6 +583,15 @@ def run_primitive_loop(
     if active_hitl_directive:
         memory.set_task_hitl_directive(active_hitl_directive, reason="initial task hitl directive")
 
+    def _call_process_method_with_optional_prompt_language(method, /, *args, **kwargs):
+        signature = inspect.signature(method)
+        parameters = signature.parameters
+        if "prompt_language" in parameters or any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()
+        ):
+            kwargs["prompt_language"] = prompt_language
+        return method(*args, **kwargs)
+
     def _emit_policy_event_if_changed() -> None:
         nonlocal last_policy_event_emitted
         if primitive_name != "policy_primitive" or not memory.policy_state.enabled:
@@ -913,12 +923,12 @@ def run_primitive_loop(
             pre_image, screen_w, screen_h, x_offset, y_offset = capture_screen_pil()
             if primitive_name == "policy_primitive":
                 memory.set_policy_capture_geometry(screen_w, screen_h, x_offset, y_offset)
-            observation = process.observe(
+            observation = _call_process_method_with_optional_prompt_language(
+                process.observe,
                 planner_provider,
                 pre_image,
                 memory,
                 normalizing_range=normalizing_range,
-                prompt_language=prompt_language,
                 img_config=planner_img_config,
             )
             plan_end = time.monotonic()
@@ -979,11 +989,11 @@ def run_primitive_loop(
                 and memory.get_best_choice() is None
                 and process.should_auto_decide_from_memory(memory)
             ):
-                decided = process.decide_from_memory(
+                decided = _call_process_method_with_optional_prompt_language(
+                    process.decide_from_memory,
                     planner_provider,
                     memory,
                     high_level_strategy=active_strategy_string,
-                    prompt_language=prompt_language,
                 )
                 if not decided:
                     result.error_message = "Failed to decide best choice from short-term memory"
@@ -997,7 +1007,8 @@ def run_primitive_loop(
                 else:
                     combined_recent_actions = task_recent_actions
 
-            action = process.plan_action(
+            action = _call_process_method_with_optional_prompt_language(
+                process.plan_action,
                 planner_provider,
                 pre_image,
                 memory,
@@ -1005,7 +1016,6 @@ def run_primitive_loop(
                 high_level_strategy=active_strategy_string,
                 recent_actions=combined_recent_actions or "없음",
                 hitl_directive=active_hitl_directive or None,
-                prompt_language=prompt_language,
                 img_config=planner_img_config,
             )
             plan_end = time.monotonic()
@@ -1295,7 +1305,8 @@ def run_primitive_loop(
                         memory=memory,
                         pil_image=post_image,
                     )
-                    no_progress_resolution = process.handle_no_progress(
+                    no_progress_resolution = _call_process_method_with_optional_prompt_language(
+                        process.handle_no_progress,
                         planner_provider,
                         post_image,
                         memory,
@@ -1304,7 +1315,6 @@ def run_primitive_loop(
                         high_level_strategy=strategy_string,
                         recent_actions=recent_actions_str,
                         hitl_directive=hitl_directive,
-                        prompt_language=prompt_language,
                         img_config=planner_img_config,
                     )
                     if no_progress_resolution.handled:
@@ -1368,7 +1378,8 @@ def run_primitive_loop(
                     step + 1,
                     verification.reason,
                 )
-                no_progress_resolution = process.handle_no_progress(
+                no_progress_resolution = _call_process_method_with_optional_prompt_language(
+                    process.handle_no_progress,
                     planner_provider,
                     post_image,
                     memory,
@@ -1377,7 +1388,6 @@ def run_primitive_loop(
                     high_level_strategy=strategy_string,
                     recent_actions=recent_actions_str,
                     hitl_directive=hitl_directive,
-                    prompt_language=prompt_language,
                     img_config=planner_img_config,
                 )
                 if no_progress_resolution.handled:
@@ -1503,7 +1513,8 @@ def run_primitive_loop(
                     memory.current_stage,
                     semantic_verify.reason,
                 )
-                no_progress_resolution = process.handle_no_progress(
+                no_progress_resolution = _call_process_method_with_optional_prompt_language(
+                    process.handle_no_progress,
                     planner_provider,
                     post_image,
                     memory,
@@ -1512,7 +1523,6 @@ def run_primitive_loop(
                     high_level_strategy=strategy_string,
                     recent_actions=recent_actions_str,
                     hitl_directive=hitl_directive,
-                    prompt_language=prompt_language,
                     img_config=planner_img_config,
                 )
                 if no_progress_resolution.handled:
@@ -1542,7 +1552,8 @@ def run_primitive_loop(
                 break
             continue
 
-        no_progress_resolution = process.handle_no_progress(
+        no_progress_resolution = _call_process_method_with_optional_prompt_language(
+            process.handle_no_progress,
             planner_provider,
             post_image,
             memory,
@@ -1551,7 +1562,6 @@ def run_primitive_loop(
             high_level_strategy=strategy_string,
             recent_actions=recent_actions_str,
             hitl_directive=hitl_directive,
-            prompt_language=prompt_language,
             img_config=planner_img_config,
         )
         if no_progress_resolution.handled:

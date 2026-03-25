@@ -575,7 +575,7 @@ def main():
             "planner_provider": planner_provider,
             "normalizing_range": args.range,
             "delay_before_action": args.delay_action,
-            "prompt_language": args.prompt_language,
+            "prompt_language": getattr(args, "prompt_language", "eng"),
             "high_level_strategy": args.strategy,
             "context_manager": ctx,
             "strategy_planner": strategy_planner,
