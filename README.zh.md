@@ -4,6 +4,8 @@
 >
 > 你可以观察屏幕、精炼策略、规划下一步动作，并通过 `HitL` 或 `MCP` 实时介入。
 
+换个角度看，CivStation 也可以理解成一个面向 Civilization VI 的 `VLM harness`。它不是把视觉语言模型直接临时接到截图上，而是把观察、策略、动作规划、执行和人工介入封装进一个结构化循环里。
+
 正式 GitHub 仓库：
 
 - `https://github.com/minsing-jin/civStation`
@@ -66,6 +68,7 @@ python -m computer_use_test.mcp.server
 - `MCP-first`：同样的架构通过稳定的外部控制面暴露出来。
 - `Extensible`：无需重写整个系统，就能替换 adapter、增加 skill、改变 orchestration。
 - `Operator-friendly`：支持本地仪表盘、WebSocket 控制和手机远程控制。
+- `实用型 VLM harness`：不是临时把 VLM 调在原始截图上，而是把上下文、路由、规划、执行和介入点组织成可复用的控制循环。
 
 ## Architecture
 

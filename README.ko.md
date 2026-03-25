@@ -4,6 +4,8 @@
 >
 > 화면을 관찰하고, 전략을 정제하고, 다음 행동을 계획하고, `HitL` 또는 `MCP`로 실시간 개입할 수 있습니다.
 
+다르게 보면 CivStation은 Civilization VI를 위한 `VLM harness`라고도 볼 수 있습니다. 비전-언어 모델을 그냥 스크린샷에 바로 붙이는 대신, 관찰, 전략, 행동 계획, 실행, 사람 개입까지 하나의 구조화된 루프로 감쌉니다.
+
 정식 GitHub 저장소:
 
 - `https://github.com/minsing-jin/civStation`
@@ -66,6 +68,7 @@ python -m computer_use_test.mcp.server
 - `MCP-first`: 같은 아키텍처가 안정적인 외부 제어 인터페이스로도 노출됩니다.
 - `Extensible`: 전체를 다시 쓰지 않고도 adapter, skill, orchestration을 바꿀 수 있습니다.
 - `Operator-friendly`: 로컬 대시보드, WebSocket 제어, 원격 폰 제어까지 지원합니다.
+- `실전형 VLM harness`: 단순히 VLM에 스크린샷을 던지는 방식이 아니라, 컨텍스트, 라우팅, 계획, 실행, 개입 지점을 갖춘 재사용 가능한 제어 루프로 모델을 감쌉니다.
 
 ## Architecture
 

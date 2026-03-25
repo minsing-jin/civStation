@@ -4,6 +4,8 @@
 >
 > Observe the screen, refine strategy, plan the next move, and intervene live through `HitL` or `MCP`.
 
+You can also think of CivStation as a `VLM harness` for Civilization VI: it gives a vision-language model a structured loop for observation, strategy, action planning, execution, and human override.
+
 Canonical GitHub repository:
 
 - `https://github.com/minsing-jin/civStation`
@@ -66,6 +68,7 @@ python -m computer_use_test.mcp.server
 - `MCP-first`: the same architecture is exposed as a stable external control surface.
 - `Extensible`: swap adapters, add skills, and change orchestration without rewriting the whole system.
 - `Operator-friendly`: local dashboard, WebSocket control, and remote phone control are all supported.
+- `A practical VLM harness`: instead of calling a VLM on raw screenshots ad hoc, CivStation wraps the model in a reusable control loop with context, routing, planning, execution, and intervention points.
 
 ## Architecture
 
