@@ -85,6 +85,9 @@ homepage = "https://github.com/minsing-jin/civStation"
 civStation = "civStation.cli:app"
 civStation_mcp = "civStation.mcp.server:main"
 civStation_mcp_install = "civStation.mcp.install_client_assets:main"
+computer_use_test = "computer_use_test.cli:app"
+computer_use_test_mcp = "computer_use_test.mcp.server:main"
+computer_use_test_mcp_install = "computer_use_test.mcp.install_client_assets:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -124,4 +127,4 @@ select = [
 package = true
 
 [tool.setuptools.packages.find]
-include = ["civStation*"]
+include = ["civStation*", "computer_use_test*"]
