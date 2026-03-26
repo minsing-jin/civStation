@@ -1574,12 +1574,12 @@ class PolicyProcess(ScriptedMultiStepProcess):
         assign_x = int(finalize_state.get("assign_x", 0))
         assign_y = int(finalize_state.get("assign_y", 0))
 
-        if not memory.policy_state.changes_made_this_run and not assign_enabled:
+        if not memory.policy_state.drag_history:
             memory.set_policy_event("finalize no changes -> escape")
             return AgentAction(
                 action="press",
                 key="escape",
-                reasoning=reason or "이번 정책 run에서 변경된 카드가 없어 Esc로 종료",
+                reasoning="이번 정책 run에서 drag-and-drop 이력이 없어 Esc로 종료",
                 task_status="complete",
             )
 
@@ -1809,51 +1809,29 @@ class PolicyProcess(ScriptedMultiStepProcess):
         img_config=None,
     ) -> bool:
         memory.set_policy_mode("structured")
-        using_session_cache = memory.has_full_policy_tab_cache() and memory.policy_cache_matches_current_geometry()
-        if using_session_cache:
-            existing_positions = memory.export_policy_tab_cache()["positions"]
-            prompt = (
-                "너는 문명6 정책 화면 bootstrap 분석기야. 현재 화면이 정책 카드 관리 화면이면 아래 JSON만 출력해.\n"
-                "{\n"
-                '  "policy_screen_ready": true,\n'
-                '  "overview_mode": true,\n'
-                '  "visible_tabs": ["전체", "군사", "경제", "외교", "와일드카드", "암흑", "황금기"],\n'
-                '  "wild_slot_active": true,\n'
-                '  "slot_inventory": [\n'
-                '    {"slot_id":"military_1","slot_type":"군사",'
-                '"current_card_name":"","is_empty":true,"active":true,"is_wild":false}\n'
-                "  ]\n"
-                "}\n"
-                '정책 카드 화면이 아니면 {"policy_screen_ready": false} 만 출력해.\n'
-                "규칙:\n"
-                "- 이미 검증된 정책 탭 좌표 cache는 코드가 별도로 갖고 있다. tab_positions는 반환하지 마.\n"
-                "- slot_inventory에는 슬롯 의미 정보만 넣고 좌표는 넣지 마.\n"
-                "- visible_tabs에는 실제로 보이는 탭 이름을 적어도 된다. "
-                "전체/황금기가 보여도 괜찮다.\n"
-                f"- 상위 전략 참고:\n{high_level_strategy}\n"
-            )
-        else:
-            existing_positions = {}
-            prompt = (
-                "너는 문명6 정책 화면 bootstrap 분석기야. 현재 화면이 정책 카드 관리 화면이면 아래 JSON만 출력해.\n"
-                "{\n"
-                '  "policy_screen_ready": true,\n'
-                '  "overview_mode": true,\n'
-                '  "visible_tabs": ["전체", "군사", "경제", "외교", "와일드카드", "암흑", "황금기"],\n'
-                '  "wild_slot_active": true,\n'
-                '  "slot_inventory": [\n'
-                '    {"slot_id":"military_1","slot_type":"군사",'
-                '"current_card_name":"","is_empty":true,"active":true,"is_wild":false}\n'
-                "  ]\n"
-                "}\n"
-                '정책 카드 화면이 아니면 {"policy_screen_ready": false} 만 출력해.\n'
-                "규칙:\n"
-                "- policy entry 직후의 첫 정책 화면은 기본적으로 overview_mode=true 로 본다.\n"
-                "- visible_tabs에는 실제로 보이는 탭 이름을 적어도 된다. "
-                "전체/황금기가 보여도 괜찮다.\n"
-                "- slot_inventory에는 슬롯 의미 정보만 넣고 좌표는 넣지 마.\n"
-                f"- 상위 전략 참고:\n{high_level_strategy}\n"
-            )
+        # TODO: Re-enable session-persistent policy tab cache only after
+        # reliable tab verification is available again.
+        using_session_cache = False
+        prompt = (
+            "너는 문명6 정책 화면 bootstrap 분석기야. 현재 화면이 정책 카드 관리 화면이면 아래 JSON만 출력해.\n"
+            "{\n"
+            '  "policy_screen_ready": true,\n'
+            '  "overview_mode": true,\n'
+            '  "visible_tabs": ["전체", "군사", "경제", "외교", "와일드카드", "암흑", "황금기"],\n'
+            '  "wild_slot_active": true,\n'
+            '  "slot_inventory": [\n'
+            '    {"slot_id":"military_1","slot_type":"군사",'
+            '"current_card_name":"","is_empty":true,"active":true,"is_wild":false}\n'
+            "  ]\n"
+            "}\n"
+            '정책 카드 화면이 아니면 {"policy_screen_ready": false} 만 출력해.\n'
+            "규칙:\n"
+            "- policy entry 직후의 첫 정책 화면은 기본적으로 overview_mode=true 로 본다.\n"
+            "- visible_tabs에는 실제로 보이는 탭 이름을 적어도 된다. "
+            "전체/황금기가 보여도 괜찮다.\n"
+            "- slot_inventory에는 슬롯 의미 정보만 넣고 좌표는 넣지 마.\n"
+            f"- 상위 전략 참고:\n{high_level_strategy}\n"
+        )
         try:
             data = _analyze_structured_json(provider, pil_image, prompt, img_config=img_config, max_tokens=2048)
         except Exception as exc:  # noqa: BLE001
@@ -1879,38 +1857,21 @@ class PolicyProcess(ScriptedMultiStepProcess):
 
         cached_positions: list[dict[str, int | str | bool]] = []
         bootstrap_scale_note = ""
-        if using_session_cache:
-            for tab_name in _POLICY_TAB_NAMES:
-                payload = existing_positions.get(tab_name, {})
-                if not isinstance(payload, dict):
-                    continue
-                cached_positions.append(
-                    {
-                        "tab_name": tab_name,
-                        "screen_x": int(payload.get("screen_x", 0)),
-                        "screen_y": int(payload.get("screen_y", 0)),
-                        "confirmed": bool(payload.get("confirmed", False)),
-                    }
-                )
-            if len(cached_positions) != len(_POLICY_TAB_NAMES):
-                memory.set_policy_event("session cache incomplete -> recalibration required")
-                return False
-        else:
-            cached_positions, bootstrap_scale_note = self._scan_policy_tab_bar_positions(
-                provider,
-                pil_image,
-                memory,
-                normalizing_range=normalizing_range,
-                high_level_strategy=high_level_strategy,
-                img_config=img_config,
-            )
-            if cached_positions is None:
-                return False
-            if set(item["tab_name"] for item in cached_positions) != set(_POLICY_TAB_NAMES):
-                seen_tabs = sorted(str(item["tab_name"]) for item in cached_positions)
-                logger.info("Policy bootstrap rejected: tab positions incomplete (%s)", seen_tabs)
-                memory.set_policy_event(f"bootstrap rejected: tab_positions={seen_tabs}")
-                return False
+        cached_positions, bootstrap_scale_note = self._scan_policy_tab_bar_positions(
+            provider,
+            pil_image,
+            memory,
+            normalizing_range=normalizing_range,
+            high_level_strategy=high_level_strategy,
+            img_config=img_config,
+        )
+        if cached_positions is None:
+            return False
+        if set(item["tab_name"] for item in cached_positions) != set(_POLICY_TAB_NAMES):
+            seen_tabs = sorted(str(item["tab_name"]) for item in cached_positions)
+            logger.info("Policy bootstrap rejected: tab positions incomplete (%s)", seen_tabs)
+            memory.set_policy_event(f"bootstrap rejected: tab_positions={seen_tabs}")
+            return False
 
         normalized_queue = self._build_policy_queue()
 
@@ -2200,6 +2161,43 @@ class PolicyProcess(ScriptedMultiStepProcess):
         memory.set_policy_event(f"plan complete={current_tab} -> finalize")
         return StageTransition(stage="finalize_policy", reason=f"현재 탭 '{current_tab}' 완료 -> finalize")
 
+    def _skip_current_policy_tab_after_exhausted_click(
+        self,
+        memory: ShortTermMemory,
+        *,
+        target_tab: str,
+        relocalized: bool,
+    ) -> NoProgressResolution:
+        """Skip one exhausted tab click after refreshing its cached coordinates."""
+        if not target_tab:
+            return NoProgressResolution()
+
+        memory.reset_stage_failure(f"click_cached_tab:{target_tab}")
+        memory.reset_stage_failure(f"click_next_tab:{target_tab}")
+        memory.clear_policy_verified_active_tab()
+        memory.set_policy_selected_tab("")
+
+        next_tab = memory.get_policy_next_tab_name()
+        self._complete_current_policy_tab(memory)
+        if next_tab:
+            memory.begin_stage("click_next_tab")
+            memory.set_policy_event(
+                f"tab click exhausted={target_tab} skip -> {next_tab} relocalized={'yes' if relocalized else 'no'}"
+            )
+        else:
+            memory.begin_stage("finalize_policy")
+            memory.set_policy_event(
+                f"tab click exhausted={target_tab} skip -> finalize relocalized={'yes' if relocalized else 'no'}"
+            )
+        logger.info(
+            "Policy tab click exhausted for '%s' -> skipping to %s (relocalized=%s)",
+            target_tab,
+            memory.current_stage,
+            relocalized,
+        )
+        memory.capture_checkpoint()
+        return NoProgressResolution(handled=True)
+
     def _normalize_policy_drag_bundle(
         self,
         memory: ShortTermMemory,
@@ -2268,11 +2266,6 @@ class PolicyProcess(ScriptedMultiStepProcess):
         current_tab = memory.get_policy_current_tab_name()
         if not current_tab:
             return None
-
-        if memory.get_policy_verified_active_tab() != current_tab:
-            memory.set_policy_event(f"plan blocked pending verified-active-tab={current_tab}")
-            memory.begin_stage("click_cached_tab")
-            return StageTransition(stage="click_cached_tab", reason=f"현재 탭 '{current_tab}' 활성 검증 후 계획 재개")
 
         slot_lines = []
         for slot in memory.policy_state.slot_inventory.values():
@@ -2369,7 +2362,7 @@ class PolicyProcess(ScriptedMultiStepProcess):
                 memory.policy_state.current_tab_index,
                 memory.get_policy_current_tab_name() or "-",
             )
-            return self._plan_generic_policy_action(
+            planned = self._plan_generic_policy_action(
                 provider,
                 pil_image,
                 memory,
@@ -2381,6 +2374,20 @@ class PolicyProcess(ScriptedMultiStepProcess):
                 img_config=img_config,
                 extra_note=self.build_generic_fallback_note(memory),
             )
+            if (
+                isinstance(planned, AgentAction)
+                and planned.action == "drag"
+                and memory.fallback_return_stage == "plan_current_tab"
+            ):
+                current_tab = memory.get_policy_current_tab_name()
+                if current_tab:
+                    skipped = self._advance_after_current_policy_tab(memory, current_tab)
+                    memory.set_policy_event(f"generic fallback rejected drag={current_tab} -> {skipped.stage}")
+                    return StageTransition(
+                        stage=skipped.stage,
+                        reason=f"현재 탭 '{current_tab}' 복구 단계가 drag를 제안해 다음 탭으로 건너뜀",
+                    )
+            return planned
 
         if not memory.is_policy_entry_done():
             if self._policy_screen_ready(provider, pil_image, img_config=img_config):
@@ -2545,12 +2552,6 @@ class PolicyProcess(ScriptedMultiStepProcess):
             )
 
         if memory.current_stage == "click_cached_tab":
-            if memory.get_policy_selected_tab() == current_tab:
-                if memory.get_policy_verified_active_tab() == current_tab:
-                    memory.set_policy_event(f"click skipped active tab={current_tab}")
-                    memory.begin_stage("plan_current_tab")
-                    return StageTransition(stage="plan_current_tab", reason=f"현재 탭 '{current_tab}'이 이미 활성 상태")
-                memory.set_policy_event(f"click requires reverify active tab={current_tab}")
             memory.set_policy_event(f"click tab={current_tab}")
             return self._build_current_tab_click(memory)
 
@@ -2566,25 +2567,12 @@ class PolicyProcess(ScriptedMultiStepProcess):
                 img_config=img_config,
             )
             if not planned:
-                memory.set_fallback_return_stage(
-                    "plan_current_tab",
-                    self.get_recovery_key(memory, stage_name="plan_current_tab"),
-                )
-                memory.begin_stage("generic_fallback")
-                memory.set_policy_mode("generic_recovery")
-                return self._plan_generic_policy_action(
-                    provider,
-                    pil_image,
-                    memory,
-                    normalizing_range=normalizing_range,
-                    high_level_strategy=high_level_strategy,
-                    recent_actions=recent_actions,
-                    hitl_directive=hitl_directive,
-                    img_config=img_config,
-                    extra_note=(
-                        "현재 탭 계획에 실패했다. policy 화면을 복구한 뒤 현재 활성 탭을 유지한 채 "
-                        "현재 탭 계획을 다시 이어갈 수 있도록 가장 안전한 단일 action을 수행해."
-                    ),
+                skipped = self._advance_after_current_policy_tab(memory, current_tab)
+                memory.set_policy_bundle_action_count(0)
+                memory.set_policy_event(f"plan_current_tab invalid-or-empty={current_tab} -> {skipped.stage}")
+                return StageTransition(
+                    stage=skipped.stage,
+                    reason=f"현재 탭 '{current_tab}'에서 유효한 drag plan이 없어 다음 단계로 진행",
                 )
             if isinstance(planned, StageTransition):
                 reason = (
@@ -2611,9 +2599,14 @@ class PolicyProcess(ScriptedMultiStepProcess):
         return None
 
     def should_verify_action_without_ui_change(self, memory: ShortTermMemory, action: AgentAction) -> bool:
-        if action.action not in {"click", "double_click"}:
-            return False
-        return memory.should_verify_policy_tab_click()
+        # TODO: Re-enable policy semantic verification once VLM quality/latency is
+        # good enough to outperform raw UI-diff gating in live runs.
+        del memory, action
+        return False
+
+    def should_verify_action_after_ui_change(self, memory: ShortTermMemory, action: AgentAction) -> bool:
+        del memory, action
+        return False
 
     def verify_action_success(
         self,
@@ -2624,26 +2617,8 @@ class PolicyProcess(ScriptedMultiStepProcess):
         *,
         img_config=None,
     ) -> SemanticVerifyResult:
-        if action.action not in {"click", "double_click"} or not memory.should_verify_policy_tab_click():
-            return super().verify_action_success(
-                provider,
-                pil_image,
-                memory,
-                action,
-                img_config=img_config,
-            )
-
-        expected_tab = memory.get_policy_click_target_name()
-        if not expected_tab:
-            return SemanticVerifyResult(handled=True, passed=False, reason="policy tab target missing")
-
-        return self._verify_policy_tab_switch(
-            provider,
-            pil_image,
-            memory,
-            expected_tab,
-            img_config=img_config,
-        )
+        del provider, pil_image, memory, action, img_config
+        return SemanticVerifyResult(handled=False)
 
     def on_action_success(self, memory: ShortTermMemory, action: AgentAction) -> None:
         if memory.current_stage == "calibrate_tabs" and action.action in {"click", "double_click"}:
@@ -2695,7 +2670,8 @@ class PolicyProcess(ScriptedMultiStepProcess):
             return
 
         if memory.current_stage == "generic_fallback":
-            memory.clear_policy_verified_active_tab()
+            if memory.fallback_return_stage != "plan_current_tab":
+                memory.clear_policy_verified_active_tab()
             memory.set_policy_mode("structured")
             memory.set_policy_event("generic fallback success -> resume structured flow")
             logger.info("Policy generic fallback success -> resume structured flow")
@@ -2756,40 +2732,14 @@ class PolicyProcess(ScriptedMultiStepProcess):
         prompt_language: str = "eng",
         img_config=None,
     ) -> NoProgressResolution:
-        if memory.current_stage in {"calibrate_tabs", "click_cached_tab", "click_next_tab"}:
-            if memory.current_stage == "calibrate_tabs":
-                target_tab = memory.get_policy_calibration_target_name()
-                retry_stage = "calibrate_tabs"
-                retry_key = f"calibrate_tabs:{target_tab}" if target_tab else "calibrate_tabs"
-                retry_prefix = "calibration"
-                preserve_progress = False
-                next_mode = "calibrating"
-            elif memory.current_stage == "click_cached_tab":
-                target_tab = memory.get_policy_current_tab_name()
-                retry_stage = "click_cached_tab"
-                retry_key = self.get_recovery_key(memory)
-                retry_prefix = "tab click"
-                preserve_progress = True
-                next_mode = "structured"
-            else:
-                target_tab = memory.get_policy_current_tab_name()
-                retry_stage = "click_next_tab"
-                retry_key = self.get_recovery_key(memory)
-                retry_prefix = "tab click"
-                preserve_progress = True
-                next_mode = "structured"
+        if memory.current_stage == "calibrate_tabs":
+            target_tab = memory.get_policy_calibration_target_name()
+            retry_stage = "calibrate_tabs"
+            retry_key = f"calibrate_tabs:{target_tab}" if target_tab else "calibrate_tabs"
+            retry_prefix = "calibration"
 
             if not target_tab:
                 return NoProgressResolution()
-
-            memory.record_policy_failed_tab(target_tab)
-            if len(memory.policy_state.distinct_failed_tabs) >= 2:
-                self._restart_policy_calibration(
-                    memory,
-                    preserve_progress=preserve_progress,
-                    reason="distinct tab failures -> full recalibration",
-                )
-                return NoProgressResolution(handled=True)
 
             def _relocalize_and_retry_once() -> None:
                 relocalized = self._relocalize_failed_tab(
@@ -2800,7 +2750,7 @@ class PolicyProcess(ScriptedMultiStepProcess):
                     normalizing_range=normalizing_range,
                     img_config=img_config,
                 )
-                memory.set_policy_mode(next_mode)
+                memory.set_policy_mode("calibrating")
                 memory.set_policy_event(
                     f"{retry_prefix} retry={target_tab} relocalized={'yes' if relocalized else 'no'}"
                 )
@@ -2818,6 +2768,17 @@ class PolicyProcess(ScriptedMultiStepProcess):
                 stage_key=retry_key,
                 on_first_retry=_relocalize_and_retry_once,
                 reroute_message=f"Policy tab '{target_tab}' failed at stage '{retry_stage}' after retry+fallback",
+            )
+
+        if memory.current_stage in {"click_cached_tab", "click_next_tab"}:
+            target_tab = memory.get_policy_current_tab_name()
+            if not target_tab:
+                return NoProgressResolution()
+            del provider, pil_image, normalizing_range, img_config, high_level_strategy, recent_actions, hitl_directive
+            return self._skip_current_policy_tab_after_exhausted_click(
+                memory,
+                target_tab=target_tab,
+                relocalized=False,
             )
 
         if memory.current_stage == "generic_fallback":

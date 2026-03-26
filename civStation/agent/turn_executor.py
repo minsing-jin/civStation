@@ -618,17 +618,9 @@ def run_primitive_loop(
     def _sync_policy_cache_to_context() -> None:
         if primitive_name != "policy_primitive" or not memory.policy_state.enabled:
             return
-        payload = memory.export_policy_tab_cache()
-        ctx.replace_policy_tab_cache(
-            positions=payload.get("positions"),
-            confirmed_tabs=payload.get("confirmed_tabs"),
-            provisional_tabs=payload.get("provisional_tabs"),
-            capture_geometry=payload.get("capture_geometry"),
-            calibration_complete=bool(payload.get("calibration_complete", False)),
-        )
-        ctx.clear_policy_tab_cache_failures()
-        for tab_name in sorted(memory.policy_state.distinct_failed_tabs):
-            ctx.add_policy_tab_cache_failure(tab_name)
+        # TODO: Re-enable session-persistent policy tab cache only after the
+        # policy stack has reliable verification for reused tab coordinates.
+        ctx.clear_policy_tab_cache()
 
     def _policy_action_summary(actions: list[AgentAction]) -> str:
         parts: list[str] = []
@@ -1251,104 +1243,12 @@ def run_primitive_loop(
             time.sleep(post_action_wait)
         post_image, *_ = capture_screen_pil()
         if primitive_name == "policy_primitive":
-            is_policy_tab_click = display_action.action in {
-                "click",
-                "double_click",
-            } and memory.current_stage in {"calibrate_tabs", "click_cached_tab", "click_next_tab"}
-            policy_requires_semantic_verify = is_policy_tab_click and process.should_verify_action_without_ui_change(
-                memory, display_action
+            memory.set_policy_last_similarity_result("disabled(policy post-click trust mode)")
+            logger.info(
+                "[POLICY] post-action-check | stage=%s current=%s trusted_click_flow=true",
+                memory.current_stage or "-",
+                memory.get_policy_current_tab_name() or "-",
             )
-            semantic_verify_result = None
-            if policy_requires_semantic_verify:
-                semantic_verify_result = process.verify_action_success(
-                    planner_provider,
-                    post_image,
-                    memory,
-                    display_action,
-                    img_config=planner_img_config,
-                )
-                if semantic_verify_result.handled:
-                    memory.set_last_semantic_verify(
-                        "pass" if semantic_verify_result.passed else "fail",
-                        semantic_verify_result.reason,
-                    )
-                semantic_verify_result = _policy_semantic_recheck_once(
-                    semantic_verify_result,
-                    action=display_action,
-                )
-                verify_status = (
-                    "pass"
-                    if semantic_verify_result.handled and semantic_verify_result.passed
-                    else "fail"
-                    if semantic_verify_result.handled
-                    else "unhandled"
-                )
-                memory.set_policy_last_similarity_result(f"skipped(policy semantic-only) tab-check {verify_status}")
-                logger.info(
-                    "[POLICY] post-action-check | stage=%s current=%s similarity=skipped semantic_status=%s",
-                    memory.current_stage or "-",
-                    memory.get_policy_current_tab_name() or "-",
-                    verify_status,
-                )
-                if not semantic_verify_result.handled or not semantic_verify_result.passed:
-                    logger.info(
-                        "Semantic verification failed for %s at stage %s: %s",
-                        primitive_name,
-                        memory.current_stage,
-                        semantic_verify_result.reason if semantic_verify_result else "unhandled",
-                    )
-                    _save_policy_semantic_failure_artifacts(
-                        primitive_name=primitive_name,
-                        stage=memory.current_stage or "-",
-                        semantic_reason=semantic_verify_result.reason if semantic_verify_result else "unhandled",
-                        semantic_details=getattr(semantic_verify_result, "details", {}),
-                        memory=memory,
-                        pil_image=post_image,
-                    )
-                    no_progress_resolution = _call_process_method_with_optional_prompt_language(
-                        process.handle_no_progress,
-                        planner_provider,
-                        post_image,
-                        memory,
-                        last_action=actions_list[-1],
-                        normalizing_range=normalizing_range,
-                        high_level_strategy=strategy_string,
-                        recent_actions=recent_actions_str,
-                        hitl_directive=hitl_directive,
-                        img_config=planner_img_config,
-                    )
-                    if no_progress_resolution.handled:
-                        memory.failure_count = 0
-                        _sync_policy_cache_to_context()
-                        _refresh_multi_step_debug()
-                        _log_policy_state("semantic-no-progress handled", actions_list)
-                        continue
-                    if no_progress_resolution.reroute:
-                        result.re_route = True
-                        result.error_message = no_progress_resolution.error_message or "Semantic verification failed"
-                        _sync_policy_cache_to_context()
-                        _log_policy_state("semantic-no-progress reroute", actions_list)
-                        break
-            elif is_policy_tab_click:
-                skip_reason = (
-                    "skipped(policy confirmed absolute cache)"
-                    if display_action.coord_space == "absolute"
-                    else "skipped(policy semantic-only)"
-                )
-                memory.set_policy_last_similarity_result(skip_reason)
-                logger.info(
-                    "[POLICY] post-action-check | stage=%s current=%s similarity=%s semantic_status=not-required",
-                    memory.current_stage or "-",
-                    memory.get_policy_current_tab_name() or "-",
-                    skip_reason,
-                )
-            else:
-                logger.info(
-                    "[POLICY] post-action-check | stage=%s current=%s "
-                    "similarity=not-applicable semantic_status=not-required",
-                    memory.current_stage or "-",
-                    memory.get_policy_current_tab_name() or "-",
-                )
 
             bundle_task_complete = any(planned_action.task_status == "complete" for planned_action in actions_list)
             if bundle_task_complete:
@@ -1957,20 +1857,7 @@ def run_one_turn(
         )
         if primitive_name == "policy_primitive":
             memory.set_policy_capture_geometry(screen_w, screen_h, x_offset, y_offset)
-            policy_cache = ctx.get_policy_tab_cache()
-            cache_geometry = getattr(policy_cache, "capture_geometry", None)
-            geometry_matches = (
-                cache_geometry is not None
-                and int(getattr(cache_geometry, "region_w", -1)) == screen_w
-                and int(getattr(cache_geometry, "region_h", -1)) == screen_h
-                and int(getattr(cache_geometry, "x_offset", -1)) == x_offset
-                and int(getattr(cache_geometry, "y_offset", -1)) == y_offset
-            )
-            if policy_cache.positions and not geometry_matches:
-                logger.info("Cleared stale session policy tab cache before loop start due to geometry mismatch")
-                ctx.clear_policy_tab_cache()
-                policy_cache = ctx.get_policy_tab_cache()
-            memory.seed_policy_tab_cache(policy_cache)
+            ctx.clear_policy_tab_cache()
 
         # Override image config if primitive has a specific preset
         primitive_img_override = registry_entry.get("img_config_preset")
@@ -2158,22 +2045,7 @@ def run_one_turn(
                 )
                 if primitive_name == "policy_primitive":
                     memory.set_policy_capture_geometry(screen_w, screen_h, x_offset, y_offset)
-                    policy_cache = ctx.get_policy_tab_cache()
-                    cache_geometry = getattr(policy_cache, "capture_geometry", None)
-                    geometry_matches = (
-                        cache_geometry is not None
-                        and int(getattr(cache_geometry, "region_w", -1)) == screen_w
-                        and int(getattr(cache_geometry, "region_h", -1)) == screen_h
-                        and int(getattr(cache_geometry, "x_offset", -1)) == x_offset
-                        and int(getattr(cache_geometry, "y_offset", -1)) == y_offset
-                    )
-                    if policy_cache.positions and not geometry_matches:
-                        logger.info(
-                            "Cleared stale session policy tab cache before rerouted loop due to geometry mismatch"
-                        )
-                        ctx.clear_policy_tab_cache()
-                        policy_cache = ctx.get_policy_tab_cache()
-                    memory.seed_policy_tab_cache(policy_cache)
+                    ctx.clear_policy_tab_cache()
                 loop_result = run_primitive_loop(
                     planner_provider=planner_provider,
                     primitive_name=primitive_name,

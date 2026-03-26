@@ -4929,6 +4929,94 @@ class TestPolicyProcess:
         assert memory.fallback_return_stage == "plan_current_tab"
         assert memory.fallback_return_key == "plan_current_tab:경제"
 
+    def test_generic_fallback_returning_to_plan_current_tab_keeps_verified_active_tab(self):
+        process = get_multi_step_process("policy_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("policy_primitive", enable_policy_state=True)
+        memory.mark_policy_entry_done()
+        memory.init_policy_state(
+            tab_positions=[{"tab_name": "경제", "x": 760, "y": 100, "confirmed": True}],
+            eligible_tabs_queue=["경제"],
+            slot_inventory=[{"slot_id": "economic_1", "slot_type": "경제", "is_empty": True}],
+            wild_slot_active=False,
+            overview_mode=False,
+            selected_tab_name="경제",
+        )
+        memory.mark_policy_tab_confirmed("경제")
+        memory.set_policy_verified_active_tab("경제")
+        memory.begin_stage("generic_fallback")
+        memory.set_fallback_return_stage("plan_current_tab", "plan_current_tab:경제")
+
+        fallback_action = type("A", (), {"action": "click", "reasoning": "정책 화면 복구"})()
+        process.on_action_success(memory, fallback_action)
+        process.on_stage_success(memory, fallback_action, stage_name="generic_fallback")
+
+        planned = process.plan_action(
+            FakeProvider([json.dumps([])]),
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert memory.get_policy_verified_active_tab() == "경제"
+        assert isinstance(planned, StageTransition)
+        assert planned.stage == "finalize_policy"
+        assert memory.current_stage == "finalize_policy"
+
+    def test_generic_fallback_rejects_drag_and_skips_to_next_tab(self):
+        process = get_multi_step_process("policy_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("policy_primitive", enable_policy_state=True)
+        memory.mark_policy_entry_done()
+        memory.init_policy_state(
+            tab_positions=[
+                {"tab_name": "군사", "x": 700, "y": 100, "confirmed": True},
+                {"tab_name": "경제", "x": 760, "y": 100, "confirmed": True},
+            ],
+            eligible_tabs_queue=["군사", "경제"],
+            slot_inventory=[{"slot_id": "military_1", "slot_type": "군사", "is_empty": True}],
+            wild_slot_active=False,
+            overview_mode=False,
+            selected_tab_name="군사",
+        )
+        memory.mark_policy_tab_confirmed("군사")
+        memory.set_policy_verified_active_tab("군사")
+        memory.begin_stage("generic_fallback")
+        memory.set_fallback_return_stage("plan_current_tab", "plan_current_tab:군사")
+
+        planned = process.plan_action(
+            FakeProvider(
+                [
+                    json.dumps(
+                        {
+                            "action": "drag",
+                            "x": 820,
+                            "y": 240,
+                            "end_x": 140,
+                            "end_y": 220,
+                            "reasoning": "복구 단계에서 드래그 제안",
+                            "task_status": "in_progress",
+                        }
+                    )
+                ]
+            ),
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리",
+            recent_actions="없음",
+            hitl_directive=None,
+        )
+
+        assert isinstance(planned, StageTransition)
+        assert planned.stage == "click_next_tab"
+        assert memory.get_policy_current_tab_name() == "경제"
+        assert memory.policy_state.completed_tabs == ["군사"]
+        assert memory.policy_state.last_event == "generic fallback rejected drag=군사 -> click_next_tab"
+
     def test_policy_next_tab_click_success_confirms_advanced_current_tab(self):
         process = get_multi_step_process("policy_primitive", "")
         memory = ShortTermMemory()
@@ -5550,7 +5638,7 @@ class TestPolicyProcess:
             f"경제:raw=(470,520) -> abs=({expected[0]},{expected[1]})"
         )
 
-    def test_second_tab_click_failure_switches_to_generic_fallback(self):
+    def test_second_click_cached_tab_failure_skips_current_tab(self):
         process = get_multi_step_process("policy_primitive", "")
         memory = ShortTermMemory()
         memory.start_task("policy_primitive", enable_policy_state=True)
@@ -5583,9 +5671,12 @@ class TestPolicyProcess:
         )
 
         assert resolution.handled is True
-        assert memory.current_stage == "generic_fallback"
+        assert memory.current_stage == "click_next_tab"
+        assert memory.get_policy_current_tab_name() == "경제"
+        assert memory.policy_state.completed_tabs == ["군사"]
+        assert memory.policy_state.last_event == "tab click exhausted=군사 skip -> 경제 relocalized=no"
 
-    def test_full_session_cache_bootstrap_skips_tab_positions_scan(self):
+    def test_policy_bootstrap_ignores_session_cache_and_scans_tab_positions(self):
         process = get_multi_step_process("policy_primitive", "")
         memory = ShortTermMemory()
         memory.start_task("policy_primitive", enable_policy_state=True)
@@ -5621,7 +5712,18 @@ class TestPolicyProcess:
                         "wild_slot_active": True,
                         "slot_inventory": [{"slot_id": "military_1", "slot_type": "군사", "is_empty": True}],
                     }
-                )
+                ),
+                json.dumps(
+                    {
+                        "tab_positions": [
+                            {"tab_name": "군사", "x": 340, "y": 500},
+                            {"tab_name": "경제", "x": 460, "y": 500},
+                            {"tab_name": "외교", "x": 580, "y": 500},
+                            {"tab_name": "와일드카드", "x": 700, "y": 500},
+                            {"tab_name": "암흑", "x": 820, "y": 500},
+                        ]
+                    }
+                ),
             ]
         )
 
@@ -5634,9 +5736,9 @@ class TestPolicyProcess:
         )
 
         assert bootstrapped is True
-        assert "tab_positions는 반환하지 마" in provider.last_text
+        assert "반드시 군사, 경제, 외교, 와일드카드, 암흑 5개 탭의 중심 좌표만 반환해." in provider.last_text
         assert memory.current_stage == "click_cached_tab"
-        assert memory.policy_state.cache_source == "session_cache"
+        assert memory.policy_state.cache_source == "bootstrap_scan"
         assert memory.policy_state.calibration_pending_tabs == []
 
     def test_policy_calibration_verification_passes_for_matching_tab(self):
@@ -5696,31 +5798,36 @@ class TestPolicyProcess:
         assert verified.passed is False
         assert memory.policy_state.last_tab_check_result.startswith("경제->외교:fail")
 
-    def test_distinct_tab_failures_restart_full_recalibration(self):
+    def test_second_next_tab_click_failure_relocalizes_and_skips_current_tab(self):
         process = get_multi_step_process("policy_primitive", "")
         memory = ShortTermMemory()
         memory.start_task("policy_primitive", enable_policy_state=True)
+        _set_default_policy_geometry(memory)
         memory.mark_policy_entry_done()
+        image = Image.new("RGB", (100, 100))
+        military_pos = _policy_tabbar_global_norm(process, image, x=340, y=500, normalizing_range=1000)
+        economic_pos = _policy_tabbar_global_norm(process, image, x=460, y=500, normalizing_range=1000)
+        diplomatic_pos = _policy_tabbar_global_norm(process, image, x=580, y=500, normalizing_range=1000)
         memory.init_policy_state(
             tab_positions=[
-                {"tab_name": "군사", "x": 700, "y": 100, "confirmed": True},
-                {"tab_name": "경제", "x": 760, "y": 100, "confirmed": True},
-                {"tab_name": "외교", "x": 820, "y": 100, "confirmed": True},
-                {"tab_name": "와일드카드", "x": 880, "y": 100, "confirmed": True},
-                {"tab_name": "암흑", "x": 940, "y": 100, "confirmed": True},
+                {"tab_name": "군사", "x": military_pos[0], "y": military_pos[1], "confirmed": True},
+                {"tab_name": "경제", "x": economic_pos[0], "y": economic_pos[1], "confirmed": True},
+                {"tab_name": "외교", "x": diplomatic_pos[0], "y": diplomatic_pos[1], "confirmed": True},
             ],
-            eligible_tabs_queue=["군사", "경제", "외교", "와일드카드", "암흑"],
+            eligible_tabs_queue=["군사", "경제", "외교"],
             slot_inventory=[{"slot_id": "military_1", "slot_type": "군사", "is_empty": True}],
             wild_slot_active=False,
         )
         memory.mark_policy_tab_completed("군사")
         memory.advance_policy_tab()
-        memory.record_policy_failed_tab("군사")
         memory.begin_stage("click_next_tab")
+        memory.increment_stage_failure("click_next_tab:경제")
+        provider = FakeProvider([json.dumps({"found": True, "tab_name": "경제", "x": 470, "y": 520})])
+        expected = _policy_tabbar_global_norm(process, image, x=470, y=520, normalizing_range=1000)
 
         resolution = process.handle_no_progress(
-            FakeProvider([]),
-            Image.new("RGB", (100, 100)),
+            provider,
+            image,
             memory,
             last_action=type("A", (), {"action": "click"})(),
             normalizing_range=1000,
@@ -5730,12 +5837,15 @@ class TestPolicyProcess:
         )
 
         assert resolution.handled is True
-        assert memory.current_stage == "bootstrap_tabs"
-        assert memory.policy_state.tab_positions == {}
-        assert memory.policy_state.eligible_tabs_queue == ["군사", "경제", "외교", "와일드카드", "암흑"]
-        assert memory.policy_state.completed_tabs == ["군사"]
-        assert memory.get_policy_current_tab_name() == "경제"
-        assert memory.policy_state.last_event == "distinct tab failures -> full recalibration"
+        assert memory.current_stage == "click_next_tab"
+        assert memory.get_policy_current_tab_name() == "외교"
+        assert memory.policy_state.completed_tabs == ["군사", "경제"]
+        assert memory.policy_state.tab_positions["경제"].screen_x == expected[0]
+        assert memory.policy_state.tab_positions["경제"].screen_y == expected[1]
+        assert memory.policy_state.last_relocalize_result == (
+            f"경제:raw=(470,520) -> abs=({expected[0]},{expected[1]})"
+        )
+        assert memory.policy_state.last_event == "tab click exhausted=경제 skip -> 외교 relocalized=yes"
 
     def test_generic_fallback_no_progress_restarts_same_policy_primitive(self):
         process = get_multi_step_process("policy_primitive", "")

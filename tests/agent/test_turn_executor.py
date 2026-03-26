@@ -15,6 +15,7 @@ from civStation.agent.modules.primitive.multi_step_process import (
     StageTransition,
     VerificationResult,
 )
+from civStation.agent.modules.primitive.runtime_hooks import NoProgressResolution
 from civStation.agent.modules.router.primitive_registry import RouterResult
 from civStation.agent.turn_executor import (
     PrimitiveLoopResult,
@@ -94,7 +95,7 @@ class TransitionProcess(BaseMultiStepProcess):
         return VerificationResult(True, "ok")
 
 
-class PolicySemanticOnlyProcess(BaseMultiStepProcess):
+class PolicyUiDiffSuccessProcess(BaseMultiStepProcess):
     def __init__(self):
         super().__init__("policy_primitive", "")
         self.calls = 0
@@ -119,31 +120,36 @@ class PolicySemanticOnlyProcess(BaseMultiStepProcess):
             action="click",
             x=850,
             y=920,
-            reasoning="finish after bypassed tab click",
+            reasoning="finish after ui diff tab click",
             task_status="complete",
         )
 
     def should_verify_action_without_ui_change(self, memory: ShortTermMemory, action: AgentAction) -> bool:
-        return memory.should_verify_policy_tab_click()
+        return False
+
+    def should_verify_action_after_ui_change(self, memory: ShortTermMemory, action: AgentAction) -> bool:
+        return False
 
     def verify_action_success(self, provider, pil_image, memory, action, **kwargs) -> SemanticVerifyResult:
         self.verify_called += 1
-        return SemanticVerifyResult(handled=True, passed=True, reason="semantic tab ok")
+        raise AssertionError("policy should not call semantic verification")
 
     def on_action_success(self, memory: ShortTermMemory, action: AgentAction) -> None:
         self.success_called = True
-        memory.mark_policy_tab_confirmed("군사")
-        memory.begin_stage("finalize_policy")
+        if action.task_status != "complete":
+            memory.mark_policy_tab_confirmed("군사")
+            memory.begin_stage("finalize_policy")
 
     def verify_completion(self, provider, pil_image, memory, **kwargs) -> VerificationResult:
         return VerificationResult(True, "ok")
 
 
-class PolicySemanticGateProcess(BaseMultiStepProcess):
+class PolicyUiDiffNoProgressProcess(BaseMultiStepProcess):
     def __init__(self):
         super().__init__("policy_primitive", "")
         self.calls = 0
         self.verify_called = 0
+        self.no_progress_called = 0
 
     def initialize(self, memory: ShortTermMemory) -> None:
         return None
@@ -160,76 +166,32 @@ class PolicySemanticGateProcess(BaseMultiStepProcess):
                 task_status="in_progress",
             )
         return AgentAction(
-            action="click",
-            x=850,
-            y=920,
-            reasoning="finish after semantic tab verification",
-            task_status="complete",
-        )
-
-    def should_verify_action_without_ui_change(self, memory: ShortTermMemory, action: AgentAction) -> bool:
-        return memory.should_verify_policy_tab_click()
-
-    def verify_action_success(self, provider, pil_image, memory, action, **kwargs) -> SemanticVerifyResult:
-        self.verify_called += 1
-        return SemanticVerifyResult(handled=True, passed=True, reason="semantic tab ok")
-
-    def on_action_success(self, memory: ShortTermMemory, action: AgentAction) -> None:
-        memory.mark_policy_tab_confirmed("군사")
-        memory.begin_stage("finalize_policy")
-
-    def verify_completion(self, provider, pil_image, memory, **kwargs) -> VerificationResult:
-        return VerificationResult(True, "ok")
-
-
-class PolicyEmptyPanelProcess(BaseMultiStepProcess):
-    def __init__(self):
-        super().__init__("policy_primitive", "")
-        self.calls = 0
-        self.verify_called = 0
-        self.no_progress_called = 0
-
-    def initialize(self, memory: ShortTermMemory) -> None:
-        return None
-
-    def plan_action(self, provider, pil_image, memory, **kwargs):
-        self.calls += 1
-        if self.calls == 1:
-            return AgentAction(
-                action="click",
-                coord_space="absolute",
-                x=820,
-                y=100,
-                reasoning="empty diplomatic tab click",
-                task_status="in_progress",
-            )
-        return AgentAction(
             action="press",
             key="escape",
-            reasoning="finish no-change policy run",
+            reasoning="finish after ui-diff retry handling",
             task_status="complete",
         )
 
     def should_verify_action_without_ui_change(self, memory: ShortTermMemory, action: AgentAction) -> bool:
-        return memory.should_verify_policy_tab_click()
+        return False
+
+    def should_verify_action_after_ui_change(self, memory: ShortTermMemory, action: AgentAction) -> bool:
+        return False
 
     def verify_action_success(self, provider, pil_image, memory, action, **kwargs) -> SemanticVerifyResult:
         self.verify_called += 1
-        return SemanticVerifyResult(
-            handled=True,
-            passed=True,
-            reason="empty panel accepted",
-            details={"expected_tab": "외교", "card_list_observed": "empty", "card_list_status": "ok"},
-        )
+        raise AssertionError("policy should not call semantic verification")
 
-    def handle_no_progress(self, provider, pil_image, memory, **kwargs):
+    def handle_no_progress(self, provider, pil_image, memory, **kwargs) -> NoProgressResolution:
         self.no_progress_called += 1
-        return super().handle_no_progress(provider, pil_image, memory, **kwargs)
+        memory.mark_policy_tab_confirmed("군사")
+        memory.begin_stage("finalize_policy")
+        return NoProgressResolution(handled=True)
 
     def on_action_success(self, memory: ShortTermMemory, action: AgentAction) -> None:
-        if action.action == "click":
-            memory.mark_policy_tab_confirmed("외교")
-            memory.begin_stage("plan_current_tab")
+        if action.task_status != "complete":
+            memory.mark_policy_tab_confirmed("군사")
+            memory.begin_stage("finalize_policy")
 
     def verify_completion(self, provider, pil_image, memory, **kwargs) -> VerificationResult:
         return VerificationResult(True, "ok")
@@ -265,6 +227,15 @@ class PolicyDragProcess(BaseMultiStepProcess):
             reasoning="finish after drag",
             task_status="complete",
         )
+
+    def should_verify_action_without_ui_change(self, memory: ShortTermMemory, action: AgentAction) -> bool:
+        return False
+
+    def should_verify_action_after_ui_change(self, memory: ShortTermMemory, action: AgentAction) -> bool:
+        return False
+
+    def verify_action_success(self, provider, pil_image, memory, action, **kwargs) -> SemanticVerifyResult:
+        raise AssertionError("policy should not call semantic verification")
 
     def on_actions_success(self, memory: ShortTermMemory, actions: list[AgentAction]) -> None:
         self.drag_success_called = True
@@ -1073,8 +1044,8 @@ class TestRunPrimitiveLoop:
 
         assert wait_seconds == 0.5
 
-    def test_policy_confirmed_tab_uses_semantic_gate_without_similarity_check(self, monkeypatch):
-        process = PolicySemanticOnlyProcess()
+    def test_policy_tab_click_trusts_execution_without_ui_diff_or_semantic_verify(self, monkeypatch):
+        process = PolicyUiDiffSuccessProcess()
         provider = DummyProvider()
         image = Image.new("RGB", (100, 100))
         memory = ShortTermMemory()
@@ -1123,12 +1094,10 @@ class TestRunPrimitiveLoop:
         assert result.success is True
         assert process.success_called is True
         assert process.verify_called == 0
-        assert memory.policy_state.last_similarity_result == "skipped(policy confirmed absolute cache)"
-        assert memory.last_semantic_verify == ""
-        assert self.ctx.get_policy_tab_cache().positions["군사"].screen_x == 200
+        assert self.ctx.get_policy_tab_cache().positions == {}
 
-    def test_policy_provisional_tab_uses_semantic_gate_and_confirms_cache(self, monkeypatch):
-        process = PolicySemanticGateProcess()
+    def test_policy_tab_click_does_not_route_through_no_progress(self, monkeypatch):
+        process = PolicyUiDiffNoProgressProcess()
         provider = DummyProvider()
         image = Image.new("RGB", (100, 100))
         memory = ShortTermMemory()
@@ -1176,63 +1145,9 @@ class TestRunPrimitiveLoop:
         )
 
         assert result.success is True
-        assert process.verify_called == 1
-        assert memory.policy_state.last_similarity_result == "skipped(policy semantic-only) tab-check pass"
-        assert memory.last_semantic_verify == "pass: semantic tab ok"
-        assert self.ctx.get_policy_tab_cache().positions["군사"].confirmed is True
-
-    def test_policy_empty_panel_success_does_not_enter_no_progress_loop(self, monkeypatch):
-        process = PolicyEmptyPanelProcess()
-        provider = DummyProvider()
-        image = Image.new("RGB", (100, 100))
-        memory = ShortTermMemory()
-        memory.start_task("policy_primitive", enable_policy_state=True)
-        memory.init_policy_state(
-            tab_positions=[{"tab_name": "외교", "x": 820, "y": 100}],
-            eligible_tabs_queue=["외교"],
-            slot_inventory=[{"slot_id": "diplomatic_1", "slot_type": "외교", "is_empty": True}],
-            wild_slot_active=False,
-            provisional_tabs=["외교"],
-        )
-        memory.begin_stage("click_cached_tab")
-
-        monkeypatch.setattr("civStation.agent.turn_executor.get_multi_step_process", lambda *args: process)
-        monkeypatch.setattr(
-            "civStation.agent.turn_executor.capture_screen_pil",
-            lambda: (image, 1440, 900, 0, 0),
-        )
-        monkeypatch.setattr("civStation.agent.turn_executor.execute_action", lambda *args: None)
-        monkeypatch.setattr("civStation.agent.turn_executor.move_cursor_to_center", lambda *args: None)
-        monkeypatch.setattr(
-            "civStation.agent.turn_executor.screenshots_similar",
-            lambda *args, **kwargs: (_ for _ in ()).throw(
-                AssertionError("policy should not use screenshot similarity")
-            ),
-        )
-
-        result = run_primitive_loop(
-            planner_provider=provider,
-            primitive_name="policy_primitive",
-            screen_w=1440,
-            screen_h=900,
-            normalizing_range=1000,
-            x_offset=0,
-            y_offset=0,
-            strategy_string="",
-            recent_actions_str="없음",
-            hitl_directive=None,
-            memory=memory,
-            ctx=self.ctx,
-            max_steps=4,
-            completion_condition="",
-            planner_img_config=None,
-            delay_before_action=0,
-        )
-
-        assert result.success is True
-        assert process.verify_called == 1
         assert process.no_progress_called == 0
-        assert memory.policy_state.last_similarity_result == "skipped(policy semantic-only) tab-check pass"
+        assert process.verify_called == 0
+        assert self.ctx.get_policy_tab_cache().positions == {}
 
     def test_policy_semantic_failure_artifacts_are_saved_next_to_run_log(self, tmp_path, monkeypatch):
         memory = ShortTermMemory()
@@ -1282,7 +1197,7 @@ class TestRunPrimitiveLoop:
         assert manifest["current_tab"] == "군사"
         assert manifest["selected_tab_name"] == "전체"
 
-    def test_policy_drag_progress_does_not_call_screenshot_similarity(self, monkeypatch):
+    def test_policy_drag_progress_does_not_use_screenshot_similarity(self, monkeypatch):
         process = PolicyDragProcess()
         provider = DummyProvider()
         image = Image.new("RGB", (100, 100))
@@ -1331,7 +1246,6 @@ class TestRunPrimitiveLoop:
 
         assert result.success is True
         assert process.drag_success_called is True
-        assert memory.policy_state.last_similarity_result == ""
 
     def test_multistep_observation_moves_cursor_to_center_before_observe(self, monkeypatch):
         process = ObservationPrepProcess()

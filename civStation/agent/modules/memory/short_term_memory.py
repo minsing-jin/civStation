@@ -167,6 +167,7 @@ class PolicyState:
     selected_tab_name: str = ""
     verified_active_tab_name: str = ""
     changes_made_this_run: bool = False
+    drag_history: list[str] = field(default_factory=list)
     visible_tabs: list[str] = field(default_factory=list)
     tab_positions: dict[str, PolicyTabPosition] = field(default_factory=dict)
     capture_geometry: PolicyCaptureGeometry | None = None
@@ -183,6 +184,7 @@ class PolicyState:
     restart_current_tab_index: int = 0
     restart_completed_tabs: list[str] = field(default_factory=list)
     restart_changes_made_this_run: bool = False
+    restart_drag_history: list[str] = field(default_factory=list)
     cache_source: str = ""
     last_similarity_result: str = ""
     last_tab_check_result: str = ""
@@ -914,6 +916,7 @@ class ShortTermMemory:
         resume_index = self.policy_state.restart_current_tab_index
         resume_completed = list(self.policy_state.restart_completed_tabs)
         resume_changes_made = bool(self.policy_state.restart_changes_made_this_run)
+        resume_drag_history = list(self.policy_state.restart_drag_history)
         self.policy_state.enabled = True
         self.policy_state.mode = "structured"
         self.policy_state.bootstrap_complete = True
@@ -926,6 +929,7 @@ class ShortTermMemory:
         self.policy_state.selected_tab_name = selected_tab_name
         self.policy_state.verified_active_tab_name = ""
         self.policy_state.changes_made_this_run = resume_changes_made
+        self.policy_state.drag_history = resume_drag_history
         self.policy_state.visible_tabs = list(visible_tabs or [])
         self.policy_state.provisional_tabs = {str(tab) for tab in (provisional_tabs or [])}
         self.policy_state.calibration_pending_tabs = list(calibration_pending_tabs or [])
@@ -937,6 +941,7 @@ class ShortTermMemory:
         self.policy_state.restart_current_tab_index = 0
         self.policy_state.restart_completed_tabs = []
         self.policy_state.restart_changes_made_this_run = False
+        self.policy_state.restart_drag_history = []
         self.policy_state.cache_source = cache_source.strip()
         self.policy_state.last_similarity_result = ""
         self.policy_state.last_tab_check_result = ""
@@ -1441,6 +1446,8 @@ class ShortTermMemory:
             slot.selected_from_tab = source_tab
             slot.selection_reason = reasoning
             self.policy_state.changes_made_this_run = True
+            history_entry = f"{source_tab}:{card_name}->{target_slot_id}"
+            self.policy_state.drag_history.append(history_entry)
 
     def mark_policy_tab_completed(self, tab_name: str) -> None:
         """Mark a tab as fully processed."""
@@ -1508,6 +1515,7 @@ class ShortTermMemory:
         restart_index = self.policy_state.current_tab_index if preserve_progress else 0
         restart_completed = list(self.policy_state.completed_tabs) if preserve_progress else []
         restart_changes_made = self.policy_state.changes_made_this_run if preserve_progress else False
+        restart_drag_history = list(self.policy_state.drag_history) if preserve_progress else []
         restart_tabs = copy.deepcopy(self.policy_state.tab_positions) if preserve_tab_positions else {}
         restart_provisional = set(self.policy_state.provisional_tabs) if preserve_tab_positions else set()
         restart_cache_geometry = copy.deepcopy(self.policy_state.cache_geometry) if preserve_tab_positions else None
@@ -1524,6 +1532,7 @@ class ShortTermMemory:
         self.policy_state.selected_tab_name = ""
         self.policy_state.verified_active_tab_name = ""
         self.policy_state.changes_made_this_run = restart_changes_made
+        self.policy_state.drag_history = restart_drag_history
         self.policy_state.visible_tabs = []
         self.policy_state.tab_positions = restart_tabs
         self.policy_state.cache_geometry = restart_cache_geometry
@@ -1538,6 +1547,7 @@ class ShortTermMemory:
         self.policy_state.restart_current_tab_index = restart_index
         self.policy_state.restart_completed_tabs = restart_completed
         self.policy_state.restart_changes_made_this_run = restart_changes_made
+        self.policy_state.restart_drag_history = restart_drag_history
         self.policy_state.cache_source = self.policy_state.cache_source if preserve_tab_positions else ""
         self.policy_state.last_similarity_result = ""
         self.policy_state.last_tab_check_result = ""
@@ -1617,6 +1627,8 @@ class ShortTermMemory:
             )
             lines.append(f"overview_mode={self.policy_state.overview_mode}")
             lines.append(f"changes_made_this_run={self.policy_state.changes_made_this_run}")
+            if self.policy_state.drag_history:
+                lines.append(f"drag_count={len(self.policy_state.drag_history)}")
             lines.append(f"bootstrap_failures={self.policy_state.bootstrap_failures}")
             if self.policy_state.entry_done:
                 lines.append("entry_done=true")
