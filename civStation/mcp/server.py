@@ -11,7 +11,9 @@ from PIL import Image
 from civStation.agent.modules.hitl.command_queue import Directive, DirectiveType
 from civStation.agent.modules.memory.short_term_memory import ShortTermMemory
 from civStation.agent.modules.strategy.strategy_schemas import StructuredStrategy
+from civStation.mcp.client_templates import render_client_template
 from civStation.mcp.codec import deserialize_value, serialize_value
+from civStation.mcp.layer_contracts import describe_layer_contracts
 from civStation.mcp.runtime import CaptureArtifact, LayerAdapterRegistry, SessionRuntimeConfig
 from civStation.mcp.session import LayeredSession, SessionRegistry
 from civStation.utils.llm_provider.parser import AgentAction
@@ -682,28 +684,17 @@ class LayeredComputerUseMCP:
             session = self._get_session(session_id)
             return json.dumps(session.memory_payload(), ensure_ascii=False, indent=2)
 
+        @mcp.resource("civ6://contracts/layers", mime_type="application/json")
+        def layer_contracts_resource() -> str:
+            return json.dumps(describe_layer_contracts(), ensure_ascii=False, indent=2)
+
         @mcp.resource("civ6://install/codex-config", mime_type="text/plain")
         def codex_install_resource() -> str:
-            return (
-                "[mcp_servers.computer-use-layered]\n"
-                'command = ".venv/bin/python"\n'
-                'args = ["-m", "civStation.mcp.server", "--transport", "stdio"]\n'
-            )
+            return render_client_template("codex")
 
-        @mcp.resource("civ6://install/claude-desktop-config", mime_type="application/json")
-        def claude_desktop_install_resource() -> str:
-            return json.dumps(
-                {
-                    "mcpServers": {
-                        "computer-use-layered": {
-                            "command": ".venv/bin/python",
-                            "args": ["-m", "civStation.mcp.server", "--transport", "stdio"],
-                        }
-                    }
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
+        @mcp.resource("civ6://install/claude-code-project-mcp-json", mime_type="application/json")
+        def claude_code_install_resource() -> str:
+            return render_client_template("claude-code")
 
         @mcp.resource("civ6://install/http-client-example", mime_type="text/plain")
         def http_install_resource() -> str:
@@ -763,9 +754,10 @@ class LayeredComputerUseMCP:
         @mcp.prompt(name="client_setup_workflow")
         def client_setup_workflow(client: str = "codex") -> str:
             normalized = client.strip().lower()
-            if normalized == "claude-desktop":
+            if normalized == "claude-code":
                 return (
-                    "Read resource `civ6://install/claude-desktop-config` and copy the MCP server block.\n"
+                    "Read resource `civ6://install/claude-code-project-mcp-json` or run:\n"
+                    "`python -m civStation.mcp.install_client_assets --client claude-code --write`\n"
                     "Then start with:\n"
                     "1. session_create\n"
                     "2. adapter_list\n"
@@ -782,7 +774,8 @@ class LayeredComputerUseMCP:
                     "4. action_plan\n"
                 )
             return (
-                "Read resource `civ6://install/codex-config` and register the server in project or user config.\n"
+                "Read resource `civ6://install/codex-config` or run:\n"
+                "`python -m civStation.mcp.install_client_assets --client codex --write`\n"
                 "Then use:\n"
                 "1. session_create\n"
                 "2. adapter_list\n"

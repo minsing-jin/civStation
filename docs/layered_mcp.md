@@ -168,12 +168,19 @@ This keeps the default posture safe for external users and generic MCP clients.
 The server exposes installation resources for common clients:
 
 - `civ6://install/codex-config`
-- `civ6://install/claude-desktop-config`
+- `civ6://install/claude-code-project-mcp-json`
 - `civ6://install/http-client-example`
 
-And a setup prompt:
+Repo-tracked host templates live under:
+
+- `templates/clients/codex/`
+- `templates/clients/claude-code/`
+
+And a setup prompt / installer:
 
 - `client_setup_workflow`
+- `python -m civStation.mcp.install_client_assets --client codex --write`
+- `python -m civStation.mcp.install_client_assets --client claude-code --write`
 
 ## Example Usage Patterns
 

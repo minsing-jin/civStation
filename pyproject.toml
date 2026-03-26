@@ -84,6 +84,7 @@ homepage = "https://github.com/minsing-jin/civStation"
 [project.scripts]
 civStation = "civStation.cli:app"
 civStation_mcp = "civStation.mcp.server:main"
+civStation_mcp_install = "civStation.mcp.install_client_assets:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

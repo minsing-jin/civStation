@@ -300,13 +300,13 @@ def test_action_workflow_and_hitl_tools(tmp_path: Path):
 
 
 def test_execution_guard_transport_config_and_install_resources(tmp_path: Path):
-    from computer_use_test.mcp.install_client_assets import (
+    from civStation.mcp.install_client_assets import (
         create_argument_parser as create_install_argument_parser,
     )
-    from computer_use_test.mcp.install_client_assets import (
+    from civStation.mcp.install_client_assets import (
         render_client_template,
     )
-    from computer_use_test.mcp.server import LayeredComputerUseMCP, create_argument_parser
+    from civStation.mcp.server import LayeredComputerUseMCP, create_argument_parser
 
     registry, execution_log = _build_fake_registry()
     app = LayeredComputerUseMCP(
@@ -430,15 +430,21 @@ def test_execution_guard_transport_config_and_install_resources(tmp_path: Path):
 
     codex_resource = _read_resource(app, "civ6://install/codex-config")
     assert 'command = ".venv/bin/python"' in codex_resource[0].content
-    assert '"computer_use_test.mcp.server"' in codex_resource[0].content
+    assert '"civStation.mcp.server"' in codex_resource[0].content
     assert '"stdio"' in codex_resource[0].content
 
     claude_resource = _read_resource(app, "civ6://install/claude-code-project-mcp-json")
     assert '"mcpServers"' in claude_resource[0].content
-    assert "computer_use_test.mcp.server" in claude_resource[0].content
+    assert "civStation.mcp.server" in claude_resource[0].content
 
     http_resource = _read_resource(app, "civ6://install/http-client-example")
     assert "http://127.0.0.1:8000/mcp" in http_resource[0].content
+
+    contracts_resource = _read_resource(app, "civ6://contracts/layers")
+    assert '"strategy_context"' in contracts_resource[0].content
+    assert '"background"' in contracts_resource[0].content
+    assert '"primitive_action"' in contracts_resource[0].content
+    assert '"main_thread"' in contracts_resource[0].content
 
     setup_prompt = _get_prompt(app, "client_setup_workflow", {"client": "claude-code"})
     setup_text = setup_prompt.messages[0].content.text
