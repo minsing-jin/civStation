@@ -340,7 +340,7 @@ Supported messages:
 
 ### MCP
 
-This repository exposes the same architecture through a layered MCP server.
+This repository exposes the same architecture through a layered MCP server so the Civ agent can be reused as a portable capability instead of only as an internal code path.
 
 Tool groups:
 
@@ -357,14 +357,42 @@ Run it with:
 python -m civStation.mcp.server
 ```
 
+or install the console script and run:
+
+```bash
+civStation_mcp
+```
+
+For remote or hosted MCP clients:
+
+```bash
+python -m civStation.mcp.server \
+  --transport streamable-http \
+  --host 127.0.0.1 \
+  --port 8000 \
+  --streamable-http-path /mcp \
+  --json-response \
+  --stateless-http
+```
+
 Docs:
 
 - [MCP README](civStation/mcp/README.md)
 - [Layered MCP Tool Map](docs/layered_mcp.md)
 
+### Strict Layer Separation
+
+The MCP contract preserves the runtime split used by the project:
+
+- `strategy/context`: background-oriented
+- `primitive action`: main-thread oriented
+- `hitl`: external queue / relay oriented
+
+This separation is exposed as a portable contract through tools, resources, and prompts rather than through host-specific wrapper logic.
+
 ### Adapter extensibility
 
-The MCP runtime is adapter-driven.
+The MCP runtime is still adapter-driven inside those layer boundaries.
 
 Default extension slots:
 
@@ -376,25 +404,38 @@ Default extension slots:
 
 You can register adapters in `LayerAdapterRegistry` and select them per session through `adapter_overrides`.
 
-### Skill extensibility
+### Portable host setup
 
-This repo also supports skill-based agent workflows.
+This repo ships host templates and an installer instead of hard-wiring one host's local skill/config folder into the repository.
 
-Current skill roots:
+Templates:
 
-- `.codex/skills/`
-- `.agents/skills/`
+- `templates/clients/codex/`
+- `templates/clients/claude-code/`
 
-Existing project-facing example:
+Installer:
 
-- `.codex/skills/computer-use-mcp/SKILL.md`
+```bash
+python -m civStation.mcp.install_client_assets --client codex --write
+python -m civStation.mcp.install_client_assets --client claude-code --write
+```
 
-Recommended pattern:
+Setup resources exposed by MCP:
 
-1. keep skills thin and stable
-2. use MCP as the control plane
-3. put reusable workflows in `SKILL.md`
-4. keep scripts and references next to the skill
+- `civ6://install/codex-config`
+- `civ6://install/claude-code-project-mcp-json`
+- `civ6://install/http-client-example`
+- `civ6://contracts/layers`
+
+### Safety defaults
+
+Live action execution is disabled by default.
+
+- default session runtime: `execution_mode="dry_run"`
+- live execution requires `session_config_update(... execution_mode="live")`
+- if confirmation is enabled, callers must also pass `confirm_execute=true`
+
+That keeps the MCP surface safe for new users while still allowing real execution when explicitly unlocked.
 
 ## 📖 Documentation
 
