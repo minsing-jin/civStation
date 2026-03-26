@@ -27,6 +27,30 @@ And adds orchestration on top:
 - `workflow`
 - `session`
 
+## Runtime Split
+
+The session/runtime model should be understood as a real layered runtime, not just a state bag.
+
+- `background runtime`
+  - context observation
+  - turn detection
+  - strategy refresh
+- `main-thread action runtime`
+  - routing
+  - planning
+  - execution
+- `hitl runtime`
+  - external controller
+  - dashboard
+  - relay/mobile client
+
+This split is the core value:
+
+- background reasoning can stay asynchronous
+- the action loop can remain focused and interruptible
+- HITL can stay outside the action loop while still steering it safely
+- sessions become useful runtime containers for skills and external agents
+
 ## Session Model
 
 Each MCP session owns:

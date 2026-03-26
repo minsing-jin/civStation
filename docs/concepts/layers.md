@@ -11,6 +11,25 @@ The high-level architecture is simple once you map the abstractions to folders.
 | `Action` | Which primitive should handle this screen, and what action should it take? | `civStation/agent/modules/router/`, `civStation/agent/modules/primitive/` | routed primitive + normalized action |
 | `HitL` | How can a human supervise, interrupt, or redirect the run? | `civStation/agent/modules/hitl/` | lifecycle control, directives, dashboard state |
 
+## Runtime Lanes
+
+The layered architecture is also split by runtime lane:
+
+- `background runtime`
+  - context updates
+  - turn tracking
+  - strategy updates
+- `main-thread action runtime`
+  - screen routing
+  - primitive planning
+  - action execution
+- `hitl runtime`
+  - dashboard
+  - relay/mobile controller
+  - external lifecycle and directive control
+
+This is why the layers matter operationally, not just conceptually.
+
 ## Context
 
 The context layer is the shared memory surface for the rest of the system.

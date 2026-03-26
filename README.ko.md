@@ -28,6 +28,7 @@
 - [🚀 Quick Start](#-quick-start)
 - [🎮 `civ6_tacticall` 모바일 QR 컨트롤러로 Civ6 플레이하기](#-civ6_tacticall-모바일-qr-컨트롤러로-civ6-플레이하기)
 - [✨ Why CivStation?](#-why-civstation)
+- [🧵 Runtime Separation](#-runtime-separation)
 - [🏗️ Architecture](#-architecture)
 - [🕹️ HitL 제어면](#-hitl-제어면)
 - [🧩 MCP와 Skill 확장성](#-mcp와-skill-확장성)
@@ -237,9 +238,32 @@ Controller Start button
 - `Layered by design`: 에이전트가 하나의 불투명한 루프가 아니라, 관찰 가능한 레이어로 나뉘어 있습니다.
 - `Human-steerable`: 실행 중에도 pause, resume, stop, strategy change, discussion이 가능합니다.
 - `MCP-first`: 같은 아키텍처가 안정적인 외부 제어 인터페이스로도 노출됩니다.
+- `실제 런타임 분리`: context/strategy 작업, 메인 스레드 action 작업, HITL 제어가 서로 다른 runtime lane으로 분리됩니다.
 - `Extensible`: 전체를 다시 쓰지 않고도 adapter, skill, orchestration을 바꿀 수 있습니다.
 - `Operator-friendly`: 로컬 대시보드, WebSocket 제어, 원격 폰 제어까지 지원합니다.
 - `실전형 VLM harness`: 단순히 VLM에 스크린샷을 던지는 방식이 아니라, 컨텍스트, 라우팅, 계획, 실행, 개입 지점을 갖춘 재사용 가능한 제어 루프로 모델을 감쌉니다.
+
+## 🧵 Runtime Separation
+
+MCP session/runtime가 중요한 이유는, 실제 실행 구조를 그대로 반영하기 때문입니다:
+
+- `background runtime`
+  - context 관찰과 turn tracking
+  - strategy refresh와 백그라운드 추론
+- `main-thread action runtime`
+  - 현재 화면 routing
+  - primitive action planning
+  - 게임 창에 대한 실제 action execution
+- `hitl runtime`
+  - 외부 컨트롤러, dashboard, relay, 모바일 클라이언트
+  - 실행 중인 시스템으로 lifecycle / strategy / control directive를 전달
+
+이 레이어드 런타임의 핵심가치는 다음입니다:
+
+- 무거운 background reasoning이 action loop를 막지 않음
+- action loop는 interrupt 가능하면서도 예측 가능하게 유지됨
+- HITL은 action thread 밖에 있으면서도 queue/gate를 통해 안전하게 개입 가능
+- MCP session이 단순 상태 저장소가 아니라, 실제 runtime container처럼 동작함
 
 ## 🏗️ Architecture
 

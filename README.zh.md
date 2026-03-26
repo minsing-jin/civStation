@@ -28,6 +28,7 @@
 - [🚀 Quick Start](#-quick-start)
 - [🎮 通过 `civ6_tacticall` 手机二维码控制器玩 Civ6](#-通过-civ6_tacticall-手机二维码控制器玩-civ6)
 - [✨ Why CivStation?](#-why-civstation)
+- [🧵 Runtime Separation](#-runtime-separation)
 - [🏗️ Architecture](#-architecture)
 - [🕹️ HitL 控制面](#-hitl-控制面)
 - [🧩 MCP 与 Skill 可扩展性](#-mcp-与-skill-可扩展性)
@@ -237,9 +238,34 @@ Controller Start button
 - `Layered by design`：代理被拆成可观察、可替换的层，而不是一个黑盒循环。
 - `Human-steerable`：运行中可以 pause、resume、stop、change strategy 和 discussion。
 - `MCP-first`：同样的架构通过稳定的外部控制面暴露出来。
+- `真实运行时分离`：context/strategy 工作、主线程 action 工作、以及 HITL 控制被拆成不同的 runtime lane。
 - `Extensible`：无需重写整个系统，就能替换 adapter、增加 skill、改变 orchestration。
 - `Operator-friendly`：支持本地仪表盘、WebSocket 控制和手机远程控制。
 - `实用型 VLM harness`：不是临时把 VLM 调在原始截图上，而是把上下文、路由、规划、执行和介入点组织成可复用的控制循环。
+
+## 🧵 Runtime Separation
+
+MCP session/runtime 的关键价值在于，它映射了真实执行时的分离结构：
+
+- `background runtime`
+  - context 观察与 turn tracking
+  - strategy refresh 与后台推理
+- `main-thread action runtime`
+  - 当前画面的 routing
+  - primitive action planning
+  - 对游戏窗口执行真正的 action
+- `hitl runtime`
+  - 外部 controller、dashboard、relay、移动端客户端
+  - 向运行中的系统发送 lifecycle / strategy / control 指令
+
+这种 layered runtime 的核心价值是：
+
+- 重的后台推理不会阻塞 action loop
+- action loop 保持可中断、可预测
+- HITL 位于 action thread 之外，但仍能通过 queue/gate 安全地介入
+- MCP session 不再只是序列化状态块，而是真正的 runtime container
+
+## 🏗️ Architecture
 
 ## 🏗️ Architecture
 

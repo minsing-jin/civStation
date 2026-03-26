@@ -28,6 +28,7 @@ Current package and module names are still:
 - [🚀 Quick Start](#-quick-start)
 - [🎮 Playing Civ6 With `civ6_tacticall` Mobile QR Control](#-playing-civ6-with-civ6_tacticall-mobile-qr-control)
 - [✨ Why CivStation?](#-why-civstation)
+- [🧵 Runtime Separation](#-runtime-separation)
 - [🏗️ Architecture](#-architecture)
 - [🕹️ HitL Control Surfaces](#-hitl-control-surfaces)
 - [🧩 MCP and Skill Extensibility](#-mcp-and-skill-extensibility)
@@ -237,9 +238,32 @@ Controller Start button
 - `Layered by design`: the agent is broken into inspectable layers instead of one opaque loop.
 - `Human-steerable`: pause, resume, stop, change strategy, and discuss the next move while the run is live.
 - `MCP-first`: the same architecture is exposed as a stable external control surface.
+- `Real runtime separation`: context/strategy work, main-thread action work, and HITL control are split into different runtime lanes.
 - `Extensible`: swap adapters, add skills, and change orchestration without rewriting the whole system.
 - `Operator-friendly`: local dashboard, WebSocket control, and remote phone control are all supported.
 - `A practical VLM harness`: instead of calling a VLM on raw screenshots ad hoc, CivStation wraps the model in a reusable control loop with context, routing, planning, execution, and intervention points.
+
+## 🧵 Runtime Separation
+
+The MCP session/runtime model matters because it mirrors the real execution split:
+
+- `background runtime`
+  - context observation and turn tracking
+  - strategy refresh and background reasoning
+- `main-thread action runtime`
+  - route the current screen
+  - plan the primitive action
+  - execute the action safely on the game window
+- `hitl runtime`
+  - external controller, dashboard, relay, or mobile client
+  - sends lifecycle and strategy/control directives into the running system
+
+This is the core value of the layered runtime:
+
+- expensive background reasoning does not have to block the action loop
+- the action loop stays deterministic and interruptible
+- HITL stays outside the action thread, but can still steer it safely through queues and gates
+- MCP sessions become real runtime containers instead of just serialized state blobs
 
 ## 🏗️ Architecture
 

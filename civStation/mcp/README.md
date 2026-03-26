@@ -6,6 +6,7 @@
 - [📁 Main Files](#-main-files)
 - [🛠️ Tool Groups](#-tool-groups)
 - [🔧 Extensibility](#-extensibility)
+- [🧵 Runtime Split](#-runtime-split)
 - [🧠 Skill Integration](#-skill-integration)
 - [🚀 Typical Usage](#-typical-usage)
 - [▶️ Run](#-run)
@@ -101,6 +102,31 @@ You can:
 3. or switch them later with `session_config_update`
 
 This keeps the external MCP contract stable while letting you swap internal implementations per session.
+
+## 🧵 Runtime Split
+
+The important point is that MCP is not just exposing serialized state.
+It reflects a real layered runtime split:
+
+- `background runtime`
+  - context observation
+  - turn detection
+  - strategy refresh
+- `main-thread action runtime`
+  - route
+  - plan
+  - execute
+- `hitl runtime`
+  - dashboard
+  - relay/mobile controller
+  - lifecycle and directive injection
+
+This is why MCP sessions matter:
+
+- they can hold isolated runtime state for each lane
+- they let external tools reason about the system in the same way the live runtime is structured
+- they keep background work, foreground action, and HITL control conceptually separate
+- they make adapter overrides meaningful at the runtime level, not only at the serialization level
 
 ## 🧠 Skill Integration
 
