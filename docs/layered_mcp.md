@@ -1,6 +1,6 @@
 # Layered MCP Server
 
-`computer_use_test` now exposes a layered MCP server that wraps the existing architecture without forcing a full rewrite.
+`civStation` now exposes a layered MCP server that wraps the existing architecture without forcing a full rewrite.
 
 ## What It Exposes
 
@@ -105,13 +105,13 @@ By default these resolve to `builtin`, but Python callers can register their own
 ## Run
 
 ```bash
-python -m computer_use_test.mcp.server
+python -m civStation.mcp.server
 ```
 
 or
 
 ```bash
-computer_use_test_mcp
+civStation_mcp
 ```
 
 The default transport is stdio, which is the right fit for local MCP clients.
@@ -121,7 +121,7 @@ The default transport is stdio, which is the right fit for local MCP clients.
 For remote or hosted MCP clients, start the server with streamable HTTP:
 
 ```bash
-python -m computer_use_test.mcp.server \
+python -m civStation.mcp.server \
   --transport streamable-http \
   --host 127.0.0.1 \
   --port 8000 \

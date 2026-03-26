@@ -3,7 +3,7 @@ requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "computer-use-test"
+name = "civStation"
 version = "0.0.1"
 requires-python = ">=3.10"
 description = "Computer-use action evaluation framework for game environments. Collect data automatically and evaluate agent actions against ground truth."
@@ -82,18 +82,19 @@ documentation = "https://minsing-jin.github.io/civStation/"
 homepage = "https://github.com/minsing-jin/civStation"
 
 [project.scripts]
-computer_use_test = "computer_use_test.cli:app"
-computer_use_test_mcp = "computer_use_test.mcp.server:main"
+civStation = "civStation.cli:app"
+civStation_mcp = "civStation.mcp.server:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 addopts = "-v --strict-markers"
 markers = [
     "integration: marks tests requiring full environment (deselect with '-m \"not integration\"')",
 ]
 
 [tool.coverage.run]
-source = ["computer_use_test"]
+source = ["civStation"]
 
 [tool.coverage.report]
 show_missing = true
@@ -122,4 +123,4 @@ select = [
 package = true
 
 [tool.setuptools.packages.find]
-include = ["computer_use_test*"]
+include = ["civStation*"]

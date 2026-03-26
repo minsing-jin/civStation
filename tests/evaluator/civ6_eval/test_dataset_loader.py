@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from computer_use_test.evaluation.evaluator.action_eval.bbox_eval import (
+from civStation.evaluation.evaluator.action_eval.bbox_eval import (
     DatasetLoadError,
     GTClickAction,
     GTKeyPressAction,

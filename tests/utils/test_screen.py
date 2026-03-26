@@ -1,5 +1,5 @@
-from computer_use_test.utils.llm_provider.parser import AgentAction
-from computer_use_test.utils.screen import execute_action, norm_to_real
+from civStation.utils.llm_provider.parser import AgentAction
+from civStation.utils.screen import execute_action, norm_to_real
 
 
 def test_norm_to_real_preserves_exact_scaled_coordinates():
@@ -11,11 +11,11 @@ def test_execute_action_absolute_click_bypasses_normalized_conversion(monkeypatc
     calls: list[tuple[str, tuple, dict]] = []
 
     monkeypatch.setattr(
-        "computer_use_test.utils.screen.pyautogui.moveTo",
+        "civStation.utils.screen.pyautogui.moveTo",
         lambda *args, **kwargs: calls.append(("moveTo", args, kwargs)),
     )
     monkeypatch.setattr(
-        "computer_use_test.utils.screen.pyautogui.click",
+        "civStation.utils.screen.pyautogui.click",
         lambda *args, **kwargs: calls.append(("click", args, kwargs)),
     )
 
@@ -44,7 +44,7 @@ def test_execute_action_move_only_moves_cursor(monkeypatch):
     calls: list[tuple[str, tuple, dict]] = []
 
     monkeypatch.setattr(
-        "computer_use_test.utils.screen.pyautogui.moveTo",
+        "civStation.utils.screen.pyautogui.moveTo",
         lambda *args, **kwargs: calls.append(("moveTo", args, kwargs)),
     )
 
@@ -70,15 +70,15 @@ def test_execute_action_scroll_waits_briefly_after_hover_before_wheel(monkeypatc
     calls: list[tuple[str, tuple, dict]] = []
 
     monkeypatch.setattr(
-        "computer_use_test.utils.screen.pyautogui.moveTo",
+        "civStation.utils.screen.pyautogui.moveTo",
         lambda *args, **kwargs: calls.append(("moveTo", args, kwargs)),
     )
     monkeypatch.setattr(
-        "computer_use_test.utils.screen.pyautogui.scroll",
+        "civStation.utils.screen.pyautogui.scroll",
         lambda *args, **kwargs: calls.append(("scroll", args, kwargs)),
     )
     monkeypatch.setattr(
-        "computer_use_test.utils.screen.time.sleep",
+        "civStation.utils.screen.time.sleep",
         lambda seconds: calls.append(("sleep", (seconds,), {})),
     )
 
@@ -107,7 +107,7 @@ def test_execute_action_press_uses_hotkey_for_chords(monkeypatch):
     calls: list[tuple[str, tuple, dict]] = []
 
     monkeypatch.setattr(
-        "computer_use_test.utils.screen.pyautogui.hotkey",
+        "civStation.utils.screen.pyautogui.hotkey",
         lambda *args, **kwargs: calls.append(("hotkey", args, kwargs)),
         raising=False,
     )

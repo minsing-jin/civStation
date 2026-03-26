@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from computer_use_test.evaluation.evaluator.action_eval.bbox_eval import (
+from civStation.evaluation.evaluator.action_eval.bbox_eval import (
     BBox,
     CaseResult,
     DatasetCase,
@@ -189,7 +189,7 @@ class TestResultModels:
         assert cr.best_sequence is None
 
     def test_eval_report(self):
-        from computer_use_test.evaluation.evaluator.action_eval.bbox_eval import AggregateMetrics, EvalConfig
+        from civStation.evaluation.evaluator.action_eval.bbox_eval import AggregateMetrics, EvalConfig
 
         report = EvalReport(
             aggregate=AggregateMetrics(total_cases=1, strict_success_rate=1.0),

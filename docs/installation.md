@@ -2,16 +2,16 @@
 
 ## Stable release
 
-To install computer-use-test, run this command in your terminal:
+To install civStation, run this command in your terminal:
 
 ```sh
-uv add computer-use-test
+uv add civStation
 ```
 
 Or if you prefer to use `pip`:
 
 ```sh
-pip install computer-use-test
+pip install civStation
 ```
 
 ## From source

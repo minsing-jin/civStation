@@ -5,8 +5,8 @@ import textwrap
 
 import pytest
 
-from computer_use_test.agent.models.schema import ClickAction, KeyPressAction
-from computer_use_test.evaluation.evaluator.action_eval.bbox_eval import (
+from civStation.agent.models.schema import ClickAction, KeyPressAction
+from civStation.evaluation.evaluator.action_eval.bbox_eval import (
     AgentRunnerError,
     BBox,
     BuiltinAgentRunner,
@@ -118,7 +118,7 @@ class TestSubprocessAgentRunner:
 class TestBuiltinAgentRunner:
     def test_with_mock_provider(self, sample_case):
         """Test BuiltinAgentRunner with MockVLMProvider."""
-        from computer_use_test.utils.llm_provider.base import MockVLMProvider
+        from civStation.utils.llm_provider.base import MockVLMProvider
 
         provider = MockVLMProvider()
         runner = BuiltinAgentRunner(provider=provider)

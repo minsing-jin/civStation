@@ -2,12 +2,12 @@ import json
 
 from PIL import Image
 
-import computer_use_test.agent.turn_executor as turn_executor_module
-from computer_use_test.agent.modules.context.context_manager import ContextManager
-from computer_use_test.agent.modules.hitl.command_queue import CommandQueue, Directive, DirectiveType
-from computer_use_test.agent.modules.hitl.status_ui.state_bridge import AgentStateBridge
-from computer_use_test.agent.modules.memory.short_term_memory import ShortTermMemory
-from computer_use_test.agent.modules.primitive.multi_step_process import (
+import civStation.agent.turn_executor as turn_executor_module
+from civStation.agent.modules.context.context_manager import ContextManager
+from civStation.agent.modules.hitl.command_queue import CommandQueue, Directive, DirectiveType
+from civStation.agent.modules.hitl.status_ui.state_bridge import AgentStateBridge
+from civStation.agent.modules.memory.short_term_memory import ShortTermMemory
+from civStation.agent.modules.primitive.multi_step_process import (
     BaseMultiStepProcess,
     CityProductionProcess,
     ObservationBundle,
@@ -15,15 +15,15 @@ from computer_use_test.agent.modules.primitive.multi_step_process import (
     StageTransition,
     VerificationResult,
 )
-from computer_use_test.agent.modules.router.primitive_registry import RouterResult
-from computer_use_test.agent.turn_executor import (
+from civStation.agent.modules.router.primitive_registry import RouterResult
+from civStation.agent.turn_executor import (
     PrimitiveLoopResult,
     _post_action_wait_seconds,
     run_one_turn,
     run_primitive_loop,
 )
-from computer_use_test.utils.llm_provider.base import BaseVLMProvider, VLMResponse
-from computer_use_test.utils.llm_provider.parser import AgentAction
+from civStation.utils.llm_provider.base import BaseVLMProvider, VLMResponse
+from civStation.utils.llm_provider.parser import AgentAction
 
 
 class DummyProvider(BaseVLMProvider):
@@ -792,17 +792,17 @@ class TestRunPrimitiveLoop:
         memory.start_task("research_select_primitive")
         executed = []
 
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr("civStation.agent.turn_executor.get_multi_step_process", lambda *args: process)
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            "civStation.agent.turn_executor.capture_screen_pil",
             lambda: (image, 1440, 900, 0, 0),
         )
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.execute_action",
+            "civStation.agent.turn_executor.execute_action",
             lambda action, *args: executed.append(action.action),
         )
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
+        monkeypatch.setattr("civStation.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
 
         result = run_primitive_loop(
             planner_provider=provider,
@@ -845,12 +845,12 @@ class TestRunPrimitiveLoop:
         memory.begin_stage("direct_culture_select")
 
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            "civStation.agent.turn_executor.capture_screen_pil",
             lambda: (image, 1440, 900, 0, 0),
         )
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
+        monkeypatch.setattr("civStation.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
 
         result = run_primitive_loop(
             planner_provider=provider,
@@ -892,12 +892,12 @@ class TestRunPrimitiveLoop:
         memory.begin_stage("direct_research_select")
 
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            "civStation.agent.turn_executor.capture_screen_pil",
             lambda: (image, 1440, 900, 0, 0),
         )
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
+        monkeypatch.setattr("civStation.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
 
         result = run_primitive_loop(
             planner_provider=provider,
@@ -937,13 +937,13 @@ class TestRunPrimitiveLoop:
         memory.start_task("culture_decision_primitive")
 
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            "civStation.agent.turn_executor.capture_screen_pil",
             lambda: (image, 1440, 900, 0, 0),
         )
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.move_cursor_to_center", lambda *args: None)
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.screenshots_similar",
+            "civStation.agent.turn_executor.screenshots_similar",
             lambda *args, action=None, **kwargs: action.action == "press",
         )
 
@@ -1012,13 +1012,13 @@ class TestRunPrimitiveLoop:
         memory.start_task("religion_primitive", enable_choice_catalog=True)
 
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            "civStation.agent.turn_executor.capture_screen_pil",
             lambda: (image, 1440, 900, 0, 0),
         )
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.move_cursor_to_center", lambda *args: None)
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.screenshots_similar",
+            "civStation.agent.turn_executor.screenshots_similar",
             lambda *args, action=None, **kwargs: action.action in {"click", "press"},
         )
 
@@ -1087,15 +1087,15 @@ class TestRunPrimitiveLoop:
         )
         memory.begin_stage("click_cached_tab")
 
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr("civStation.agent.turn_executor.get_multi_step_process", lambda *args: process)
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            "civStation.agent.turn_executor.capture_screen_pil",
             lambda: (image, 1440, 900, 0, 0),
         )
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.move_cursor_to_center", lambda *args: None)
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.screenshots_similar",
+            "civStation.agent.turn_executor.screenshots_similar",
             lambda *args, **kwargs: (_ for _ in ()).throw(
                 AssertionError("policy should not use screenshot similarity")
             ),
@@ -1142,15 +1142,15 @@ class TestRunPrimitiveLoop:
         )
         memory.begin_stage("click_cached_tab")
 
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr("civStation.agent.turn_executor.get_multi_step_process", lambda *args: process)
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            "civStation.agent.turn_executor.capture_screen_pil",
             lambda: (image, 1440, 900, 0, 0),
         )
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.move_cursor_to_center", lambda *args: None)
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.screenshots_similar",
+            "civStation.agent.turn_executor.screenshots_similar",
             lambda *args, **kwargs: (_ for _ in ()).throw(
                 AssertionError("policy should not use screenshot similarity")
             ),
@@ -1196,15 +1196,15 @@ class TestRunPrimitiveLoop:
         )
         memory.begin_stage("click_cached_tab")
 
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr("civStation.agent.turn_executor.get_multi_step_process", lambda *args: process)
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            "civStation.agent.turn_executor.capture_screen_pil",
             lambda: (image, 1440, 900, 0, 0),
         )
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.move_cursor_to_center", lambda *args: None)
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.screenshots_similar",
+            "civStation.agent.turn_executor.screenshots_similar",
             lambda *args, **kwargs: (_ for _ in ()).throw(
                 AssertionError("policy should not use screenshot similarity")
             ),
@@ -1247,9 +1247,9 @@ class TestRunPrimitiveLoop:
         )
         memory.begin_stage("click_cached_tab")
         memory.set_policy_event("click tab=군사")
-        run_log_path = tmp_path / "computer_use_test" / "turn_runner_latest.log"
+        run_log_path = tmp_path / "civStation" / "turn_runner_latest.log"
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.get_run_log_cache_path",
+            "civStation.agent.turn_executor.get_run_log_cache_path",
             lambda base_dir=None: run_log_path,
         )
 
@@ -1296,15 +1296,15 @@ class TestRunPrimitiveLoop:
         )
         memory.begin_stage("plan_current_tab")
 
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr("civStation.agent.turn_executor.get_multi_step_process", lambda *args: process)
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            "civStation.agent.turn_executor.capture_screen_pil",
             lambda: (image, 1440, 900, 0, 0),
         )
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.move_cursor_to_center", lambda *args: None)
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.screenshots_similar",
+            "civStation.agent.turn_executor.screenshots_similar",
             lambda *args, **kwargs: (_ for _ in ()).throw(
                 AssertionError("policy should not use screenshot similarity")
             ),
@@ -1350,20 +1350,20 @@ class TestRunPrimitiveLoop:
             ]
         )
 
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr("civStation.agent.turn_executor.get_multi_step_process", lambda *args: process)
 
         def fake_capture():
             index = len([item for item in call_order if item.startswith("capture")]) + 1
             call_order.append(f"capture{index}")
             return next(captures)
 
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.capture_screen_pil", fake_capture)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.capture_screen_pil", fake_capture)
+        monkeypatch.setattr("civStation.agent.turn_executor.execute_action", lambda *args: None)
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.move_cursor_to_center",
+            "civStation.agent.turn_executor.move_cursor_to_center",
             lambda *args: call_order.append("center"),
         )
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
+        monkeypatch.setattr("civStation.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
 
         result = run_primitive_loop(
             planner_provider=provider,
@@ -1395,14 +1395,14 @@ class TestRunPrimitiveLoop:
         memory = ShortTermMemory()
         memory.start_task("religion_primitive", enable_choice_catalog=True)
 
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr("civStation.agent.turn_executor.get_multi_step_process", lambda *args: process)
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            "civStation.agent.turn_executor.capture_screen_pil",
             lambda: (image, 1440, 900, 0, 0),
         )
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
+        monkeypatch.setattr("civStation.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
 
         result = run_primitive_loop(
             planner_provider=provider,
@@ -1444,14 +1444,14 @@ class TestRunPrimitiveLoop:
         bridge = AgentStateBridge(self.ctx, CommandQueue())
         bridge.update_current_action("city_production_primitive", "scroll (8800, 5100)", "숨은 선택지 확인")
 
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr("civStation.agent.turn_executor.get_multi_step_process", lambda *args: process)
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            "civStation.agent.turn_executor.capture_screen_pil",
             lambda: (image, 1440, 900, 0, 0),
         )
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
+        monkeypatch.setattr("civStation.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
 
         result = run_primitive_loop(
             planner_provider=provider,
@@ -1492,14 +1492,14 @@ class TestRunPrimitiveLoop:
             scroll_direction="down",
         )
 
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr("civStation.agent.turn_executor.get_multi_step_process", lambda *args: process)
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            "civStation.agent.turn_executor.capture_screen_pil",
             lambda: (image, 1440, 900, 0, 0),
         )
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
+        monkeypatch.setattr("civStation.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
 
         result = run_primitive_loop(
             planner_provider=provider,
@@ -1532,15 +1532,15 @@ class TestRunPrimitiveLoop:
         memory.start_task("governor_primitive", enable_choice_catalog=True)
         sleeps: list[float] = []
 
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr("civStation.agent.turn_executor.get_multi_step_process", lambda *args: process)
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            "civStation.agent.turn_executor.capture_screen_pil",
             lambda: (image, 1440, 900, 0, 0),
         )
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.time.sleep", lambda seconds: sleeps.append(seconds))
+        monkeypatch.setattr("civStation.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
+        monkeypatch.setattr("civStation.agent.turn_executor.time.sleep", lambda seconds: sleeps.append(seconds))
 
         result = run_primitive_loop(
             planner_provider=provider,
@@ -1575,14 +1575,14 @@ class TestRunPrimitiveLoop:
         memory.start_task("research_select_primitive")
         bridge = AgentStateBridge(self.ctx, CommandQueue())
 
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr("civStation.agent.turn_executor.get_multi_step_process", lambda *args: process)
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            "civStation.agent.turn_executor.capture_screen_pil",
             lambda: (image, 1440, 900, 0, 0),
         )
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
+        monkeypatch.setattr("civStation.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
 
         result = run_primitive_loop(
             planner_provider=provider,
@@ -1620,15 +1620,15 @@ class TestRunPrimitiveLoop:
         memory.start_task("governor_primitive", enable_choice_catalog=True)
         rich = RecordingRichLogger()
 
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.RichLogger.get", lambda: rich)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr("civStation.agent.turn_executor.RichLogger.get", lambda: rich)
+        monkeypatch.setattr("civStation.agent.turn_executor.get_multi_step_process", lambda *args: process)
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            "civStation.agent.turn_executor.capture_screen_pil",
             lambda: (image, 1440, 900, 0, 0),
         )
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
+        monkeypatch.setattr("civStation.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
 
         result = run_primitive_loop(
             planner_provider=provider,
@@ -1679,14 +1679,14 @@ class TestRunPrimitiveLoop:
 
         bridge.update_multi_step = record_update_multi_step
 
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr("civStation.agent.turn_executor.get_multi_step_process", lambda *args: process)
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            "civStation.agent.turn_executor.capture_screen_pil",
             lambda: (image, 1440, 900, 0, 0),
         )
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
+        monkeypatch.setattr("civStation.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
 
         result = run_primitive_loop(
             planner_provider=provider,
@@ -1728,14 +1728,14 @@ class TestRunPrimitiveLoop:
 
         bridge.update_multi_step = record_update_multi_step
 
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr("civStation.agent.turn_executor.get_multi_step_process", lambda *args: process)
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            "civStation.agent.turn_executor.capture_screen_pil",
             lambda: (image, 1440, 900, 0, 0),
         )
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
+        monkeypatch.setattr("civStation.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
 
         result = run_primitive_loop(
             planner_provider=provider,
@@ -1790,15 +1790,15 @@ class TestRunPrimitiveLoop:
 
         rich = ActionCapturingRichLogger()
 
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.RichLogger.get", lambda: rich)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr("civStation.agent.turn_executor.RichLogger.get", lambda: rich)
+        monkeypatch.setattr("civStation.agent.turn_executor.get_multi_step_process", lambda *args: process)
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            "civStation.agent.turn_executor.capture_screen_pil",
             lambda: (image, 1440, 900, 0, 0),
         )
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
+        monkeypatch.setattr("civStation.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
 
         result = run_primitive_loop(
             planner_provider=provider,
@@ -1836,15 +1836,15 @@ class TestRunPrimitiveLoop:
         memory.start_task("city_production_primitive", enable_choice_catalog=True)
         sleeps: list[float] = []
 
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr("civStation.agent.turn_executor.get_multi_step_process", lambda *args: process)
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            "civStation.agent.turn_executor.capture_screen_pil",
             lambda: (image, 1440, 900, 0, 0),
         )
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.time.sleep", lambda seconds: sleeps.append(seconds))
+        monkeypatch.setattr("civStation.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
+        monkeypatch.setattr("civStation.agent.turn_executor.time.sleep", lambda seconds: sleeps.append(seconds))
 
         result = run_primitive_loop(
             planner_provider=provider,
@@ -1876,15 +1876,15 @@ class TestRunPrimitiveLoop:
         memory.start_task("governor_primitive", enable_choice_catalog=True)
         sleeps: list[float] = []
 
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr("civStation.agent.turn_executor.get_multi_step_process", lambda *args: process)
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            "civStation.agent.turn_executor.capture_screen_pil",
             lambda: (image, 1440, 900, 0, 0),
         )
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.time.sleep", lambda seconds: sleeps.append(seconds))
+        monkeypatch.setattr("civStation.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
+        monkeypatch.setattr("civStation.agent.turn_executor.time.sleep", lambda seconds: sleeps.append(seconds))
 
         result = run_primitive_loop(
             planner_provider=provider,
@@ -1915,14 +1915,14 @@ class TestRunPrimitiveLoop:
         memory = ShortTermMemory()
         memory.start_task("city_production_primitive", enable_choice_catalog=True)
 
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr("civStation.agent.turn_executor.get_multi_step_process", lambda *args: process)
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            "civStation.agent.turn_executor.capture_screen_pil",
             lambda: (image, 1440, 900, 0, 0),
         )
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
+        monkeypatch.setattr("civStation.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
 
         result = run_primitive_loop(
             planner_provider=provider,
@@ -1954,14 +1954,14 @@ class TestRunPrimitiveLoop:
         memory = ShortTermMemory()
         memory.start_task("city_production_primitive", enable_choice_catalog=True)
 
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr("civStation.agent.turn_executor.get_multi_step_process", lambda *args: process)
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            "civStation.agent.turn_executor.capture_screen_pil",
             lambda: (image, 1440, 900, 0, 0),
         )
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
+        monkeypatch.setattr("civStation.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
 
         result = run_primitive_loop(
             planner_provider=provider,
@@ -1992,15 +1992,15 @@ class TestRunPrimitiveLoop:
         memory = ShortTermMemory()
         memory.start_task("city_production_primitive", enable_choice_catalog=True)
 
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr("civStation.agent.turn_executor.get_multi_step_process", lambda *args: process)
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            "civStation.agent.turn_executor.capture_screen_pil",
             lambda: (image, 1440, 900, 0, 0),
         )
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.move_cursor_to_center", lambda *args: None)
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.screenshots_similar",
+            "civStation.agent.turn_executor.screenshots_similar",
             lambda *args, action=None, **kwargs: action.action == "scroll",
         )
 
@@ -2034,17 +2034,17 @@ class TestRunPrimitiveLoop:
         memory.start_task("city_production_primitive", enable_choice_catalog=True)
         executed_actions: list[str] = []
 
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr("civStation.agent.turn_executor.get_multi_step_process", lambda *args: process)
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            "civStation.agent.turn_executor.capture_screen_pil",
             lambda: (image, 1440, 900, 0, 0),
         )
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.execute_action",
+            "civStation.agent.turn_executor.execute_action",
             lambda action, *args: executed_actions.append(action.action),
         )
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: True)
+        monkeypatch.setattr("civStation.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: True)
 
         result = run_primitive_loop(
             planner_provider=provider,
@@ -2092,17 +2092,17 @@ class TestRunPrimitiveLoop:
         memory.start_task("city_production_primitive", enable_choice_catalog=True)
         executed_actions: list[str] = []
 
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr("civStation.agent.turn_executor.get_multi_step_process", lambda *args: process)
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            "civStation.agent.turn_executor.capture_screen_pil",
             lambda: (image, 1440, 900, 0, 0),
         )
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.execute_action",
+            "civStation.agent.turn_executor.execute_action",
             lambda action, *args: executed_actions.append(action.action),
         )
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: True)
+        monkeypatch.setattr("civStation.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: True)
 
         result = run_primitive_loop(
             planner_provider=provider,
@@ -2141,15 +2141,15 @@ class TestRunPrimitiveLoop:
         executed_actions: list[str] = []
 
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            "civStation.agent.turn_executor.capture_screen_pil",
             lambda: (image, 1440, 900, 0, 0),
         )
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.route_primitive",
+            "civStation.agent.turn_executor.route_primitive",
             lambda *args, **kwargs: next(routed_primitives),
         )
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.run_primitive_loop",
+            "civStation.agent.turn_executor.run_primitive_loop",
             lambda **kwargs: PrimitiveLoopResult(
                 success=True,
                 completed=True,
@@ -2165,7 +2165,7 @@ class TestRunPrimitiveLoop:
             ),
         )
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.plan_action",
+            "civStation.agent.turn_executor.plan_action",
             lambda *args, **kwargs: AgentAction(
                 action="press",
                 key="enter",
@@ -2174,10 +2174,10 @@ class TestRunPrimitiveLoop:
             ),
         )
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.execute_action",
+            "civStation.agent.turn_executor.execute_action",
             lambda action, *args: executed_actions.append(action.action),
         )
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.time.sleep", lambda *_args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.time.sleep", lambda *_args: None)
 
         summary = run_one_turn(
             router_provider=provider,
@@ -2204,15 +2204,15 @@ class TestRunPrimitiveLoop:
         executed_actions: list[str] = []
 
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            "civStation.agent.turn_executor.capture_screen_pil",
             lambda: (image, 1440, 900, 0, 0),
         )
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.route_primitive",
+            "civStation.agent.turn_executor.route_primitive",
             lambda *args, **kwargs: next(routed_primitives),
         )
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.run_primitive_loop",
+            "civStation.agent.turn_executor.run_primitive_loop",
             lambda **kwargs: PrimitiveLoopResult(
                 success=False,
                 completed=False,
@@ -2229,7 +2229,7 @@ class TestRunPrimitiveLoop:
             ),
         )
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.plan_action",
+            "civStation.agent.turn_executor.plan_action",
             lambda *args, **kwargs: AgentAction(
                 action="press",
                 key="enter",
@@ -2238,10 +2238,10 @@ class TestRunPrimitiveLoop:
             ),
         )
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.execute_action",
+            "civStation.agent.turn_executor.execute_action",
             lambda action, *args: executed_actions.append(action.action),
         )
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.time.sleep", lambda *_args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.time.sleep", lambda *_args: None)
 
         summary = run_one_turn(
             router_provider=provider,
@@ -2270,11 +2270,11 @@ class TestRunPrimitiveLoop:
         loop_calls = {"count": 0}
 
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            "civStation.agent.turn_executor.capture_screen_pil",
             lambda: (image, 1440, 900, 0, 0),
         )
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.route_primitive",
+            "civStation.agent.turn_executor.route_primitive",
             lambda *args, **kwargs: next(routed_primitives),
         )
 
@@ -2309,9 +2309,9 @@ class TestRunPrimitiveLoop:
                 ),
             )
 
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.run_primitive_loop", fake_run_primitive_loop)
+        monkeypatch.setattr("civStation.agent.turn_executor.run_primitive_loop", fake_run_primitive_loop)
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.plan_action",
+            "civStation.agent.turn_executor.plan_action",
             lambda *args, **kwargs: AgentAction(
                 action="press",
                 key="enter",
@@ -2320,10 +2320,10 @@ class TestRunPrimitiveLoop:
             ),
         )
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.execute_action",
+            "civStation.agent.turn_executor.execute_action",
             lambda action, *args: executed_actions.append(action.action),
         )
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.time.sleep", lambda *_args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.time.sleep", lambda *_args: None)
 
         summary = run_one_turn(
             router_provider=provider,
@@ -2366,22 +2366,22 @@ class TestRunPrimitiveLoop:
         executed_actions: list[str] = []
 
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            "civStation.agent.turn_executor.capture_screen_pil",
             lambda: (image, 1440, 900, 0, 0),
         )
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.route_primitive",
+            "civStation.agent.turn_executor.route_primitive",
             lambda *args, **kwargs: next(routed_primitives),
         )
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.plan_action",
+            "civStation.agent.turn_executor.plan_action",
             lambda *args, **kwargs: next(planned_actions),
         )
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.execute_action",
+            "civStation.agent.turn_executor.execute_action",
             lambda action, *args: executed_actions.append(action.action),
         )
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.time.sleep", lambda *_args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.time.sleep", lambda *_args: None)
 
         summary = run_one_turn(
             router_provider=provider,
@@ -2412,14 +2412,14 @@ class TestRunPrimitiveLoop:
             )
         )
 
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.get_multi_step_process", lambda *args: process)
+        monkeypatch.setattr("civStation.agent.turn_executor.get_multi_step_process", lambda *args: process)
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            "civStation.agent.turn_executor.capture_screen_pil",
             lambda: (image, 1440, 900, 0, 0),
         )
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.move_cursor_to_center", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
+        monkeypatch.setattr("civStation.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.move_cursor_to_center", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.screenshots_similar", lambda *args, **kwargs: False)
 
         result = run_primitive_loop(
             planner_provider=provider,
@@ -2457,17 +2457,17 @@ class TestRunPrimitiveLoop:
             ]
         )
 
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.RichLogger.get", lambda: rich)
+        monkeypatch.setattr("civStation.agent.turn_executor.RichLogger.get", lambda: rich)
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            "civStation.agent.turn_executor.capture_screen_pil",
             lambda: (image, 1440, 900, 0, 0),
         )
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.route_primitive",
+            "civStation.agent.turn_executor.route_primitive",
             lambda *args, **kwargs: next(routed_primitives),
         )
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.run_primitive_loop",
+            "civStation.agent.turn_executor.run_primitive_loop",
             lambda **kwargs: PrimitiveLoopResult(
                 success=True,
                 completed=True,
@@ -2483,7 +2483,7 @@ class TestRunPrimitiveLoop:
             ),
         )
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.plan_action",
+            "civStation.agent.turn_executor.plan_action",
             lambda *args, **kwargs: AgentAction(
                 action="press",
                 key="enter",
@@ -2491,8 +2491,8 @@ class TestRunPrimitiveLoop:
                 task_status="complete",
             ),
         )
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.execute_action", lambda *args: None)
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.time.sleep", lambda *_args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.execute_action", lambda *args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.time.sleep", lambda *_args: None)
 
         summary = run_one_turn(
             router_provider=provider,
@@ -2527,11 +2527,11 @@ class TestRunPrimitiveLoop:
         loop_calls = {"count": 0}
 
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            "civStation.agent.turn_executor.capture_screen_pil",
             lambda: (image, 1440, 900, 0, 0),
         )
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.route_primitive",
+            "civStation.agent.turn_executor.route_primitive",
             lambda *args, **kwargs: next(routed_primitives),
         )
 
@@ -2552,9 +2552,9 @@ class TestRunPrimitiveLoop:
                 ),
             )
 
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.run_primitive_loop", fake_run_primitive_loop)
+        monkeypatch.setattr("civStation.agent.turn_executor.run_primitive_loop", fake_run_primitive_loop)
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.plan_action",
+            "civStation.agent.turn_executor.plan_action",
             lambda *args, **kwargs: AgentAction(
                 action="press",
                 key="enter",
@@ -2563,10 +2563,10 @@ class TestRunPrimitiveLoop:
             ),
         )
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.execute_action",
+            "civStation.agent.turn_executor.execute_action",
             lambda action, *args: executed_actions.append(action.action),
         )
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.time.sleep", lambda *_args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.time.sleep", lambda *_args: None)
 
         summary = run_one_turn(
             router_provider=provider,
@@ -2595,11 +2595,11 @@ class TestRunPrimitiveLoop:
         loop_calls = {"count": 0}
 
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.capture_screen_pil",
+            "civStation.agent.turn_executor.capture_screen_pil",
             lambda: (image, 1440, 900, 0, 0),
         )
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.route_primitive",
+            "civStation.agent.turn_executor.route_primitive",
             lambda *args, **kwargs: next(routed_primitives),
         )
 
@@ -2621,9 +2621,9 @@ class TestRunPrimitiveLoop:
                 ),
             )
 
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.run_primitive_loop", fake_run_primitive_loop)
+        monkeypatch.setattr("civStation.agent.turn_executor.run_primitive_loop", fake_run_primitive_loop)
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.plan_action",
+            "civStation.agent.turn_executor.plan_action",
             lambda *args, **kwargs: AgentAction(
                 action="press",
                 key="enter",
@@ -2632,10 +2632,10 @@ class TestRunPrimitiveLoop:
             ),
         )
         monkeypatch.setattr(
-            "computer_use_test.agent.turn_executor.execute_action",
+            "civStation.agent.turn_executor.execute_action",
             lambda action, *args: executed_actions.append(action.action),
         )
-        monkeypatch.setattr("computer_use_test.agent.turn_executor.time.sleep", lambda *_args: None)
+        monkeypatch.setattr("civStation.agent.turn_executor.time.sleep", lambda *_args: None)
 
         summary = run_one_turn(
             router_provider=provider,

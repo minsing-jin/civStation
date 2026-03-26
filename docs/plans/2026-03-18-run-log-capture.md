@@ -14,7 +14,7 @@
 
 **Files:**
 - Modify: `tests/utils/test_run_log_cache.py`
-- Modify: `computer_use_test/utils/run_log_cache.py`
+- Modify: `civStation/utils/run_log_cache.py`
 
 **Step 1: Write the failing test**
 
@@ -32,7 +32,7 @@ Expected: FAIL because `RunLogSession` does not yet tee stdout/stderr.
 
 **Step 3: Write minimal implementation**
 
-Implement a small tee stream wrapper inside `computer_use_test/utils/run_log_cache.py` and install it in `RunLogSession.__init__`.
+Implement a small tee stream wrapper inside `civStation/utils/run_log_cache.py` and install it in `RunLogSession.__init__`.
 
 **Step 4: Run test to verify it passes**
 
@@ -43,7 +43,7 @@ Expected: PASS
 **Step 5: Commit**
 
 ```bash
-git add tests/utils/test_run_log_cache.py computer_use_test/utils/run_log_cache.py docs/plans/2026-03-18-run-log-capture-design.md docs/plans/2026-03-18-run-log-capture.md
+git add tests/utils/test_run_log_cache.py civStation/utils/run_log_cache.py docs/plans/2026-03-18-run-log-capture-design.md docs/plans/2026-03-18-run-log-capture.md
 git commit -m "feat: capture runtime stdout and stderr in latest run log"
 ```
 
@@ -51,7 +51,7 @@ git commit -m "feat: capture runtime stdout and stderr in latest run log"
 
 **Files:**
 - Modify: `tests/utils/test_run_log_cache.py`
-- Modify: `computer_use_test/utils/run_log_cache.py`
+- Modify: `civStation/utils/run_log_cache.py`
 
 **Step 1: Write or adjust focused tests**
 
@@ -76,6 +76,6 @@ Expected: PASS
 **Step 5: Commit**
 
 ```bash
-git add tests/utils/test_run_log_cache.py computer_use_test/utils/run_log_cache.py
+git add tests/utils/test_run_log_cache.py civStation/utils/run_log_cache.py
 git commit -m "test: harden run log capture behavior"
 ```

@@ -1,4 +1,4 @@
-# Justfile for computer-use-test
+# Justfile for civStation
 
 # Show available commands
 list:
@@ -28,6 +28,14 @@ test *ARGS:
 pdb *ARGS:
     @echo "Running with arg: {{ARGS}}"
     uv run --python=3.13  --extra test pytest --pdb --maxfail=10 --pdbcls=IPython.terminal.debugger:TerminalPdb {{ARGS}}
+
+# Serve the docs site locally
+docs:
+    uv run --python=3.13 --extra docs mkdocs serve -f docs/mkdocs.local.yml
+
+# Build the docs site in strict mode
+docs-build:
+    uv run --python=3.13 --extra docs mkdocs build --strict -f docs/mkdocs.yml
 
 # Run coverage, and build to HTML
 coverage:

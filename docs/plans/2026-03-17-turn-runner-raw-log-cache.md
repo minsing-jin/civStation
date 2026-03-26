@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Add an opt-in raw run log cache for `computer_use_test.agent.turn_runner` that overwrites on each new run and captures plain logging plus uncaught tracebacks without altering existing Rich output.
+**Goal:** Add an opt-in raw run log cache for `civStation.agent.turn_runner` that overwrites on each new run and captures plain logging plus uncaught tracebacks without altering existing Rich output.
 
 **Architecture:** A new utility module owns the temp-file path, root logger file handler, and temporary `sys.excepthook` wrapper. `turn_runner.main()` opts into that utility at startup and always tears it down in cleanup so the behavior remains isolated to that entrypoint.
 
@@ -45,15 +45,15 @@ Expected: PASS
 **Step 5: Commit**
 
 ```bash
-git add tests/utils/test_run_log_cache.py computer_use_test/utils/run_log_cache.py
+git add tests/utils/test_run_log_cache.py civStation/utils/run_log_cache.py
 git commit -m "test: cover turn runner raw log cache"
 ```
 
 ### Task 2: Wire `turn_runner` into the new util
 
 **Files:**
-- Modify: `computer_use_test/agent/turn_runner.py`
-- Modify: `computer_use_test/utils/__init__.py`
+- Modify: `civStation/agent/turn_runner.py`
+- Modify: `civStation/utils/__init__.py`
 - Test: `tests/utils/test_run_log_cache.py`
 
 **Step 1: Write the failing test**
@@ -84,7 +84,7 @@ Expected: PASS
 **Step 5: Commit**
 
 ```bash
-git add computer_use_test/agent/turn_runner.py computer_use_test/utils/__init__.py
+git add civStation/agent/turn_runner.py civStation/utils/__init__.py
 git commit -m "feat: cache raw turn runner logs"
 ```
 
@@ -92,7 +92,7 @@ git commit -m "feat: cache raw turn runner logs"
 
 **Files:**
 - Modify: `tests/utils/test_run_log_cache.py`
-- Modify: `computer_use_test/utils/run_log_cache.py`
+- Modify: `civStation/utils/run_log_cache.py`
 
 **Step 1: Write the failing test**
 
@@ -121,15 +121,15 @@ Expected: PASS
 **Step 5: Commit**
 
 ```bash
-git add tests/utils/test_run_log_cache.py computer_use_test/utils/run_log_cache.py
+git add tests/utils/test_run_log_cache.py civStation/utils/run_log_cache.py
 git commit -m "test: cover raw traceback capture"
 ```
 
 ### Task 4: Final verification and push
 
 **Files:**
-- Modify: `computer_use_test/utils/run_log_cache.py`
-- Modify: `computer_use_test/agent/turn_runner.py`
+- Modify: `civStation/utils/run_log_cache.py`
+- Modify: `civStation/agent/turn_runner.py`
 - Test: `tests/utils/test_run_log_cache.py`
 
 **Step 1: Run focused verification**
@@ -144,12 +144,12 @@ Expected: existing agent tests still pass.
 
 **Step 3: Review diff**
 
-Run: `git diff -- computer_use_test/agent/turn_runner.py computer_use_test/utils/run_log_cache.py tests/utils/test_run_log_cache.py`
+Run: `git diff -- civStation/agent/turn_runner.py civStation/utils/run_log_cache.py tests/utils/test_run_log_cache.py`
 
 **Step 4: Commit**
 
 ```bash
-git add docs/plans/2026-03-17-turn-runner-raw-log-cache-design.md docs/plans/2026-03-17-turn-runner-raw-log-cache.md computer_use_test/agent/turn_runner.py computer_use_test/utils/run_log_cache.py computer_use_test/utils/__init__.py tests/utils/test_run_log_cache.py
+git add docs/plans/2026-03-17-turn-runner-raw-log-cache-design.md docs/plans/2026-03-17-turn-runner-raw-log-cache.md civStation/agent/turn_runner.py civStation/utils/run_log_cache.py civStation/utils/__init__.py tests/utils/test_run_log_cache.py
 git commit -m "feat: cache raw turn runner logs"
 ```
 

@@ -2,13 +2,13 @@
 
 import pytest
 
-from computer_use_test.agent.models.schema import (
+from civStation.agent.models.schema import (
     ClickAction,
     DragAction,
     KeyPressAction,
     WaitAction,
 )
-from computer_use_test.evaluation.evaluator.action_eval.bbox_eval import (
+from civStation.evaluation.evaluator.action_eval.bbox_eval import (
     BBox,
     CaseResult,
     GTClickAction,

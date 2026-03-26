@@ -1,0 +1,86 @@
+"""
+Prompts package for VLM interactions.
+
+This package contains reusable prompt templates for different game primitives
+and scenarios in Civilization VI.
+
+Prompt templates live here in primitive_prompt.py.
+Registry, routing, and lookup logic lives in
+civStation.agent.modules.router.primitive_registry.
+"""
+
+from civStation.utils.prompts.primitive_prompt import (
+    CITY_PRODUCTION_PROMPT,
+    CITY_PRODUCTION_PROMPT_EN,
+    COMBAT_PROMPT,
+    COMBAT_PROMPT_EN,
+    CULTURE_MANAGER_PROMPT,
+    CULTURE_MANAGER_PROMPT_EN,
+    DEAL_PROMPT,
+    DEAL_PROMPT_EN,
+    DIPLOMATIC_PROMPT,
+    DIPLOMATIC_PROMPT_EN,
+    ERA_PROMPT,
+    ERA_PROMPT_EN,
+    GOVERNOR_PROMPT,
+    GOVERNOR_PROMPT_EN,
+    JSON_FORMAT_INSTRUCTION_EN,
+    MULTI_ACTION_SEQUENCE_JSON_FORMAT_INSTRUCTION_EN,
+    MULTI_STEP_JSON_FORMAT_INSTRUCTION_EN,
+    POLICY_PROMPT,
+    POLICY_PROMPT_EN,
+    POPUP_PROMPT,
+    POPUP_PROMPT_EN,
+    RELIGION_PROMPT,
+    RELIGION_PROMPT_EN,
+    RESEARCH_MANAGER_PROMPT,
+    RESEARCH_MANAGER_PROMPT_EN,
+    UNIT_OPS_PROMPT,
+    UNIT_OPS_PROMPT_EN,
+    VOTING_PROMPT,
+    VOTING_PROMPT_EN,
+    WAR_PROMPT,
+    WAR_PROMPT_EN,
+    build_custom_prompt,
+    get_json_instruction_template,
+    get_primitive_prompt_template,
+    normalize_prompt_language,
+)
+
+__all__ = [
+    "UNIT_OPS_PROMPT",
+    "UNIT_OPS_PROMPT_EN",
+    "POPUP_PROMPT",
+    "POPUP_PROMPT_EN",
+    "RESEARCH_MANAGER_PROMPT",
+    "RESEARCH_MANAGER_PROMPT_EN",
+    "CITY_PRODUCTION_PROMPT",
+    "CITY_PRODUCTION_PROMPT_EN",
+    "CULTURE_MANAGER_PROMPT",
+    "CULTURE_MANAGER_PROMPT_EN",
+    "DIPLOMATIC_PROMPT",
+    "DIPLOMATIC_PROMPT_EN",
+    "GOVERNOR_PROMPT",
+    "GOVERNOR_PROMPT_EN",
+    "COMBAT_PROMPT",
+    "COMBAT_PROMPT_EN",
+    "POLICY_PROMPT",
+    "POLICY_PROMPT_EN",
+    "RELIGION_PROMPT",
+    "RELIGION_PROMPT_EN",
+    "WAR_PROMPT",
+    "WAR_PROMPT_EN",
+    "DEAL_PROMPT",
+    "DEAL_PROMPT_EN",
+    "VOTING_PROMPT",
+    "VOTING_PROMPT_EN",
+    "ERA_PROMPT",
+    "ERA_PROMPT_EN",
+    "JSON_FORMAT_INSTRUCTION_EN",
+    "MULTI_ACTION_SEQUENCE_JSON_FORMAT_INSTRUCTION_EN",
+    "MULTI_STEP_JSON_FORMAT_INSTRUCTION_EN",
+    "normalize_prompt_language",
+    "get_json_instruction_template",
+    "get_primitive_prompt_template",
+    "build_custom_prompt",
+]

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from computer_use_test.agent.modules.context.context_manager import ContextManager
-from computer_use_test.agent.modules.context.macro_turn_manager import MacroTurnManager
+from civStation.agent.modules.context.context_manager import ContextManager
+from civStation.agent.modules.context.macro_turn_manager import MacroTurnManager
 
 
 @dataclass

@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from computer_use_test.agent.models.schema import ClickAction, DragAction, KeyPressAction, WaitAction
-from computer_use_test.evaluation.evaluator.action_eval.bbox_eval import (
+from civStation.agent.models.schema import ClickAction, DragAction, KeyPressAction, WaitAction
+from civStation.evaluation.evaluator.action_eval.bbox_eval import (
     AgentResponse,
     BaseAgentRunner,
     BBox,
@@ -34,7 +34,7 @@ class PerfectAgentRunner(BaseAgentRunner):
         self._cases = {c.case_id: c for c in dataset_cases}
 
     def run_case(self, case: DatasetCase) -> AgentResponse:
-        from computer_use_test.agent.models.schema import DoubleClickAction
+        from civStation.agent.models.schema import DoubleClickAction
 
         gt_actions = case.action_sets[0].actions
         pred_actions = []
@@ -92,7 +92,7 @@ class TestEvaluateCase:
 
         class ErrorRunner(BaseAgentRunner):
             def run_case(self, case):
-                from computer_use_test.evaluation.evaluator.action_eval.bbox_eval import AgentRunnerError
+                from civStation.evaluation.evaluator.action_eval.bbox_eval import AgentRunnerError
 
                 raise AgentRunnerError("test error")
 
@@ -139,7 +139,7 @@ class TestRunEvaluationEndToEnd:
 
     def test_with_perfect_agent(self):
         """Run full evaluation with agent that returns perfect predictions."""
-        from computer_use_test.evaluation.evaluator.action_eval.bbox_eval import load_dataset
+        from civStation.evaluation.evaluator.action_eval.bbox_eval import load_dataset
 
         cases = load_dataset(SAMPLE_DATASET)
         runner = PerfectAgentRunner(cases)

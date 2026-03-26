@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-from computer_use_test.agent.models.schema import (
+from civStation.agent.models.schema import (
     AgentPlan,
     ClickAction,
     DragAction,

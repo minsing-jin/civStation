@@ -1,0 +1,233 @@
+site_name: CivStation Docs
+site_description: Runtime, tooling, and control surfaces for letting VLMs play Civilization VI.
+site_url: https://minsing-jin.github.io/civStation/
+site_dir: ../site
+docs_dir: .
+repo_url: https://github.com/minsing-jin/civStation
+repo_name: minsing-jin/civStation
+edit_uri: edit/main/docs/
+strict: true
+
+theme:
+  name: material
+  language: en
+  font: false
+  palette:
+    - scheme: default
+      primary: blue grey
+      accent: blue
+  features:
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - toc.integrate
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+    - content.tabs.link
+
+plugins:
+  - search
+  - i18n:
+      docs_structure: suffix
+      fallback_to_default: true
+      reconfigure_material: true
+      reconfigure_search: true
+      languages:
+        - locale: en
+          default: true
+          build: true
+          name: English
+          nav_translations:
+            Home: Home
+            Getting Started: Getting Started
+            Concepts: Concepts
+            Guides: Guides
+            Reference: Reference
+            Development: Development
+            Appendix: Appendix
+            Installation: Installation
+            Quickstart: Quickstart
+            First Live Run: First Live Run
+            Mental Model: Architecture Overview
+            Layers: Layers
+            Execution Loop: Execution Loop
+            Human-in-the-Loop: Human-in-the-Loop
+            Layered MCP: Layered MCP
+            Running the Agent: Running the Agent
+            Control and Discussion: Control and Discussion
+            Providers and Image Pipeline: Providers and Image Pipeline
+            Evaluation: Evaluation
+            CLI Reference: CLI Reference
+            Configuration: Configuration
+            MCP Tools: MCP Tools
+            Project Layout: Project Layout
+            Contributing: Contributing
+            Testing and Quality: Testing and Quality
+            Extending the Stack: Extending the Stack
+            Release Notes: Release Notes
+            Architecture Guide: Architecture Guide
+            Historical Implementation Summary: Historical Implementation Summary
+            Legacy Installation Page: Legacy Installation Page
+            Legacy Usage Page: Legacy Usage Page
+            Legacy MCP Tool Map: Legacy MCP Tool Map
+            "Design Note: City Production Blue Placement": "Design Note: City Production Blue Placement"
+            "Design Note: Raw Log Cache Design": "Design Note: Raw Log Cache Design"
+            "Design Note: Raw Log Cache Rollout": "Design Note: Raw Log Cache Rollout"
+            "Design Note: Run Log Capture Design": "Design Note: Run Log Capture Design"
+            "Design Note: Run Log Capture Rollout": "Design Note: Run Log Capture Rollout"
+            "Design Note: Computer-use Providers Design": "Design Note: Computer-use Providers Design"
+            "Design Note: Computer-use Providers Rollout": "Design Note: Computer-use Providers Rollout"
+            "Design Note: Governor Secret Society Trace": "Design Note: Governor Secret Society Trace"
+        - locale: ko
+          build: true
+          name: 한국어
+          nav_translations:
+            Home: 홈
+            Getting Started: 시작하기
+            Concepts: 개념
+            Guides: 가이드
+            Reference: 레퍼런스
+            Development: 개발
+            Appendix: 부록
+            Installation: 설치
+            Quickstart: 빠른 시작
+            First Live Run: 첫 실전 실행
+            Mental Model: 아키텍처 개요
+            Layers: 레이어
+            Execution Loop: 실행 루프
+            Human-in-the-Loop: Human-in-the-Loop
+            Layered MCP: 레이어드 MCP
+            Running the Agent: 에이전트 실행
+            Control and Discussion: 제어와 디스커션
+            Providers and Image Pipeline: 프로바이더와 이미지 파이프라인
+            Evaluation: 평가
+            CLI Reference: CLI 레퍼런스
+            Configuration: 설정
+            MCP Tools: MCP 도구
+            Project Layout: 프로젝트 구조
+            Contributing: 기여하기
+            Testing and Quality: 테스트와 품질
+            Extending the Stack: 스택 확장
+            Release Notes: 릴리스 노트
+            Architecture Guide: 아키텍처 가이드
+            Historical Implementation Summary: 구현 이력 요약
+            Legacy Installation Page: 구 설치 페이지
+            Legacy Usage Page: 구 사용 페이지
+            Legacy MCP Tool Map: 구 MCP 도구 맵
+            "Design Note: City Production Blue Placement": "설계 노트: 도시 생산 배치"
+            "Design Note: Raw Log Cache Design": "설계 노트: 로그 캐시 설계"
+            "Design Note: Raw Log Cache Rollout": "설계 노트: 로그 캐시 적용"
+            "Design Note: Run Log Capture Design": "설계 노트: 실행 로그 캡처 설계"
+            "Design Note: Run Log Capture Rollout": "설계 노트: 실행 로그 캡처 적용"
+            "Design Note: Computer-use Providers Design": "설계 노트: 컴퓨터 유즈 프로바이더 설계"
+            "Design Note: Computer-use Providers Rollout": "설계 노트: 컴퓨터 유즈 프로바이더 적용"
+            "Design Note: Governor Secret Society Trace": "설계 노트: 총독 비밀결사 추적"
+        - locale: zh
+          build: true
+          name: 中文
+          nav_translations:
+            Home: 首页
+            Getting Started: 入门
+            Concepts: 概念
+            Guides: 指南
+            Reference: 参考
+            Development: 开发
+            Appendix: 附录
+            Installation: 安装
+            Quickstart: 快速开始
+            First Live Run: 第一次实机运行
+            Mental Model: 架构概览
+            Layers: 分层
+            Execution Loop: 执行循环
+            Human-in-the-Loop: Human-in-the-Loop
+            Layered MCP: 分层 MCP
+            Running the Agent: 运行代理
+            Control and Discussion: 控制与讨论
+            Providers and Image Pipeline: 提供商与图像管线
+            Evaluation: 评测
+            CLI Reference: CLI 参考
+            Configuration: 配置
+            MCP Tools: MCP 工具
+            Project Layout: 项目结构
+            Contributing: 参与贡献
+            Testing and Quality: 测试与质量
+            Extending the Stack: 扩展栈
+            Release Notes: 发布说明
+            Architecture Guide: 架构指南
+            Historical Implementation Summary: 历史实现总结
+            Legacy Installation Page: 旧安装页
+            Legacy Usage Page: 旧使用页
+            Legacy MCP Tool Map: 旧 MCP 工具图
+            "Design Note: City Production Blue Placement": "设计说明：城市生产布局"
+            "Design Note: Raw Log Cache Design": "设计说明：日志缓存设计"
+            "Design Note: Raw Log Cache Rollout": "设计说明：日志缓存落地"
+            "Design Note: Run Log Capture Design": "设计说明：运行日志捕获设计"
+            "Design Note: Run Log Capture Rollout": "设计说明：运行日志捕获落地"
+            "Design Note: Computer-use Providers Design": "设计说明：Computer-use 提供商设计"
+            "Design Note: Computer-use Providers Rollout": "设计说明：Computer-use 提供商落地"
+            "Design Note: Governor Secret Society Trace": "设计说明：总督秘密结社追踪"
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+extra_css:
+  - assets/stylesheets/extra.css
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Installation: getting-started/installation.md
+      - Quickstart: getting-started/quickstart.md
+      - First Live Run: getting-started/first-live-run.md
+  - Concepts:
+      - Architecture Overview: concepts/mental-model.md
+      - Layers: concepts/layers.md
+      - Execution Loop: concepts/execution-loop.md
+      - Human-in-the-Loop: concepts/human-in-the-loop.md
+      - Layered MCP: concepts/layered-mcp.md
+  - Guides:
+      - Running the Agent: guides/running-the-agent.md
+      - Control and Discussion: guides/control-and-discussion.md
+      - Providers and Image Pipeline: guides/providers-and-image-pipeline.md
+      - Evaluation: guides/evaluation.md
+  - Reference:
+      - CLI Reference: reference/cli.md
+      - Configuration: reference/configuration.md
+      - MCP Tools: reference/mcp-tools.md
+      - Project Layout: reference/project-layout.md
+  - Development:
+      - Contributing: development/contributing.md
+      - Testing and Quality: development/testing-and-quality.md
+      - Extending the Stack: development/extending-the-stack.md
+      - Release Notes: development/release-notes.md
+  - Appendix:
+      - Architecture Guide: archive/architecture-guide.md
+      - Historical Implementation Summary: archive/implementation-summary.md
+      - Legacy Installation Page: installation.md
+      - Legacy Usage Page: usage.md
+      - Legacy MCP Tool Map: layered_mcp.md
+      - "Design Note: City Production Blue Placement": plans/2026-03-16-city-production-blue-placement-followup.md
+      - "Design Note: Raw Log Cache Design": plans/2026-03-17-turn-runner-raw-log-cache-design.md
+      - "Design Note: Raw Log Cache Rollout": plans/2026-03-17-turn-runner-raw-log-cache.md
+      - "Design Note: Run Log Capture Design": plans/2026-03-18-run-log-capture-design.md
+      - "Design Note: Run Log Capture Rollout": plans/2026-03-18-run-log-capture.md
+      - "Design Note: Computer-use Providers Design": plans/2026-03-19-computer-use-providers-design.md
+      - "Design Note: Computer-use Providers Rollout": plans/2026-03-19-computer-use-providers.md
+      - "Design Note: Governor Secret Society Trace": plans/2026-03-19-governor-secret-society-observation-trace.md

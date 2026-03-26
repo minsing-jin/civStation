@@ -1,0 +1,2960 @@
+{
+  "metadata": {
+    "model": "gemini-3-flash-preview",
+    "image": "tests/rough_test/screenshot.png",
+    "ranges": [
+      250,
+      500,
+      1000
+    ],
+    "runs_per_variant": 2,
+    "size_modes": [
+      "raw",
+      "compressed",
+      "downscale_restore",
+      "compressed_downscale_restore"
+    ],
+    "background_modes": [
+      "none",
+      "color"
+    ],
+    "downscale_long_edge": 960,
+    "background_color": [
+      32,
+      32,
+      32
+    ],
+    "background_padding_ratio": 0.12,
+    "generated_at": "2026-03-05T23:17:03.788198"
+  },
+  "aggregates": {
+    "range_mean": {
+      "250": 4.1669375,
+      "500": 4.3921874999999995,
+      "1000": 4.5789375
+    },
+    "range_delta_pct_vs_1000": {
+      "250": -8.997720541064382,
+      "500": -4.078457065640246,
+      "1000": 0.0
+    },
+    "prompt_mean": {
+      "long_prompt": 4.509916666666667,
+      "concise_prompt": 4.248791666666667
+    },
+    "size_mean": {
+      "raw": 6.179416666666666,
+      "compressed": 3.608833333333333,
+      "downscale_restore": 4.062666666666667,
+      "compressed_downscale_restore": 3.6665000000000005
+    },
+    "background_mean": {
+      "none": 4.367458333333334,
+      "color": 4.391249999999999
+    },
+    "range_prompt_mean": {
+      "250::long_prompt": 4.3321250000000004,
+      "250::concise_prompt": 4.00175,
+      "500::long_prompt": 4.4815,
+      "500::concise_prompt": 4.302875,
+      "1000::long_prompt": 4.716125000000001,
+      "1000::concise_prompt": 4.44175
+    },
+    "range_image_mean": {
+      "250::raw+bg_none": 5.6685,
+      "250::raw+bg_color": 6.0920000000000005,
+      "250::compressed+bg_none": 4.026,
+      "250::compressed+bg_color": 3.6180000000000003,
+      "250::downscale_restore+bg_none": 4.1125,
+      "250::downscale_restore+bg_color": 3.1390000000000002,
+      "250::compressed_downscale_restore+bg_none": 3.512,
+      "250::compressed_downscale_restore+bg_color": 3.1675,
+      "500::raw+bg_none": 6.2415,
+      "500::raw+bg_color": 6.619999999999999,
+      "500::compressed+bg_none": 3.411,
+      "500::compressed+bg_color": 3.231,
+      "500::downscale_restore+bg_none": 3.8065,
+      "500::downscale_restore+bg_color": 5.541499999999999,
+      "500::compressed_downscale_restore+bg_none": 3.029,
+      "500::compressed_downscale_restore+bg_color": 3.257,
+      "1000::raw+bg_none": 6.208,
+      "1000::raw+bg_color": 6.2465,
+      "1000::compressed+bg_none": 3.4945,
+      "1000::compressed+bg_color": 3.8725,
+      "1000::downscale_restore+bg_none": 3.6525,
+      "1000::downscale_restore+bg_color": 4.1240000000000006,
+      "1000::compressed_downscale_restore+bg_none": 5.2475000000000005,
+      "1000::compressed_downscale_restore+bg_color": 3.786
+    }
+  },
+  "rows": [
+    {
+      "normalizing_range": 250,
+      "prompt_variant": "long_prompt",
+      "image_variant": "raw+bg_none",
+      "size_variant": "raw",
+      "background_variant": "none",
+      "variant_image_size": "2822x1880",
+      "content_box": [
+        0,
+        0,
+        2822,
+        1880
+      ],
+      "runs": 2,
+      "avg_latency_sec": 5.896,
+      "min_latency_sec": 5.317,
+      "max_latency_sec": 6.475,
+      "num_actions": 1,
+      "first_action": "drag",
+      "result": [
+        {
+          "action": "drag",
+          "x": 150,
+          "y": 180,
+          "end_x": 95,
+          "end_y": 115,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "Early game efficiency: Dragging 'Urban Planning' (+1 Production in all cities) to replace 'God-King' in the Economic Policy slot to boost overall development."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "drag",
+          "x": 150,
+          "y": 180,
+          "end_x": 95,
+          "end_y": 115,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "Early game efficiency: Dragging 'Urban Planning' (+1 Production in all cities) to replace 'God-King' in the Economic Policy slot to boost overall development."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 250,
+      "prompt_variant": "long_prompt",
+      "image_variant": "raw+bg_color",
+      "size_variant": "raw",
+      "background_variant": "color",
+      "variant_image_size": "3500x2332",
+      "content_box": [
+        339,
+        226,
+        2822,
+        1880
+      ],
+      "runs": 2,
+      "avg_latency_sec": 6.3,
+      "min_latency_sec": 5.883,
+      "max_latency_sec": 6.717,
+      "num_actions": 1,
+      "first_action": "drag",
+      "result": [
+        {
+          "action": "drag",
+          "x": 152,
+          "y": 182,
+          "end_x": 94,
+          "end_y": 110,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "Early game efficiency: 'Urban Planning' (+1 Production) is superior to 'God King' unless specific religious objectives are prioritized. Dragging the card to the Economic slot."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "drag",
+          "x": 147,
+          "y": 171,
+          "end_x": 100,
+          "end_y": 113,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "Early game efficiency: 'Urban Planning' (+1 Production) is superior to 'God King' unless specific religious objectives are prioritized. Dragging the card to the Economic slot."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 250,
+      "prompt_variant": "long_prompt",
+      "image_variant": "compressed+bg_none",
+      "size_variant": "compressed",
+      "background_variant": "none",
+      "variant_image_size": "1280x853",
+      "content_box": [
+        0,
+        0,
+        1280,
+        853
+      ],
+      "runs": 2,
+      "avg_latency_sec": 4.52,
+      "min_latency_sec": 4.001,
+      "max_latency_sec": 5.038,
+      "num_actions": 1,
+      "first_action": "click",
+      "result": [
+        {
+          "action": "click",
+          "x": 197,
+          "y": 202,
+          "end_x": 197,
+          "end_y": 202,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "현재 '규율'과 '신앙' 카드가 각각 군사 및 경제 슬롯에 이미 배치되어 있으며 다른 변경 사항이 필요하지 않으므로, 정책 배정을 확정하기 위해 하단의 '모든 정책 배정' 버튼을 클릭합니다."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "click",
+          "x": 197,
+          "y": 202,
+          "end_x": 197,
+          "end_y": 202,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "현재 '규율'과 '신앙' 카드가 각각 군사 및 경제 슬롯에 이미 배치되어 있으며 다른 변경 사항이 필요하지 않으므로, 정책 배정을 확정하기 위해 하단의 '모든 정책 배정' 버튼을 클릭합니다."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 250,
+      "prompt_variant": "long_prompt",
+      "image_variant": "compressed+bg_color",
+      "size_variant": "compressed",
+      "background_variant": "color",
+      "variant_image_size": "1588x1057",
+      "content_box": [
+        154,
+        102,
+        1280,
+        853
+      ],
+      "runs": 2,
+      "avg_latency_sec": 3.736,
+      "min_latency_sec": 3.608,
+      "max_latency_sec": 3.863,
+      "num_actions": 1,
+      "first_action": "click",
+      "result": [
+        {
+          "action": "click",
+          "x": 211,
+          "y": 203,
+          "end_x": 211,
+          "end_y": 203,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "All policy slots are filled (Military: Discipline, Economic: God-King), so I will click the 'Confirm All Policies' button to finish policy management."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "click",
+          "x": 194,
+          "y": 188,
+          "end_x": 194,
+          "end_y": 188,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "All policy slots are filled (Military: Discipline, Economic: God-King), so I will click the 'Confirm All Policies' button to finish policy management."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 250,
+      "prompt_variant": "long_prompt",
+      "image_variant": "downscale_restore+bg_none",
+      "size_variant": "downscale_restore",
+      "background_variant": "none",
+      "variant_image_size": "960x640",
+      "content_box": [
+        0,
+        0,
+        960,
+        640
+      ],
+      "runs": 2,
+      "avg_latency_sec": 5.279,
+      "min_latency_sec": 4.211,
+      "max_latency_sec": 6.346,
+      "num_actions": 2,
+      "first_action": "drag",
+      "result": [
+        {
+          "action": "drag",
+          "x": 153,
+          "y": 183,
+          "end_x": 96,
+          "end_y": 135,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "경제 성장을 위해 도시 계획 카드를 경제 정책 슬롯에 배치합니다."
+        },
+        {
+          "action": "click",
+          "x": 194,
+          "y": 201,
+          "end_x": 194,
+          "end_y": 201,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "정책 설정을 완료하기 위해 모든 정책 배정 버튼을 클릭합니다."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "drag",
+          "x": 153,
+          "y": 183,
+          "end_x": 96,
+          "end_y": 135,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "경제 성장을 위해 도시 계획 카드를 경제 정책 슬롯에 배치합니다."
+        },
+        {
+          "action": "click",
+          "x": 194,
+          "y": 201,
+          "end_x": 194,
+          "end_y": 201,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "정책 설정을 완료하기 위해 모든 정책 배정 버튼을 클릭합니다."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 250,
+      "prompt_variant": "long_prompt",
+      "image_variant": "downscale_restore+bg_color",
+      "size_variant": "downscale_restore",
+      "background_variant": "color",
+      "variant_image_size": "1190x794",
+      "content_box": [
+        115,
+        77,
+        960,
+        640
+      ],
+      "runs": 2,
+      "avg_latency_sec": 3.115,
+      "min_latency_sec": 3.047,
+      "max_latency_sec": 3.182,
+      "num_actions": 2,
+      "first_action": "drag",
+      "result": [
+        {
+          "action": "drag",
+          "x": 154,
+          "y": 180,
+          "end_x": 104,
+          "end_y": 121,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "경제 정책 슬롯이 비어있으므로 '도시 계획' 카드를 드래그하여 배정합니다."
+        },
+        {
+          "action": "click",
+          "x": 206,
+          "y": 203,
+          "end_x": 206,
+          "end_y": 203,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "모든 슬롯 배정이 완료되었으므로 '모든 정책 배정' 버튼을 클릭하여 확정합니다."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "drag",
+          "x": 148,
+          "y": 169,
+          "end_x": 108,
+          "end_y": 122,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "경제 정책 슬롯이 비어있으므로 '도시 계획' 카드를 드래그하여 배정합니다."
+        },
+        {
+          "action": "click",
+          "x": 190,
+          "y": 188,
+          "end_x": 190,
+          "end_y": 188,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "모든 슬롯 배정이 완료되었으므로 '모든 정책 배정' 버튼을 클릭하여 확정합니다."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 250,
+      "prompt_variant": "long_prompt",
+      "image_variant": "compressed_downscale_restore+bg_none",
+      "size_variant": "compressed_downscale_restore",
+      "background_variant": "none",
+      "variant_image_size": "960x640",
+      "content_box": [
+        0,
+        0,
+        960,
+        640
+      ],
+      "runs": 2,
+      "avg_latency_sec": 2.857,
+      "min_latency_sec": 2.733,
+      "max_latency_sec": 2.982,
+      "num_actions": 1,
+      "first_action": "click",
+      "result": [
+        {
+          "action": "click",
+          "x": 211,
+          "y": 202,
+          "end_x": 211,
+          "end_y": 202,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "All available policy slots are currently filled as per the current strategy, so I am clicking 'Confirm All Policies' to finalize and close the screen."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "click",
+          "x": 211,
+          "y": 202,
+          "end_x": 211,
+          "end_y": 202,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "All available policy slots are currently filled as per the current strategy, so I am clicking 'Confirm All Policies' to finalize and close the screen."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 250,
+      "prompt_variant": "long_prompt",
+      "image_variant": "compressed_downscale_restore+bg_color",
+      "size_variant": "compressed_downscale_restore",
+      "background_variant": "color",
+      "variant_image_size": "1190x794",
+      "content_box": [
+        115,
+        77,
+        960,
+        640
+      ],
+      "runs": 2,
+      "avg_latency_sec": 2.954,
+      "min_latency_sec": 2.834,
+      "max_latency_sec": 3.075,
+      "num_actions": 1,
+      "first_action": "drag",
+      "result": [
+        {
+          "action": "drag",
+          "x": 156,
+          "y": 168,
+          "end_x": 94,
+          "end_y": 125,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "경제 정책 슬롯이 비어 있으므로 도시 생산성을 높이기 위해 우측의 '도시 계획' 카드를 경제 슬롯으로 드래그하여 배치합니다."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "drag",
+          "x": 150,
+          "y": 160,
+          "end_x": 100,
+          "end_y": 125,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "경제 정책 슬롯이 비어 있으므로 도시 생산성을 높이기 위해 우측의 '도시 계획' 카드를 경제 슬롯으로 드래그하여 배치합니다."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 250,
+      "prompt_variant": "concise_prompt",
+      "image_variant": "raw+bg_none",
+      "size_variant": "raw",
+      "background_variant": "none",
+      "variant_image_size": "2822x1880",
+      "content_box": [
+        0,
+        0,
+        2822,
+        1880
+      ],
+      "runs": 2,
+      "avg_latency_sec": 5.441,
+      "min_latency_sec": 5.301,
+      "max_latency_sec": 5.582,
+      "num_actions": 1,
+      "first_action": "click",
+      "result": [
+        {
+          "action": "click",
+          "x": 196,
+          "y": 203,
+          "end_x": 196,
+          "end_y": 203,
+          "button": "left",
+          "key": "none",
+          "text": "none",
+          "reasoning": "모든 정책 배정 버튼을 클릭하여 현재 설정된 정책 카드를 확정하고 정책 변경을 완료함."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "click",
+          "x": 196,
+          "y": 203,
+          "end_x": 196,
+          "end_y": 203,
+          "button": "left",
+          "key": "none",
+          "text": "none",
+          "reasoning": "모든 정책 배정 버튼을 클릭하여 현재 설정된 정책 카드를 확정하고 정책 변경을 완료함."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 250,
+      "prompt_variant": "concise_prompt",
+      "image_variant": "raw+bg_color",
+      "size_variant": "raw",
+      "background_variant": "color",
+      "variant_image_size": "3500x2332",
+      "content_box": [
+        339,
+        226,
+        2822,
+        1880
+      ],
+      "runs": 2,
+      "avg_latency_sec": 5.884,
+      "min_latency_sec": 5.741,
+      "max_latency_sec": 6.028,
+      "num_actions": 2,
+      "first_action": "drag",
+      "result": [
+        {
+          "action": "drag",
+          "x": 154,
+          "y": 180,
+          "end_x": 94,
+          "end_y": 180,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "'도시 계획' 정책 카드를 드래그하여 경제 정책 슬롯의 기존 '신왕' 카드를 교체하여 생산력을 확보합니다."
+        },
+        {
+          "action": "click",
+          "x": 196,
+          "y": 203,
+          "end_x": 196,
+          "end_y": 203,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "변경된 정책을 확정하기 위해 '모든 정책 배정' 버튼을 클릭합니다."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "drag",
+          "x": 148,
+          "y": 169,
+          "end_x": 100,
+          "end_y": 169,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "'도시 계획' 정책 카드를 드래그하여 경제 정책 슬롯의 기존 '신왕' 카드를 교체하여 생산력을 확보합니다."
+        },
+        {
+          "action": "click",
+          "x": 182,
+          "y": 188,
+          "end_x": 182,
+          "end_y": 188,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "변경된 정책을 확정하기 위해 '모든 정책 배정' 버튼을 클릭합니다."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 250,
+      "prompt_variant": "concise_prompt",
+      "image_variant": "compressed+bg_none",
+      "size_variant": "compressed",
+      "background_variant": "none",
+      "variant_image_size": "1280x853",
+      "content_box": [
+        0,
+        0,
+        1280,
+        853
+      ],
+      "runs": 2,
+      "avg_latency_sec": 3.532,
+      "min_latency_sec": 3.005,
+      "max_latency_sec": 4.059,
+      "num_actions": 1,
+      "first_action": "drag",
+      "result": [
+        {
+          "action": "drag",
+          "x": 154,
+          "y": 171,
+          "end_x": 100,
+          "end_y": 183,
+          "button": "left",
+          "key": "null",
+          "text": "null",
+          "reasoning": "Urban Planning card provides +1 Production in all cities, which is essential for early game growth. Dragging it to the Economic Policy slot."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "drag",
+          "x": 154,
+          "y": 171,
+          "end_x": 100,
+          "end_y": 183,
+          "button": "left",
+          "key": "null",
+          "text": "null",
+          "reasoning": "Urban Planning card provides +1 Production in all cities, which is essential for early game growth. Dragging it to the Economic Policy slot."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 250,
+      "prompt_variant": "concise_prompt",
+      "image_variant": "compressed+bg_color",
+      "size_variant": "compressed",
+      "background_variant": "color",
+      "variant_image_size": "1588x1057",
+      "content_box": [
+        154,
+        102,
+        1280,
+        853
+      ],
+      "runs": 2,
+      "avg_latency_sec": 3.5,
+      "min_latency_sec": 3.022,
+      "max_latency_sec": 3.977,
+      "num_actions": 2,
+      "first_action": "drag",
+      "result": [
+        {
+          "action": "drag",
+          "x": 157,
+          "y": 188,
+          "end_x": 95,
+          "end_y": 188,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "'도시 계획' 정책 카드를 드래그하여 비어 있는 경제 정책 슬롯에 배치하여 생산력을 확보합니다."
+        },
+        {
+          "action": "click",
+          "x": 196,
+          "y": 203,
+          "end_x": 196,
+          "end_y": 203,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "모든 정책 슬롯이 채워진 후 하단의 '모든 정책 배정' 버튼을 클릭하여 변경 사항을 확정합니다."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "drag",
+          "x": 151,
+          "y": 176,
+          "end_x": 101,
+          "end_y": 176,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "'도시 계획' 정책 카드를 드래그하여 비어 있는 경제 정책 슬롯에 배치하여 생산력을 확보합니다."
+        },
+        {
+          "action": "click",
+          "x": 182,
+          "y": 188,
+          "end_x": 182,
+          "end_y": 188,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "모든 정책 슬롯이 채워진 후 하단의 '모든 정책 배정' 버튼을 클릭하여 변경 사항을 확정합니다."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 250,
+      "prompt_variant": "concise_prompt",
+      "image_variant": "downscale_restore+bg_none",
+      "size_variant": "downscale_restore",
+      "background_variant": "none",
+      "variant_image_size": "960x640",
+      "content_box": [
+        0,
+        0,
+        960,
+        640
+      ],
+      "runs": 2,
+      "avg_latency_sec": 2.946,
+      "min_latency_sec": 2.742,
+      "max_latency_sec": 3.149,
+      "num_actions": 2,
+      "first_action": "drag",
+      "result": [
+        {
+          "action": "drag",
+          "x": 154,
+          "y": 178,
+          "end_x": 97,
+          "end_y": 122,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "'도시 계획' 정책 카드를 경제 정책 슬롯으로 드래그하여 생산력을 확보합니다."
+        },
+        {
+          "action": "click",
+          "x": 195,
+          "y": 203,
+          "end_x": 195,
+          "end_y": 203,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "정책 변경 사항을 최종 확정하기 위해 '모든 정책 배정' 버튼을 클릭합니다."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "drag",
+          "x": 154,
+          "y": 178,
+          "end_x": 97,
+          "end_y": 122,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "'도시 계획' 정책 카드를 경제 정책 슬롯으로 드래그하여 생산력을 확보합니다."
+        },
+        {
+          "action": "click",
+          "x": 195,
+          "y": 203,
+          "end_x": 195,
+          "end_y": 203,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "정책 변경 사항을 최종 확정하기 위해 '모든 정책 배정' 버튼을 클릭합니다."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 250,
+      "prompt_variant": "concise_prompt",
+      "image_variant": "downscale_restore+bg_color",
+      "size_variant": "downscale_restore",
+      "background_variant": "color",
+      "variant_image_size": "1190x794",
+      "content_box": [
+        115,
+        77,
+        960,
+        640
+      ],
+      "runs": 2,
+      "avg_latency_sec": 3.163,
+      "min_latency_sec": 2.844,
+      "max_latency_sec": 3.482,
+      "num_actions": 2,
+      "first_action": "drag",
+      "result": [
+        {
+          "action": "drag",
+          "x": 154,
+          "y": 172,
+          "end_x": 95,
+          "end_y": 121,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "'도시 계획' 경제 정책 카드를 비어 있는 경제 정책 슬롯으로 드래그하여 배치합니다. 초기 확장을 위해 생산력 +1 보너스가 중요합니다."
+        },
+        {
+          "action": "click",
+          "x": 196,
+          "y": 203,
+          "end_x": 196,
+          "end_y": 203,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "모든 정책 슬롯이 채워진 것을 확인한 후 '모든 정책 배정' 버튼을 클릭하여 변경 사항을 최종 승인합니다."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "drag",
+          "x": 148,
+          "y": 163,
+          "end_x": 101,
+          "end_y": 122,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "'도시 계획' 경제 정책 카드를 비어 있는 경제 정책 슬롯으로 드래그하여 배치합니다. 초기 확장을 위해 생산력 +1 보너스가 중요합니다."
+        },
+        {
+          "action": "click",
+          "x": 182,
+          "y": 188,
+          "end_x": 182,
+          "end_y": 188,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "모든 정책 슬롯이 채워진 것을 확인한 후 '모든 정책 배정' 버튼을 클릭하여 변경 사항을 최종 승인합니다."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 250,
+      "prompt_variant": "concise_prompt",
+      "image_variant": "compressed_downscale_restore+bg_none",
+      "size_variant": "compressed_downscale_restore",
+      "background_variant": "none",
+      "variant_image_size": "960x640",
+      "content_box": [
+        0,
+        0,
+        960,
+        640
+      ],
+      "runs": 2,
+      "avg_latency_sec": 4.167,
+      "min_latency_sec": 3.332,
+      "max_latency_sec": 5.002,
+      "num_actions": 2,
+      "first_action": "drag",
+      "result": [
+        {
+          "action": "drag",
+          "x": 153,
+          "y": 175,
+          "end_x": 100,
+          "end_y": 180,
+          "button": "left",
+          "key": "none",
+          "text": "",
+          "reasoning": "'도시 계획' 경제 정책 카드를 비어 있는 경제 정책 슬롯으로 드래그하여 활성화합니다. 생산력 보너스를 위해 초기 단계에서 매우 유용합니다."
+        },
+        {
+          "action": "click",
+          "x": 197,
+          "y": 201,
+          "end_x": 197,
+          "end_y": 201,
+          "button": "left",
+          "key": "none",
+          "text": "",
+          "reasoning": "정책 카드 배정을 완료한 후 하단의 '모든 정책 확정' 버튼을 클릭하여 변경 사항을 적용합니다."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "drag",
+          "x": 153,
+          "y": 175,
+          "end_x": 100,
+          "end_y": 180,
+          "button": "left",
+          "key": "none",
+          "text": "",
+          "reasoning": "'도시 계획' 경제 정책 카드를 비어 있는 경제 정책 슬롯으로 드래그하여 활성화합니다. 생산력 보너스를 위해 초기 단계에서 매우 유용합니다."
+        },
+        {
+          "action": "click",
+          "x": 197,
+          "y": 201,
+          "end_x": 197,
+          "end_y": 201,
+          "button": "left",
+          "key": "none",
+          "text": "",
+          "reasoning": "정책 카드 배정을 완료한 후 하단의 '모든 정책 확정' 버튼을 클릭하여 변경 사항을 적용합니다."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 250,
+      "prompt_variant": "concise_prompt",
+      "image_variant": "compressed_downscale_restore+bg_color",
+      "size_variant": "compressed_downscale_restore",
+      "background_variant": "color",
+      "variant_image_size": "1190x794",
+      "content_box": [
+        115,
+        77,
+        960,
+        640
+      ],
+      "runs": 2,
+      "avg_latency_sec": 3.381,
+      "min_latency_sec": 2.871,
+      "max_latency_sec": 3.891,
+      "num_actions": 3,
+      "first_action": "drag",
+      "result": [
+        {
+          "action": "drag",
+          "x": 154,
+          "y": 79,
+          "end_x": 95,
+          "end_y": 74,
+          "button": "left",
+          "key": "null",
+          "text": "null",
+          "reasoning": "'Discipline' policy card is being dragged from the available list to the Military Policy slot to fulfill the military slot requirement."
+        },
+        {
+          "action": "drag",
+          "x": 154,
+          "y": 137,
+          "end_x": 95,
+          "end_y": 121,
+          "button": "left",
+          "key": "null",
+          "text": "null",
+          "reasoning": "'God-King' policy card is being dragged to the Economic Policy slot to start generating Faith and Gold."
+        },
+        {
+          "action": "click",
+          "x": 194,
+          "y": 203,
+          "end_x": 194,
+          "end_y": 203,
+          "button": "left",
+          "key": "null",
+          "text": "null",
+          "reasoning": "Clicking 'Confirm Policies' (모든 정책 확정) to apply the selected policy changes and return to the main game screen."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "drag",
+          "x": 148,
+          "y": 88,
+          "end_x": 101,
+          "end_y": 84,
+          "button": "left",
+          "key": "null",
+          "text": "null",
+          "reasoning": "'Discipline' policy card is being dragged from the available list to the Military Policy slot to fulfill the military slot requirement."
+        },
+        {
+          "action": "drag",
+          "x": 148,
+          "y": 135,
+          "end_x": 101,
+          "end_y": 122,
+          "button": "left",
+          "key": "null",
+          "text": "null",
+          "reasoning": "'God-King' policy card is being dragged to the Economic Policy slot to start generating Faith and Gold."
+        },
+        {
+          "action": "click",
+          "x": 181,
+          "y": 188,
+          "end_x": 181,
+          "end_y": 188,
+          "button": "left",
+          "key": "null",
+          "text": "null",
+          "reasoning": "Clicking 'Confirm Policies' (모든 정책 확정) to apply the selected policy changes and return to the main game screen."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 500,
+      "prompt_variant": "long_prompt",
+      "image_variant": "raw+bg_none",
+      "size_variant": "raw",
+      "background_variant": "none",
+      "variant_image_size": "2822x1880",
+      "content_box": [
+        0,
+        0,
+        2822,
+        1880
+      ],
+      "runs": 2,
+      "avg_latency_sec": 5.824,
+      "min_latency_sec": 5.695,
+      "max_latency_sec": 5.952,
+      "num_actions": 2,
+      "first_action": "drag",
+      "result": [
+        {
+          "action": "drag",
+          "x": 305,
+          "y": 361,
+          "end_x": 191,
+          "end_y": 242,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "전략적 우위를 위해 현재 슬롯의 '신왕' 카드 대신 도시 생산력을 높여주는 '도시 계획' 카드를 경제 정책 슬롯에 배치합니다."
+        },
+        {
+          "action": "click",
+          "x": 401,
+          "y": 404,
+          "end_x": 401,
+          "end_y": 404,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "모든 정책 슬롯이 채워졌으므로 '모든 정책 배정' 버튼을 눌러 변경 사항을 확정합니다."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "drag",
+          "x": 305,
+          "y": 361,
+          "end_x": 191,
+          "end_y": 242,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "전략적 우위를 위해 현재 슬롯의 '신왕' 카드 대신 도시 생산력을 높여주는 '도시 계획' 카드를 경제 정책 슬롯에 배치합니다."
+        },
+        {
+          "action": "click",
+          "x": 401,
+          "y": 404,
+          "end_x": 401,
+          "end_y": 404,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "모든 정책 슬롯이 채워졌으므로 '모든 정책 배정' 버튼을 눌러 변경 사항을 확정합니다."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 500,
+      "prompt_variant": "long_prompt",
+      "image_variant": "raw+bg_color",
+      "size_variant": "raw",
+      "background_variant": "color",
+      "variant_image_size": "3500x2332",
+      "content_box": [
+        339,
+        226,
+        2822,
+        1880
+      ],
+      "runs": 2,
+      "avg_latency_sec": 7.249,
+      "min_latency_sec": 6.915,
+      "max_latency_sec": 7.583,
+      "num_actions": 1,
+      "first_action": "drag",
+      "result": [
+        {
+          "action": "drag",
+          "x": 312,
+          "y": 362,
+          "end_x": 188,
+          "end_y": 238,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "경제 정책 카드 '도시 계획'을 빈 경제 정책 슬롯에 배치하여 모든 도시에 생산력 +1 보너스를 획득합니다."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "drag",
+          "x": 300,
+          "y": 340,
+          "end_x": 200,
+          "end_y": 240,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "경제 정책 카드 '도시 계획'을 빈 경제 정책 슬롯에 배치하여 모든 도시에 생산력 +1 보너스를 획득합니다."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 500,
+      "prompt_variant": "long_prompt",
+      "image_variant": "compressed+bg_none",
+      "size_variant": "compressed",
+      "background_variant": "none",
+      "variant_image_size": "1280x853",
+      "content_box": [
+        0,
+        0,
+        1280,
+        853
+      ],
+      "runs": 2,
+      "avg_latency_sec": 2.816,
+      "min_latency_sec": 2.422,
+      "max_latency_sec": 3.211,
+      "num_actions": 1,
+      "first_action": "click",
+      "result": [
+        {
+          "action": "click",
+          "x": 392,
+          "y": 408,
+          "end_x": 392,
+          "end_y": 408,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "현재 정부 슬롯에 군사 및 경제 정책이 이미 모두 배정되어 있으므로 '모든 정책 배정' 버튼을 눌러 확정합니다."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "click",
+          "x": 392,
+          "y": 408,
+          "end_x": 392,
+          "end_y": 408,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "현재 정부 슬롯에 군사 및 경제 정책이 이미 모두 배정되어 있으므로 '모든 정책 배정' 버튼을 눌러 확정합니다."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 500,
+      "prompt_variant": "long_prompt",
+      "image_variant": "compressed+bg_color",
+      "size_variant": "compressed",
+      "background_variant": "color",
+      "variant_image_size": "1588x1057",
+      "content_box": [
+        154,
+        102,
+        1280,
+        853
+      ],
+      "runs": 2,
+      "avg_latency_sec": 2.918,
+      "min_latency_sec": 2.77,
+      "max_latency_sec": 3.066,
+      "num_actions": 1,
+      "first_action": "click",
+      "result": [
+        {
+          "action": "click",
+          "x": 413,
+          "y": 404,
+          "end_x": 0,
+          "end_y": 0,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "모든 정책 슬롯(군사 정책 '규율', 경제 정책 '신왕')이 현재 정부 상태에 맞게 채워져 있으므로 하단의 '모든 정책 배정' 버튼을 눌러 확정합니다."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "click",
+          "x": 381,
+          "y": 374,
+          "end_x": 0,
+          "end_y": 0,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "모든 정책 슬롯(군사 정책 '규율', 경제 정책 '신왕')이 현재 정부 상태에 맞게 채워져 있으므로 하단의 '모든 정책 배정' 버튼을 눌러 확정합니다."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 500,
+      "prompt_variant": "long_prompt",
+      "image_variant": "downscale_restore+bg_none",
+      "size_variant": "downscale_restore",
+      "background_variant": "none",
+      "variant_image_size": "960x640",
+      "content_box": [
+        0,
+        0,
+        960,
+        640
+      ],
+      "runs": 2,
+      "avg_latency_sec": 4.719,
+      "min_latency_sec": 3.696,
+      "max_latency_sec": 5.743,
+      "num_actions": 2,
+      "first_action": "drag",
+      "result": [
+        {
+          "action": "drag",
+          "x": 308,
+          "y": 360,
+          "end_x": 190,
+          "end_y": 238,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "현재 경제 정책에 '신왕'이 장착되어 있으나, 빠른 확장을 위해 생산력을 높여주는 '도시 계획' 카드로 교체하기 위해 드래그합니다."
+        },
+        {
+          "action": "click",
+          "x": 392,
+          "y": 403,
+          "end_x": 392,
+          "end_y": 403,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "정책 슬롯 배정이 완료되었으므로 '모든 정책 배정' 버튼을 클릭하여 변경 사항을 확정합니다."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "drag",
+          "x": 308,
+          "y": 360,
+          "end_x": 190,
+          "end_y": 238,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "현재 경제 정책에 '신왕'이 장착되어 있으나, 빠른 확장을 위해 생산력을 높여주는 '도시 계획' 카드로 교체하기 위해 드래그합니다."
+        },
+        {
+          "action": "click",
+          "x": 392,
+          "y": 403,
+          "end_x": 392,
+          "end_y": 403,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "정책 슬롯 배정이 완료되었으므로 '모든 정책 배정' 버튼을 클릭하여 변경 사항을 확정합니다."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 500,
+      "prompt_variant": "long_prompt",
+      "image_variant": "downscale_restore+bg_color",
+      "size_variant": "downscale_restore",
+      "background_variant": "color",
+      "variant_image_size": "1190x794",
+      "content_box": [
+        115,
+        77,
+        960,
+        640
+      ],
+      "runs": 2,
+      "avg_latency_sec": 6.108,
+      "min_latency_sec": 6.021,
+      "max_latency_sec": 6.196,
+      "num_actions": 1,
+      "first_action": "click",
+      "result": [
+        {
+          "action": "click",
+          "x": 398,
+          "y": 404,
+          "end_x": 398,
+          "end_y": 404,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "모든 정책 슬롯(군사, 경제)에 카드가 배정되었으므로 하단의 '모든 정책 배정' 버튼을 클릭하여 확정합니다."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "click",
+          "x": 369,
+          "y": 374,
+          "end_x": 369,
+          "end_y": 374,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "모든 정책 슬롯(군사, 경제)에 카드가 배정되었으므로 하단의 '모든 정책 배정' 버튼을 클릭하여 확정합니다."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 500,
+      "prompt_variant": "long_prompt",
+      "image_variant": "compressed_downscale_restore+bg_none",
+      "size_variant": "compressed_downscale_restore",
+      "background_variant": "none",
+      "variant_image_size": "960x640",
+      "content_box": [
+        0,
+        0,
+        960,
+        640
+      ],
+      "runs": 2,
+      "avg_latency_sec": 2.739,
+      "min_latency_sec": 2.354,
+      "max_latency_sec": 3.124,
+      "num_actions": 1,
+      "first_action": "click",
+      "result": [
+        {
+          "action": "click",
+          "x": 403,
+          "y": 405,
+          "end_x": 0,
+          "end_y": 0,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "현재 정부(족장제)의 군사 및 경제 정책 슬롯이 모두 채워져 있고 다른 변경 사항이 없으므로 정책 설정을 완료하기 위해 '모든 정책 배정' 버튼을 클릭합니다."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "click",
+          "x": 403,
+          "y": 405,
+          "end_x": 0,
+          "end_y": 0,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "현재 정부(족장제)의 군사 및 경제 정책 슬롯이 모두 채워져 있고 다른 변경 사항이 없으므로 정책 설정을 완료하기 위해 '모든 정책 배정' 버튼을 클릭합니다."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 500,
+      "prompt_variant": "long_prompt",
+      "image_variant": "compressed_downscale_restore+bg_color",
+      "size_variant": "compressed_downscale_restore",
+      "background_variant": "color",
+      "variant_image_size": "1190x794",
+      "content_box": [
+        115,
+        77,
+        960,
+        640
+      ],
+      "runs": 2,
+      "avg_latency_sec": 3.479,
+      "min_latency_sec": 2.764,
+      "max_latency_sec": 4.193,
+      "num_actions": 1,
+      "first_action": "click",
+      "result": [
+        {
+          "action": "click",
+          "x": 467,
+          "y": 406,
+          "end_x": 467,
+          "end_y": 406,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "모든 정책 슬롯에 카드가 배정되어 있으므로 '모든 정책 배정' 버튼을 클릭하여 변경 사항을 확정합니다."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "click",
+          "x": 425,
+          "y": 376,
+          "end_x": 425,
+          "end_y": 376,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "모든 정책 슬롯에 카드가 배정되어 있으므로 '모든 정책 배정' 버튼을 클릭하여 변경 사항을 확정합니다."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 500,
+      "prompt_variant": "concise_prompt",
+      "image_variant": "raw+bg_none",
+      "size_variant": "raw",
+      "background_variant": "none",
+      "variant_image_size": "2822x1880",
+      "content_box": [
+        0,
+        0,
+        2822,
+        1880
+      ],
+      "runs": 2,
+      "avg_latency_sec": 6.659,
+      "min_latency_sec": 5.945,
+      "max_latency_sec": 7.372,
+      "num_actions": 2,
+      "first_action": "drag",
+      "result": [
+        {
+          "action": "drag",
+          "x": 306,
+          "y": 371,
+          "end_x": 190,
+          "end_y": 239,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "'도시 계획' 정책 카드가 비어 있는 경제 정책 슬롯에 들어가도록 드래그 앤 드롭을 수행합니다."
+        },
+        {
+          "action": "click",
+          "x": 392,
+          "y": 406,
+          "end_x": 392,
+          "end_y": 406,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "정책 슬롯을 모두 채운 후 '모든 정책 배정' 버튼을 클릭하여 정책 변경을 완료합니다."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "drag",
+          "x": 306,
+          "y": 371,
+          "end_x": 190,
+          "end_y": 239,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "'도시 계획' 정책 카드가 비어 있는 경제 정책 슬롯에 들어가도록 드래그 앤 드롭을 수행합니다."
+        },
+        {
+          "action": "click",
+          "x": 392,
+          "y": 406,
+          "end_x": 392,
+          "end_y": 406,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "정책 슬롯을 모두 채운 후 '모든 정책 배정' 버튼을 클릭하여 정책 변경을 완료합니다."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 500,
+      "prompt_variant": "concise_prompt",
+      "image_variant": "raw+bg_color",
+      "size_variant": "raw",
+      "background_variant": "color",
+      "variant_image_size": "3500x2332",
+      "content_box": [
+        339,
+        226,
+        2822,
+        1880
+      ],
+      "runs": 2,
+      "avg_latency_sec": 5.991,
+      "min_latency_sec": 5.912,
+      "max_latency_sec": 6.071,
+      "num_actions": 1,
+      "first_action": "drag",
+      "result": [
+        {
+          "action": "drag",
+          "x": 306,
+          "y": 355,
+          "end_x": 188,
+          "end_y": 231,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "도시 계획 정책 카드를 경제 정책 슬롯으로 드래그하여 활성화함"
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "drag",
+          "x": 295,
+          "y": 335,
+          "end_x": 200,
+          "end_y": 235,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "도시 계획 정책 카드를 경제 정책 슬롯으로 드래그하여 활성화함"
+        }
+      ]
+    },
+    {
+      "normalizing_range": 500,
+      "prompt_variant": "concise_prompt",
+      "image_variant": "compressed+bg_none",
+      "size_variant": "compressed",
+      "background_variant": "none",
+      "variant_image_size": "1280x853",
+      "content_box": [
+        0,
+        0,
+        1280,
+        853
+      ],
+      "runs": 2,
+      "avg_latency_sec": 4.006,
+      "min_latency_sec": 2.895,
+      "max_latency_sec": 5.117,
+      "num_actions": 2,
+      "first_action": "drag",
+      "result": [
+        {
+          "action": "drag",
+          "x": 305,
+          "y": 336,
+          "end_x": 194,
+          "end_y": 336,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "'Urban Planning' (+1 Production in all cities) is highly effective in the early game. Dragging this economic policy card from the available list on the right to the empty economic policy slot on the left."
+        },
+        {
+          "action": "click",
+          "x": 392,
+          "y": 404,
+          "end_x": 392,
+          "end_y": 404,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "After allocating the policy card, click the 'Confirm Policies' (모든 정책 배정) button at the bottom right to apply the changes."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "drag",
+          "x": 305,
+          "y": 336,
+          "end_x": 194,
+          "end_y": 336,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "'Urban Planning' (+1 Production in all cities) is highly effective in the early game. Dragging this economic policy card from the available list on the right to the empty economic policy slot on the left."
+        },
+        {
+          "action": "click",
+          "x": 392,
+          "y": 404,
+          "end_x": 392,
+          "end_y": 404,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "After allocating the policy card, click the 'Confirm Policies' (모든 정책 배정) button at the bottom right to apply the changes."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 500,
+      "prompt_variant": "concise_prompt",
+      "image_variant": "compressed+bg_color",
+      "size_variant": "compressed",
+      "background_variant": "color",
+      "variant_image_size": "1588x1057",
+      "content_box": [
+        154,
+        102,
+        1280,
+        853
+      ],
+      "runs": 2,
+      "avg_latency_sec": 3.544,
+      "min_latency_sec": 3.424,
+      "max_latency_sec": 3.664,
+      "num_actions": 3,
+      "first_action": "drag",
+      "result": [
+        {
+          "action": "drag",
+          "x": 318,
+          "y": 362,
+          "end_x": 193,
+          "end_y": 244,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "군사 정책 슬롯이 비어 있으므로 '규율' 카드를 군사 정책 슬롯으로 드래그하여 장착합니다."
+        },
+        {
+          "action": "drag",
+          "x": 318,
+          "y": 379,
+          "end_x": 193,
+          "end_y": 244,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "경제 정책 슬롯이 비어 있으므로 '신왕' 카드를 경제 정책 슬롯으로 드래그하여 장착합니다."
+        },
+        {
+          "action": "click",
+          "x": 401,
+          "y": 406,
+          "end_x": 401,
+          "end_y": 406,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "정책 배정이 완료된 후 하단의 '모든 정책 배정' 버튼을 눌러 확정합니다."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "drag",
+          "x": 305,
+          "y": 340,
+          "end_x": 204,
+          "end_y": 245,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "군사 정책 슬롯이 비어 있으므로 '규율' 카드를 군사 정책 슬롯으로 드래그하여 장착합니다."
+        },
+        {
+          "action": "drag",
+          "x": 305,
+          "y": 354,
+          "end_x": 204,
+          "end_y": 245,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "경제 정책 슬롯이 비어 있으므로 '신왕' 카드를 경제 정책 슬롯으로 드래그하여 장착합니다."
+        },
+        {
+          "action": "click",
+          "x": 372,
+          "y": 376,
+          "end_x": 372,
+          "end_y": 376,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "정책 배정이 완료된 후 하단의 '모든 정책 배정' 버튼을 눌러 확정합니다."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 500,
+      "prompt_variant": "concise_prompt",
+      "image_variant": "downscale_restore+bg_none",
+      "size_variant": "downscale_restore",
+      "background_variant": "none",
+      "variant_image_size": "960x640",
+      "content_box": [
+        0,
+        0,
+        960,
+        640
+      ],
+      "runs": 2,
+      "avg_latency_sec": 2.894,
+      "min_latency_sec": 2.848,
+      "max_latency_sec": 2.94,
+      "num_actions": 1,
+      "first_action": "click",
+      "result": [
+        {
+          "action": "click",
+          "x": 390,
+          "y": 405,
+          "end_x": 390,
+          "end_y": 405,
+          "button": "left",
+          "key": "null",
+          "text": "null",
+          "reasoning": "모든 정책 슬롯이 현재 유효한 정책으로 채워져 있으므로 정책 배정 확정을 위해 '모든 정책 배정' 버튼을 클릭합니다."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "click",
+          "x": 390,
+          "y": 405,
+          "end_x": 390,
+          "end_y": 405,
+          "button": "left",
+          "key": "null",
+          "text": "null",
+          "reasoning": "모든 정책 슬롯이 현재 유효한 정책으로 채워져 있으므로 정책 배정 확정을 위해 '모든 정책 배정' 버튼을 클릭합니다."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 500,
+      "prompt_variant": "concise_prompt",
+      "image_variant": "downscale_restore+bg_color",
+      "size_variant": "downscale_restore",
+      "background_variant": "color",
+      "variant_image_size": "1190x794",
+      "content_box": [
+        115,
+        77,
+        960,
+        640
+      ],
+      "runs": 2,
+      "avg_latency_sec": 4.975,
+      "min_latency_sec": 4.319,
+      "max_latency_sec": 5.63,
+      "num_actions": 3,
+      "first_action": "drag",
+      "result": [
+        {
+          "action": "drag",
+          "x": 312,
+          "y": 357,
+          "end_x": 192,
+          "end_y": 171,
+          "button": "left",
+          "key": "null",
+          "text": "null",
+          "reasoning": "Urban Planning policy is being moved to the empty Military policy slot to optimize production in the early game."
+        },
+        {
+          "action": "drag",
+          "x": 312,
+          "y": 275,
+          "end_x": 192,
+          "end_y": 239,
+          "button": "left",
+          "key": "null",
+          "text": "null",
+          "reasoning": "Caravanserais policy card is being assigned to the Economic policy slot to increase early gold income."
+        },
+        {
+          "action": "click",
+          "x": 391,
+          "y": 406,
+          "end_x": 391,
+          "end_y": 406,
+          "button": "left",
+          "key": "null",
+          "text": "null",
+          "reasoning": "Clicking the 'Confirm Policies' button to apply the selected policy changes and close the management interface."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "drag",
+          "x": 300,
+          "y": 336,
+          "end_x": 203,
+          "end_y": 186,
+          "button": "left",
+          "key": "null",
+          "text": "null",
+          "reasoning": "Urban Planning policy is being moved to the empty Military policy slot to optimize production in the early game."
+        },
+        {
+          "action": "drag",
+          "x": 300,
+          "y": 270,
+          "end_x": 203,
+          "end_y": 241,
+          "button": "left",
+          "key": "null",
+          "text": "null",
+          "reasoning": "Caravanserais policy card is being assigned to the Economic policy slot to increase early gold income."
+        },
+        {
+          "action": "click",
+          "x": 364,
+          "y": 376,
+          "end_x": 364,
+          "end_y": 376,
+          "button": "left",
+          "key": "null",
+          "text": "null",
+          "reasoning": "Clicking the 'Confirm Policies' button to apply the selected policy changes and close the management interface."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 500,
+      "prompt_variant": "concise_prompt",
+      "image_variant": "compressed_downscale_restore+bg_none",
+      "size_variant": "compressed_downscale_restore",
+      "background_variant": "none",
+      "variant_image_size": "960x640",
+      "content_box": [
+        0,
+        0,
+        960,
+        640
+      ],
+      "runs": 2,
+      "avg_latency_sec": 3.319,
+      "min_latency_sec": 2.848,
+      "max_latency_sec": 3.789,
+      "num_actions": 1,
+      "first_action": "drag",
+      "result": [
+        {
+          "action": "drag",
+          "x": 308,
+          "y": 348,
+          "end_x": 192,
+          "end_y": 165,
+          "button": "left",
+          "key": "none",
+          "text": "none",
+          "reasoning": "Economic policy 'Urban Planning' is a strong early-game choice. Dragging it from the selection pool to the empty economic policy slot to provide +1 Production in all cities."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "drag",
+          "x": 308,
+          "y": 348,
+          "end_x": 192,
+          "end_y": 165,
+          "button": "left",
+          "key": "none",
+          "text": "none",
+          "reasoning": "Economic policy 'Urban Planning' is a strong early-game choice. Dragging it from the selection pool to the empty economic policy slot to provide +1 Production in all cities."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 500,
+      "prompt_variant": "concise_prompt",
+      "image_variant": "compressed_downscale_restore+bg_color",
+      "size_variant": "compressed_downscale_restore",
+      "background_variant": "color",
+      "variant_image_size": "1190x794",
+      "content_box": [
+        115,
+        77,
+        960,
+        640
+      ],
+      "runs": 2,
+      "avg_latency_sec": 3.035,
+      "min_latency_sec": 2.798,
+      "max_latency_sec": 3.273,
+      "num_actions": 3,
+      "first_action": "drag",
+      "result": [
+        {
+          "action": "drag",
+          "x": 312,
+          "y": 157,
+          "end_x": 188,
+          "end_y": 163,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "'Maritime Industries' policy card is being dragged into the empty Military Policy slot to improve naval unit production."
+        },
+        {
+          "action": "drag",
+          "x": 312,
+          "y": 362,
+          "end_x": 188,
+          "end_y": 231,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "'Urban Planning' policy card is being dragged into the Economic Policy slot to provide +1 Production in all cities."
+        },
+        {
+          "action": "click",
+          "x": 393,
+          "y": 405,
+          "end_x": 393,
+          "end_y": 405,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "Clicking the 'Confirm Policy' button (모든 정책 확정) to apply the selected policy changes."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "drag",
+          "x": 300,
+          "y": 175,
+          "end_x": 200,
+          "end_y": 180,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "'Maritime Industries' policy card is being dragged into the empty Military Policy slot to improve naval unit production."
+        },
+        {
+          "action": "drag",
+          "x": 300,
+          "y": 340,
+          "end_x": 200,
+          "end_y": 235,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "'Urban Planning' policy card is being dragged into the Economic Policy slot to provide +1 Production in all cities."
+        },
+        {
+          "action": "click",
+          "x": 365,
+          "y": 375,
+          "end_x": 365,
+          "end_y": 375,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "Clicking the 'Confirm Policy' button (모든 정책 확정) to apply the selected policy changes."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 1000,
+      "prompt_variant": "long_prompt",
+      "image_variant": "raw+bg_none",
+      "size_variant": "raw",
+      "background_variant": "none",
+      "variant_image_size": "2822x1880",
+      "content_box": [
+        0,
+        0,
+        2822,
+        1880
+      ],
+      "runs": 2,
+      "avg_latency_sec": 6.686,
+      "min_latency_sec": 6.556,
+      "max_latency_sec": 6.816,
+      "num_actions": 2,
+      "first_action": "drag",
+      "result": [
+        {
+          "action": "drag",
+          "x": 614,
+          "y": 732,
+          "end_x": 383,
+          "end_y": 478,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "현재 경제 정책 슬롯에 '신왕'이 장착되어 있으나 도시의 전반적인 생산력을 높이기 위해 '도시 계획' 카드로 교체합니다."
+        },
+        {
+          "action": "click",
+          "x": 783,
+          "y": 811,
+          "end_x": 783,
+          "end_y": 811,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "모든 정책 슬롯이 채워졌고 전략에 따른 변경이 완료되었으므로 '모든 정책 배정' 버튼을 눌러 확정합니다."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "drag",
+          "x": 614,
+          "y": 732,
+          "end_x": 383,
+          "end_y": 478,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "현재 경제 정책 슬롯에 '신왕'이 장착되어 있으나 도시의 전반적인 생산력을 높이기 위해 '도시 계획' 카드로 교체합니다."
+        },
+        {
+          "action": "click",
+          "x": 783,
+          "y": 811,
+          "end_x": 783,
+          "end_y": 811,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "모든 정책 슬롯이 채워졌고 전략에 따른 변경이 완료되었으므로 '모든 정책 배정' 버튼을 눌러 확정합니다."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 1000,
+      "prompt_variant": "long_prompt",
+      "image_variant": "raw+bg_color",
+      "size_variant": "raw",
+      "background_variant": "color",
+      "variant_image_size": "3500x2332",
+      "content_box": [
+        339,
+        226,
+        2822,
+        1880
+      ],
+      "runs": 2,
+      "avg_latency_sec": 5.964,
+      "min_latency_sec": 5.92,
+      "max_latency_sec": 6.007,
+      "num_actions": 1,
+      "first_action": "drag",
+      "result": [
+        {
+          "action": "drag",
+          "x": 630,
+          "y": 715,
+          "end_x": 382,
+          "end_y": 450,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "Early game expansion and production are crucial. 'Urban Planning' (+1 Production in all cities) is generally superior to 'God King' (+1 Faith/Gold) in the economic slot unless aiming for an early Pantheon/Religion. Dragging 'Urban Planning' to replace 'God King'."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "drag",
+          "x": 605,
+          "y": 673,
+          "end_x": 405,
+          "end_y": 460,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "Early game expansion and production are crucial. 'Urban Planning' (+1 Production in all cities) is generally superior to 'God King' (+1 Faith/Gold) in the economic slot unless aiming for an early Pantheon/Religion. Dragging 'Urban Planning' to replace 'God King'."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 1000,
+      "prompt_variant": "long_prompt",
+      "image_variant": "compressed+bg_none",
+      "size_variant": "compressed",
+      "background_variant": "none",
+      "variant_image_size": "1280x853",
+      "content_box": [
+        0,
+        0,
+        1280,
+        853
+      ],
+      "runs": 2,
+      "avg_latency_sec": 3.314,
+      "min_latency_sec": 3.259,
+      "max_latency_sec": 3.369,
+      "num_actions": 2,
+      "first_action": "drag",
+      "result": [
+        {
+          "action": "drag",
+          "x": 605,
+          "y": 720,
+          "end_x": 381,
+          "end_y": 444,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "Early game expansion benefits more from 'Urban Planning' (production +1) than 'God King' (faith/gold +1) to speed up building production. Dragging the 'Urban Planning' card to the economic slot."
+        },
+        {
+          "action": "click",
+          "x": 782,
+          "y": 813,
+          "end_x": 782,
+          "end_y": 813,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "Confirming the policy assignment after making the change to finalize the government configuration."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "drag",
+          "x": 605,
+          "y": 720,
+          "end_x": 381,
+          "end_y": 444,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "Early game expansion benefits more from 'Urban Planning' (production +1) than 'God King' (faith/gold +1) to speed up building production. Dragging the 'Urban Planning' card to the economic slot."
+        },
+        {
+          "action": "click",
+          "x": 782,
+          "y": 813,
+          "end_x": 782,
+          "end_y": 813,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "Confirming the policy assignment after making the change to finalize the government configuration."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 1000,
+      "prompt_variant": "long_prompt",
+      "image_variant": "compressed+bg_color",
+      "size_variant": "compressed",
+      "background_variant": "color",
+      "variant_image_size": "1588x1057",
+      "content_box": [
+        154,
+        102,
+        1280,
+        853
+      ],
+      "runs": 2,
+      "avg_latency_sec": 3.675,
+      "min_latency_sec": 3.574,
+      "max_latency_sec": 3.776,
+      "num_actions": 2,
+      "first_action": "drag",
+      "result": [
+        {
+          "action": "drag",
+          "x": 630,
+          "y": 730,
+          "end_x": 382,
+          "end_y": 478,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "경제 정책 슬롯이 비어 있으므로 '도시 계획' 카드를 드래그하여 배치합니다."
+        },
+        {
+          "action": "click",
+          "x": 819,
+          "y": 815,
+          "end_x": 819,
+          "end_y": 815,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "모든 정책 슬롯을 채운 후 하단의 '모든 정책 배정' 버튼을 눌러 확정합니다."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "drag",
+          "x": 605,
+          "y": 686,
+          "end_x": 405,
+          "end_y": 482,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "경제 정책 슬롯이 비어 있으므로 '도시 계획' 카드를 드래그하여 배치합니다."
+        },
+        {
+          "action": "click",
+          "x": 757,
+          "y": 754,
+          "end_x": 757,
+          "end_y": 754,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "모든 정책 슬롯을 채운 후 하단의 '모든 정책 배정' 버튼을 눌러 확정합니다."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 1000,
+      "prompt_variant": "long_prompt",
+      "image_variant": "downscale_restore+bg_none",
+      "size_variant": "downscale_restore",
+      "background_variant": "none",
+      "variant_image_size": "960x640",
+      "content_box": [
+        0,
+        0,
+        960,
+        640
+      ],
+      "runs": 2,
+      "avg_latency_sec": 3.509,
+      "min_latency_sec": 3.062,
+      "max_latency_sec": 3.956,
+      "num_actions": 1,
+      "first_action": "click",
+      "result": [
+        {
+          "action": "click",
+          "x": 820,
+          "y": 811,
+          "end_x": 820,
+          "end_y": 811,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "모든 정책 슬롯(군사 1개, 경제 1개)이 현재 채워져 있는 상태이므로, 하단의 '모든 정책 배정' 버튼을 눌러 확정합니다."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "click",
+          "x": 820,
+          "y": 811,
+          "end_x": 820,
+          "end_y": 811,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "모든 정책 슬롯(군사 1개, 경제 1개)이 현재 채워져 있는 상태이므로, 하단의 '모든 정책 배정' 버튼을 눌러 확정합니다."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 1000,
+      "prompt_variant": "long_prompt",
+      "image_variant": "downscale_restore+bg_color",
+      "size_variant": "downscale_restore",
+      "background_variant": "color",
+      "variant_image_size": "1190x794",
+      "content_box": [
+        115,
+        77,
+        960,
+        640
+      ],
+      "runs": 2,
+      "avg_latency_sec": 3.958,
+      "min_latency_sec": 3.391,
+      "max_latency_sec": 4.525,
+      "num_actions": 2,
+      "first_action": "drag",
+      "result": [
+        {
+          "action": "drag",
+          "x": 618,
+          "y": 716,
+          "end_x": 387,
+          "end_y": 454,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "신앙(God King) 카드를 도시 계획(Urban Planning) 카드로 교체하여 생산력을 높이는 것이 초반 확장에 유리합니다."
+        },
+        {
+          "action": "click",
+          "x": 786,
+          "y": 810,
+          "end_x": 786,
+          "end_y": 810,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "모든 정책 슬롯이 채워진 것을 확인하였으므로 정책 배정을 완료합니다."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "drag",
+          "x": 595,
+          "y": 674,
+          "end_x": 409,
+          "end_y": 463,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "신앙(God King) 카드를 도시 계획(Urban Planning) 카드로 교체하여 생산력을 높이는 것이 초반 확장에 유리합니다."
+        },
+        {
+          "action": "click",
+          "x": 731,
+          "y": 750,
+          "end_x": 731,
+          "end_y": 750,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "모든 정책 슬롯이 채워진 것을 확인하였으므로 정책 배정을 완료합니다."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 1000,
+      "prompt_variant": "long_prompt",
+      "image_variant": "compressed_downscale_restore+bg_none",
+      "size_variant": "compressed_downscale_restore",
+      "background_variant": "none",
+      "variant_image_size": "960x640",
+      "content_box": [
+        0,
+        0,
+        960,
+        640
+      ],
+      "runs": 2,
+      "avg_latency_sec": 6.804,
+      "min_latency_sec": 5.054,
+      "max_latency_sec": 8.554,
+      "num_actions": 1,
+      "first_action": "click",
+      "result": [
+        {
+          "action": "click",
+          "x": 803,
+          "y": 812,
+          "end_x": 803,
+          "end_y": 812,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "현재 군사 정책 슬롯(규율)과 경제 정책 슬롯(신왕)이 이미 상위 전략에 맞게 적절히 채워져 있으므로 '모든 정책 배정' 버튼을 눌러 정책 변경을 확정합니다."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "click",
+          "x": 803,
+          "y": 812,
+          "end_x": 803,
+          "end_y": 812,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "현재 군사 정책 슬롯(규율)과 경제 정책 슬롯(신왕)이 이미 상위 전략에 맞게 적절히 채워져 있으므로 '모든 정책 배정' 버튼을 눌러 정책 변경을 확정합니다."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 1000,
+      "prompt_variant": "long_prompt",
+      "image_variant": "compressed_downscale_restore+bg_color",
+      "size_variant": "compressed_downscale_restore",
+      "background_variant": "color",
+      "variant_image_size": "1190x794",
+      "content_box": [
+        115,
+        77,
+        960,
+        640
+      ],
+      "runs": 2,
+      "avg_latency_sec": 3.819,
+      "min_latency_sec": 3.621,
+      "max_latency_sec": 4.017,
+      "num_actions": 1,
+      "first_action": "click",
+      "result": [
+        {
+          "action": "click",
+          "x": 810,
+          "y": 804,
+          "end_x": 810,
+          "end_y": 804,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "현재 군사 정책과 경제 정책 슬롯이 모두 전략에 맞게 채워져 있으므로 '모든 정책 배정' 버튼을 눌러 확정합니다."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "click",
+          "x": 750,
+          "y": 745,
+          "end_x": 750,
+          "end_y": 745,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "현재 군사 정책과 경제 정책 슬롯이 모두 전략에 맞게 채워져 있으므로 '모든 정책 배정' 버튼을 눌러 확정합니다."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 1000,
+      "prompt_variant": "concise_prompt",
+      "image_variant": "raw+bg_none",
+      "size_variant": "raw",
+      "background_variant": "none",
+      "variant_image_size": "2822x1880",
+      "content_box": [
+        0,
+        0,
+        2822,
+        1880
+      ],
+      "runs": 2,
+      "avg_latency_sec": 5.73,
+      "min_latency_sec": 5.598,
+      "max_latency_sec": 5.861,
+      "num_actions": 1,
+      "first_action": "click",
+      "result": [
+        {
+          "action": "click",
+          "x": 783,
+          "y": 812,
+          "end_x": 783,
+          "end_y": 812,
+          "button": "left",
+          "key": "none",
+          "text": "none",
+          "reasoning": "Confirm policy selection by clicking the 'All Policies Assigned' button (모든 정책 배정)."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "click",
+          "x": 783,
+          "y": 812,
+          "end_x": 783,
+          "end_y": 812,
+          "button": "left",
+          "key": "none",
+          "text": "none",
+          "reasoning": "Confirm policy selection by clicking the 'All Policies Assigned' button (모든 정책 배정)."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 1000,
+      "prompt_variant": "concise_prompt",
+      "image_variant": "raw+bg_color",
+      "size_variant": "raw",
+      "background_variant": "color",
+      "variant_image_size": "3500x2332",
+      "content_box": [
+        339,
+        226,
+        2822,
+        1880
+      ],
+      "runs": 2,
+      "avg_latency_sec": 6.529,
+      "min_latency_sec": 6.425,
+      "max_latency_sec": 6.633,
+      "num_actions": 2,
+      "first_action": "drag",
+      "result": [
+        {
+          "action": "drag",
+          "x": 612,
+          "y": 721,
+          "end_x": 381,
+          "end_y": 721,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "'도시 계획' 정책 카드(생산력 +1)를 선택하여 경제 정책 슬롯으로 드래그하여 배치합니다. 현재 슬롯이 비어있거나 교체가 필요합니다."
+        },
+        {
+          "action": "click",
+          "x": 782,
+          "y": 814,
+          "end_x": 782,
+          "end_y": 814,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "정책 카드 배치를 완료한 후 하단의 '모든 정책 배정' 버튼을 클릭하여 정책 변경을 확정합니다."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "drag",
+          "x": 590,
+          "y": 678,
+          "end_x": 404,
+          "end_y": 678,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "'도시 계획' 정책 카드(생산력 +1)를 선택하여 경제 정책 슬롯으로 드래그하여 배치합니다. 현재 슬롯이 비어있거나 교체가 필요합니다."
+        },
+        {
+          "action": "click",
+          "x": 727,
+          "y": 753,
+          "end_x": 727,
+          "end_y": 753,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "정책 카드 배치를 완료한 후 하단의 '모든 정책 배정' 버튼을 클릭하여 정책 변경을 확정합니다."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 1000,
+      "prompt_variant": "concise_prompt",
+      "image_variant": "compressed+bg_none",
+      "size_variant": "compressed",
+      "background_variant": "none",
+      "variant_image_size": "1280x853",
+      "content_box": [
+        0,
+        0,
+        1280,
+        853
+      ],
+      "runs": 2,
+      "avg_latency_sec": 3.675,
+      "min_latency_sec": 2.987,
+      "max_latency_sec": 4.363,
+      "num_actions": 2,
+      "first_action": "drag",
+      "result": [
+        {
+          "action": "drag",
+          "x": 614,
+          "y": 726,
+          "end_x": 385,
+          "end_y": 508,
+          "button": "left",
+          "key": "null",
+          "text": "null",
+          "reasoning": "경제 정책 슬롯인 신왕이 이미 차 있으므로, 내정 발전을 위해 도시 계획 정책 카드를 경제 정책 슬롯으로 드래그하여 교체합니다."
+        },
+        {
+          "action": "click",
+          "x": 780,
+          "y": 811,
+          "end_x": 780,
+          "end_y": 811,
+          "button": "left",
+          "key": "null",
+          "text": "null",
+          "reasoning": "정책 변경 사항을 적용하기 위해 모든 정책 배정 버튼을 클릭합니다."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "drag",
+          "x": 614,
+          "y": 726,
+          "end_x": 385,
+          "end_y": 508,
+          "button": "left",
+          "key": "null",
+          "text": "null",
+          "reasoning": "경제 정책 슬롯인 신왕이 이미 차 있으므로, 내정 발전을 위해 도시 계획 정책 카드를 경제 정책 슬롯으로 드래그하여 교체합니다."
+        },
+        {
+          "action": "click",
+          "x": 780,
+          "y": 811,
+          "end_x": 780,
+          "end_y": 811,
+          "button": "left",
+          "key": "null",
+          "text": "null",
+          "reasoning": "정책 변경 사항을 적용하기 위해 모든 정책 배정 버튼을 클릭합니다."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 1000,
+      "prompt_variant": "concise_prompt",
+      "image_variant": "compressed+bg_color",
+      "size_variant": "compressed",
+      "background_variant": "color",
+      "variant_image_size": "1588x1057",
+      "content_box": [
+        154,
+        102,
+        1280,
+        853
+      ],
+      "runs": 2,
+      "avg_latency_sec": 4.07,
+      "min_latency_sec": 3.731,
+      "max_latency_sec": 4.409,
+      "num_actions": 2,
+      "first_action": "drag",
+      "result": [
+        {
+          "action": "drag",
+          "x": 612,
+          "y": 723,
+          "end_x": 381,
+          "end_y": 723,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "'도시 계획' 경제 정책 카드를 비어 있는 경제 정책 슬롯으로 드래그하여 배정합니다."
+        },
+        {
+          "action": "click",
+          "x": 779,
+          "y": 810,
+          "end_x": 779,
+          "end_y": 810,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "모든 정책 슬롯이 채워졌는지 확인한 후 '모든 정책 배정' 버튼을 눌러 확정합니다."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "drag",
+          "x": 590,
+          "y": 680,
+          "end_x": 404,
+          "end_y": 680,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "'도시 계획' 경제 정책 카드를 비어 있는 경제 정책 슬롯으로 드래그하여 배정합니다."
+        },
+        {
+          "action": "click",
+          "x": 725,
+          "y": 750,
+          "end_x": 725,
+          "end_y": 750,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "모든 정책 슬롯이 채워졌는지 확인한 후 '모든 정책 배정' 버튼을 눌러 확정합니다."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 1000,
+      "prompt_variant": "concise_prompt",
+      "image_variant": "downscale_restore+bg_none",
+      "size_variant": "downscale_restore",
+      "background_variant": "none",
+      "variant_image_size": "960x640",
+      "content_box": [
+        0,
+        0,
+        960,
+        640
+      ],
+      "runs": 2,
+      "avg_latency_sec": 3.796,
+      "min_latency_sec": 3.531,
+      "max_latency_sec": 4.062,
+      "num_actions": 2,
+      "first_action": "drag",
+      "result": [
+        {
+          "action": "drag",
+          "x": 612,
+          "y": 703,
+          "end_x": 387,
+          "end_y": 516,
+          "button": "left",
+          "key": "none",
+          "text": "none",
+          "reasoning": "Early game development requires production; dragging 'Urban Planning' (City Planning) card to the Economic Policy slot to boost production in all cities."
+        },
+        {
+          "action": "click",
+          "x": 781,
+          "y": 812,
+          "end_x": 781,
+          "end_y": 812,
+          "button": "left",
+          "key": "none",
+          "text": "none",
+          "reasoning": "Confirming the policy changes to apply the bonuses to the civilization."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "drag",
+          "x": 612,
+          "y": 703,
+          "end_x": 387,
+          "end_y": 516,
+          "button": "left",
+          "key": "none",
+          "text": "none",
+          "reasoning": "Early game development requires production; dragging 'Urban Planning' (City Planning) card to the Economic Policy slot to boost production in all cities."
+        },
+        {
+          "action": "click",
+          "x": 781,
+          "y": 812,
+          "end_x": 781,
+          "end_y": 812,
+          "button": "left",
+          "key": "none",
+          "text": "none",
+          "reasoning": "Confirming the policy changes to apply the bonuses to the civilization."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 1000,
+      "prompt_variant": "concise_prompt",
+      "image_variant": "downscale_restore+bg_color",
+      "size_variant": "downscale_restore",
+      "background_variant": "color",
+      "variant_image_size": "1190x794",
+      "content_box": [
+        115,
+        77,
+        960,
+        640
+      ],
+      "runs": 2,
+      "avg_latency_sec": 4.29,
+      "min_latency_sec": 3.071,
+      "max_latency_sec": 5.509,
+      "num_actions": 2,
+      "first_action": "drag",
+      "result": [
+        {
+          "action": "drag",
+          "x": 613,
+          "y": 720,
+          "end_x": 383,
+          "end_y": 720,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "'도시 계획' 경제 정책 카드를 비어 있는 경제 정책 슬롯으로 드래그하여 도시 생산력을 높입니다."
+        },
+        {
+          "action": "click",
+          "x": 783,
+          "y": 814,
+          "end_x": 783,
+          "end_y": 814,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "변경 사항을 확정하기 위해 '모든 정책 배정' 버튼을 클릭합니다."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "drag",
+          "x": 591,
+          "y": 677,
+          "end_x": 406,
+          "end_y": 677,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "'도시 계획' 경제 정책 카드를 비어 있는 경제 정책 슬롯으로 드래그하여 도시 생산력을 높입니다."
+        },
+        {
+          "action": "click",
+          "x": 728,
+          "y": 753,
+          "end_x": 728,
+          "end_y": 753,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "변경 사항을 확정하기 위해 '모든 정책 배정' 버튼을 클릭합니다."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 1000,
+      "prompt_variant": "concise_prompt",
+      "image_variant": "compressed_downscale_restore+bg_none",
+      "size_variant": "compressed_downscale_restore",
+      "background_variant": "none",
+      "variant_image_size": "960x640",
+      "content_box": [
+        0,
+        0,
+        960,
+        640
+      ],
+      "runs": 2,
+      "avg_latency_sec": 3.691,
+      "min_latency_sec": 3.449,
+      "max_latency_sec": 3.933,
+      "num_actions": 1,
+      "first_action": "click",
+      "result": [
+        {
+          "action": "click",
+          "x": 783,
+          "y": 811,
+          "end_x": 783,
+          "end_y": 811,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "The user needs to finalize the current policy selection to proceed with the turn. The 'Confirm All Policies' button is highlighted as the primary interaction point."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "click",
+          "x": 783,
+          "y": 811,
+          "end_x": 783,
+          "end_y": 811,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "The user needs to finalize the current policy selection to proceed with the turn. The 'Confirm All Policies' button is highlighted as the primary interaction point."
+        }
+      ]
+    },
+    {
+      "normalizing_range": 1000,
+      "prompt_variant": "concise_prompt",
+      "image_variant": "compressed_downscale_restore+bg_color",
+      "size_variant": "compressed_downscale_restore",
+      "background_variant": "color",
+      "variant_image_size": "1190x794",
+      "content_box": [
+        115,
+        77,
+        960,
+        640
+      ],
+      "runs": 2,
+      "avg_latency_sec": 3.753,
+      "min_latency_sec": 3.073,
+      "max_latency_sec": 4.432,
+      "num_actions": 3,
+      "first_action": "drag",
+      "result": [
+        {
+          "action": "drag",
+          "x": 613,
+          "y": 329,
+          "end_x": 383,
+          "end_y": 329,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "Drag the 'Maritime Industries' (해상 산업) policy card from the list into the empty Military Policy (군사 정책) slot to boost naval production."
+        },
+        {
+          "action": "drag",
+          "x": 613,
+          "y": 463,
+          "end_x": 383,
+          "end_y": 463,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "Drag the 'Survey' (조사) policy card into the Economic Policy (경제 정책) slot to increase experience gain for scout units."
+        },
+        {
+          "action": "click",
+          "x": 779,
+          "y": 813,
+          "end_x": 779,
+          "end_y": 813,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "Click the 'Confirm All Policies' (모든 정책 확정) button to apply the changes and close the policy management screen."
+        }
+      ],
+      "result_raw": [
+        {
+          "action": "drag",
+          "x": 591,
+          "y": 362,
+          "end_x": 406,
+          "end_y": 362,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "Drag the 'Maritime Industries' (해상 산업) policy card from the list into the empty Military Policy (군사 정책) slot to boost naval production."
+        },
+        {
+          "action": "drag",
+          "x": 591,
+          "y": 470,
+          "end_x": 406,
+          "end_y": 470,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "Drag the 'Survey' (조사) policy card into the Economic Policy (경제 정책) slot to increase experience gain for scout units."
+        },
+        {
+          "action": "click",
+          "x": 725,
+          "y": 752,
+          "end_x": 725,
+          "end_y": 752,
+          "button": "left",
+          "key": "",
+          "text": "",
+          "reasoning": "Click the 'Confirm All Policies' (모든 정책 확정) button to apply the changes and close the policy management screen."
+        }
+      ]
+    }
+  ]
+}

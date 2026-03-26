@@ -5,8 +5,8 @@ from pathlib import Path
 
 import PIL.Image
 
-from computer_use_test.evaluation.evaluator.action_eval.bbox_eval.schema import DatasetCase
-from computer_use_test.utils.ui_benchmarking import (
+from civStation.evaluation.evaluator.action_eval.bbox_eval.schema import DatasetCase
+from civStation.utils.ui_benchmarking import (
     PreprocessSpec,
     build_preprocess_specs,
     convert_actions_for_bbox_eval,

@@ -1,0 +1,115 @@
+{
+  "aggregate": {
+    "total_cases": 3,
+    "strict_success_rate": 1.0,
+    "avg_step_accuracy": 1.0,
+    "avg_prefix_len": 1.3333333333333333,
+    "error_count": 0,
+    "timeout_count": 0,
+    "per_action_type": [
+      {
+        "action_type": "click",
+        "total": 1,
+        "correct": 1,
+        "accuracy": 1.0
+      },
+      {
+        "action_type": "drag",
+        "total": 1,
+        "correct": 1,
+        "accuracy": 1.0
+      },
+      {
+        "action_type": "press",
+        "total": 2,
+        "correct": 2,
+        "accuracy": 1.0
+      }
+    ]
+  },
+  "cases": [
+    {
+      "case_id": "civ6_science_001",
+      "best_sequence": {
+        "strict_success": true,
+        "prefix_len": 2,
+        "step_accuracy": 1.0,
+        "step_results": [
+          {
+            "step_index": 0,
+            "correct": true,
+            "gt_type": "click",
+            "pred_type": "click",
+            "distance_to_center": 0.0,
+            "levenshtein_similarity": null
+          },
+          {
+            "step_index": 1,
+            "correct": true,
+            "gt_type": "press",
+            "pred_type": "press",
+            "distance_to_center": null,
+            "levenshtein_similarity": 1.0
+          }
+        ]
+      },
+      "agent_actions_count": 2,
+      "gt_set_index": 0,
+      "error": null,
+      "timed_out": false
+    },
+    {
+      "case_id": "civ6_popup_002",
+      "best_sequence": {
+        "strict_success": true,
+        "prefix_len": 1,
+        "step_accuracy": 1.0,
+        "step_results": [
+          {
+            "step_index": 0,
+            "correct": true,
+            "gt_type": "press",
+            "pred_type": "press",
+            "distance_to_center": null,
+            "levenshtein_similarity": 1.0
+          }
+        ]
+      },
+      "agent_actions_count": 1,
+      "gt_set_index": 0,
+      "error": null,
+      "timed_out": false
+    },
+    {
+      "case_id": "civ6_drag_003",
+      "best_sequence": {
+        "strict_success": true,
+        "prefix_len": 1,
+        "step_accuracy": 1.0,
+        "step_results": [
+          {
+            "step_index": 0,
+            "correct": true,
+            "gt_type": "drag",
+            "pred_type": "drag",
+            "distance_to_center": null,
+            "levenshtein_similarity": null
+          }
+        ]
+      },
+      "agent_actions_count": 1,
+      "gt_set_index": 0,
+      "error": null,
+      "timed_out": false
+    }
+  ],
+  "config": {
+    "dataset_path": "/Users/jinminseong/Desktop/civStation/tests/evaluator/civ6_eval/fixtures/sample_bbox_dataset.jsonl",
+    "agent_cmd": null,
+    "provider": null,
+    "model": null,
+    "timeout": 10.0,
+    "ignore_wait": false
+  },
+  "timestamp": "2026-03-26T00:54:27.934443"
+}

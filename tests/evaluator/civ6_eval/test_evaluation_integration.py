@@ -10,23 +10,23 @@ from pathlib import Path
 
 import pytest
 
-from computer_use_test.agent.models.schema import (
+from civStation.agent.models.schema import (
     Action,
     AgentPlan,
     ClickAction,
     DragAction,
     KeyPressAction,
 )
-from computer_use_test.agent.modules.primitive.primitives import (
+from civStation.agent.modules.primitive.primitives import (
     CityProductionPrimitive,
     CultureDecisionPrimitive,
     PopupPrimitive,
     ResearchSelectPrimitive,
     UnitOpsPrimitive,
 )
-from computer_use_test.agent.modules.router.router import Civ6MockRouter
-from computer_use_test.evaluation.evaluator.action_eval import EvalResult, GroundTruth
-from computer_use_test.evaluation.evaluator.action_eval.civ6_eval.civ6_impl import (
+from civStation.agent.modules.router.router import Civ6MockRouter
+from civStation.evaluation.evaluator.action_eval import EvalResult, GroundTruth
+from civStation.evaluation.evaluator.action_eval.civ6_eval.civ6_impl import (
     Civ6StaticEvaluator,
 )
 
@@ -385,7 +385,7 @@ def evaluate_screenshot_directory(screenshots_dir: str, ground_truth_file: str, 
         ground_truth_file: Path to ground truth JSON file
         output_file: Optional path to save results JSON
     """
-    from computer_use_test.evaluation.evaluator.action_eval.civ6_eval.main import (
+    from civStation.evaluation.evaluator.action_eval.civ6_eval.main import (
         load_ground_truth_from_json,
     )
 

@@ -6,8 +6,8 @@ from pathlib import Path
 
 from PIL import Image
 
-from computer_use_test.agent.modules.strategy.strategy_schemas import StructuredStrategy, VictoryType
-from computer_use_test.utils.llm_provider.parser import AgentAction
+from civStation.agent.modules.strategy.strategy_schemas import StructuredStrategy, VictoryType
+from civStation.utils.llm_provider.parser import AgentAction
 
 
 def _build_test_image(path: Path) -> Path:
@@ -17,7 +17,7 @@ def _build_test_image(path: Path) -> Path:
 
 
 def _build_fake_registry():
-    from computer_use_test.mcp.runtime import LayerAdapterRegistry
+    from civStation.mcp.runtime import LayerAdapterRegistry
 
     execution_log: list[dict[str, object]] = []
 
@@ -84,7 +84,7 @@ def _build_fake_registry():
 
 
 def _build_app():
-    from computer_use_test.mcp.server import LayeredComputerUseMCP
+    from civStation.mcp.server import LayeredComputerUseMCP
 
     registry, execution_log = _build_fake_registry()
     app = LayeredComputerUseMCP(adapter_registry=registry)
@@ -205,6 +205,10 @@ def test_action_workflow_and_hitl_tools(tmp_path: Path):
         "session_create",
         {
             "name": "workflow",
+            "runtime": {
+                "execution_mode": "live",
+                "require_execute_confirmation": False,
+            },
             "adapter_overrides": {
                 "action_router": "fake",
                 "action_planner": "fake",
@@ -293,6 +297,158 @@ def test_action_workflow_and_hitl_tools(tmp_path: Path):
     hitl_result = _call_tool(app, "hitl_status", {"session_id": session_id})
     assert hitl_result["agent_state"] == "running"
     assert hitl_result["queued_directives"][0]["payload"] == "switch to defense"
+
+
+def test_execution_guard_transport_config_and_install_resources(tmp_path: Path):
+    from computer_use_test.mcp.install_client_assets import (
+        create_argument_parser as create_install_argument_parser,
+    )
+    from computer_use_test.mcp.install_client_assets import (
+        render_client_template,
+    )
+    from computer_use_test.mcp.server import LayeredComputerUseMCP, create_argument_parser
+
+    registry, execution_log = _build_fake_registry()
+    app = LayeredComputerUseMCP(
+        adapter_registry=registry,
+        host="0.0.0.0",
+        port=9100,
+        streamable_http_path="/api/mcp",
+        json_response=True,
+        stateless_http=True,
+    )
+    image_path = _build_test_image(tmp_path / "screen.png")
+
+    assert app.server.settings.host == "0.0.0.0"
+    assert app.server.settings.port == 9100
+    assert app.server.settings.streamable_http_path == "/api/mcp"
+    assert app.server.settings.json_response is True
+    assert app.server.settings.stateless_http is True
+
+    parser = create_argument_parser()
+    args = parser.parse_args(
+        [
+            "--transport",
+            "streamable-http",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            "9100",
+            "--streamable-http-path",
+            "/api/mcp",
+            "--json-response",
+            "--stateless-http",
+        ]
+    )
+    assert args.transport == "streamable-http"
+    assert args.host == "0.0.0.0"
+    assert args.port == 9100
+    assert args.streamable_http_path == "/api/mcp"
+    assert args.json_response is True
+    assert args.stateless_http is True
+
+    install_parser = create_install_argument_parser()
+    install_args = install_parser.parse_args(["--client", "claude-code", "--output", "/tmp/test.mcp.json", "--write"])
+    assert install_args.client == "claude-code"
+    assert install_args.output == "/tmp/test.mcp.json"
+    assert install_args.write is True
+
+    create_result = _call_tool(
+        app,
+        "session_create",
+        {
+            "name": "guarded",
+            "adapter_overrides": {
+                "action_router": "fake",
+                "action_planner": "fake",
+                "context_observer": "fake",
+                "strategy_refiner": "fake",
+                "action_executor": "fake",
+            },
+        },
+    )
+    session_id = create_result["session_id"]
+    plan_result = _call_tool(
+        app,
+        "action_plan",
+        {
+            "session_id": session_id,
+            "image_path": str(image_path),
+            "primitive_name": "policy_primitive",
+        },
+    )
+
+    dry_run_result = _call_tool(
+        app,
+        "action_execute",
+        {
+            "session_id": session_id,
+            "action": plan_result["action"],
+        },
+    )
+    assert dry_run_result["executed"] is False
+    assert dry_run_result["blocked"] is True
+    assert dry_run_result["mode"] == "dry_run"
+    assert execution_log == []
+
+    _call_tool(
+        app,
+        "session_config_update",
+        {
+            "session_id": session_id,
+            "runtime_patch": {
+                "execution_mode": "live",
+                "require_execute_confirmation": True,
+            },
+        },
+    )
+
+    confirm_blocked = _call_tool(
+        app,
+        "action_execute",
+        {
+            "session_id": session_id,
+            "action": plan_result["action"],
+        },
+    )
+    assert confirm_blocked["executed"] is False
+    assert confirm_blocked["blocked"] is True
+    assert confirm_blocked["requires_confirmation"] is True
+    assert execution_log == []
+
+    confirmed_result = _call_tool(
+        app,
+        "action_execute",
+        {
+            "session_id": session_id,
+            "action": plan_result["action"],
+            "confirm_execute": True,
+        },
+    )
+    assert confirmed_result["executed"] is True
+    assert execution_log[-1]["action"] == "click"
+
+    codex_resource = _read_resource(app, "civ6://install/codex-config")
+    assert 'command = ".venv/bin/python"' in codex_resource[0].content
+    assert '"computer_use_test.mcp.server"' in codex_resource[0].content
+    assert '"stdio"' in codex_resource[0].content
+
+    claude_resource = _read_resource(app, "civ6://install/claude-code-project-mcp-json")
+    assert '"mcpServers"' in claude_resource[0].content
+    assert "computer_use_test.mcp.server" in claude_resource[0].content
+
+    http_resource = _read_resource(app, "civ6://install/http-client-example")
+    assert "http://127.0.0.1:8000/mcp" in http_resource[0].content
+
+    setup_prompt = _get_prompt(app, "client_setup_workflow", {"client": "claude-code"})
+    setup_text = setup_prompt.messages[0].content.text
+    assert "civ6://install/claude-code-project-mcp-json" in setup_text
+    assert "session_create" in setup_text
+
+    codex_template = render_client_template("codex")
+    claude_template = render_client_template("claude-code")
+    assert 'command = ".venv/bin/python"' in codex_template
+    assert '"mcpServers"' in claude_template
 
 
 def test_resources_and_prompts_surface_session_information(tmp_path: Path):

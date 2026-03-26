@@ -1,4 +1,4 @@
-from computer_use_test.agent.modules.context.context_manager import ContextManager
+from civStation.agent.modules.context.context_manager import ContextManager
 
 
 class TestContextManagerPolicyCache:

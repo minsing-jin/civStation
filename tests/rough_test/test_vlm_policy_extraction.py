@@ -15,13 +15,13 @@ from rich.console import Console
 from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn, TimeRemainingColumn
 from rich.table import Table
 
-from computer_use_test.evaluation.evaluator.action_eval.bbox_eval.dataset_loader import load_dataset
-from computer_use_test.evaluation.evaluator.action_eval.bbox_eval.scorer import aggregate_results
-from computer_use_test.utils.prompts.primitive_prompt import (
+from civStation.evaluation.evaluator.action_eval.bbox_eval.dataset_loader import load_dataset
+from civStation.evaluation.evaluator.action_eval.bbox_eval.scorer import aggregate_results
+from civStation.utils.prompts.primitive_prompt import (
     MULTI_ACTION_SEQUENCE_JSON_FORMAT_INSTRUCTION,
     POLICY_PROMPT,
 )
-from computer_use_test.utils.ui_benchmarking import (
+from civStation.utils.ui_benchmarking import (
     ALLOWED_COLOR_POLICIES,
     ALLOWED_ENCODE_MODES,
     ALLOWED_UI_FILTER_MODES,

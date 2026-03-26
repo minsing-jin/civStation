@@ -39,7 +39,7 @@ Run the same pytest command.
 ### Task 2: Implement shared computer-use action mapping
 
 **Files:**
-- Create: `computer_use_test/utils/llm_provider/computer_use_actions.py`
+- Create: `civStation/utils/llm_provider/computer_use_actions.py`
 
 **Step 1: Add OpenAI action translation helpers**
 
@@ -62,8 +62,8 @@ Run: `pytest tests/utils/test_openai_computer_provider.py tests/utils/test_anthr
 ### Task 3: Implement OpenAI computer-use provider
 
 **Files:**
-- Create: `computer_use_test/utils/llm_provider/openai_computer.py`
-- Modify: `computer_use_test/utils/llm_provider/__init__.py`
+- Create: `civStation/utils/llm_provider/openai_computer.py`
+- Modify: `civStation/utils/llm_provider/__init__.py`
 
 **Step 1: Subclass the existing GPT provider**
 
@@ -88,8 +88,8 @@ Run: `pytest tests/utils/test_openai_computer_provider.py -q`
 ### Task 4: Implement Anthropic computer-use provider
 
 **Files:**
-- Create: `computer_use_test/utils/llm_provider/anthropic_computer.py`
-- Modify: `computer_use_test/utils/llm_provider/__init__.py`
+- Create: `civStation/utils/llm_provider/anthropic_computer.py`
+- Modify: `civStation/utils/llm_provider/__init__.py`
 
 **Step 1: Subclass the existing Claude provider**
 
@@ -113,7 +113,7 @@ Run: `pytest tests/utils/test_anthropic_computer_provider.py -q`
 ### Task 5: Register providers and document usage
 
 **Files:**
-- Modify: `computer_use_test/utils/llm_provider/__init__.py`
+- Modify: `civStation/utils/llm_provider/__init__.py`
 - Modify: `README.md`
 
 **Step 1: Register provider names**
@@ -133,21 +133,21 @@ Run: `pytest tests/utils/test_openai_computer_provider.py tests/utils/test_anthr
 
 **Files:**
 - Modify: `README.md`
-- Modify: `computer_use_test/utils/llm_provider/__init__.py`
-- Create: `computer_use_test/utils/llm_provider/openai_computer.py`
-- Create: `computer_use_test/utils/llm_provider/anthropic_computer.py`
-- Create: `computer_use_test/utils/llm_provider/computer_use_actions.py`
+- Modify: `civStation/utils/llm_provider/__init__.py`
+- Create: `civStation/utils/llm_provider/openai_computer.py`
+- Create: `civStation/utils/llm_provider/anthropic_computer.py`
+- Create: `civStation/utils/llm_provider/computer_use_actions.py`
 - Create: `tests/utils/test_openai_computer_provider.py`
 - Create: `tests/utils/test_anthropic_computer_provider.py`
 
 **Step 1: Run full targeted verification**
 
 Run: `pytest tests/utils/test_openai_computer_provider.py tests/utils/test_anthropic_computer_provider.py tests/agent/test_turn_runner.py -q`
-Run: `ruff check computer_use_test/utils/llm_provider/__init__.py computer_use_test/utils/llm_provider/computer_use_actions.py computer_use_test/utils/llm_provider/openai_computer.py computer_use_test/utils/llm_provider/anthropic_computer.py tests/utils/test_openai_computer_provider.py tests/utils/test_anthropic_computer_provider.py`
+Run: `ruff check civStation/utils/llm_provider/__init__.py civStation/utils/llm_provider/computer_use_actions.py civStation/utils/llm_provider/openai_computer.py civStation/utils/llm_provider/anthropic_computer.py tests/utils/test_openai_computer_provider.py tests/utils/test_anthropic_computer_provider.py`
 
 **Step 2: Commit**
 
 ```bash
-git add docs/plans/2026-03-19-computer-use-providers-design.md docs/plans/2026-03-19-computer-use-providers.md README.md computer_use_test/utils/llm_provider/__init__.py computer_use_test/utils/llm_provider/computer_use_actions.py computer_use_test/utils/llm_provider/openai_computer.py computer_use_test/utils/llm_provider/anthropic_computer.py tests/utils/test_openai_computer_provider.py tests/utils/test_anthropic_computer_provider.py
+git add docs/plans/2026-03-19-computer-use-providers-design.md docs/plans/2026-03-19-computer-use-providers.md README.md civStation/utils/llm_provider/__init__.py civStation/utils/llm_provider/computer_use_actions.py civStation/utils/llm_provider/openai_computer.py civStation/utils/llm_provider/anthropic_computer.py tests/utils/test_openai_computer_provider.py tests/utils/test_anthropic_computer_provider.py
 git commit -m "feat: add OpenAI and Anthropic computer-use providers"
 ```

@@ -2,8 +2,8 @@ from types import SimpleNamespace
 
 from PIL import Image
 
-from computer_use_test.utils.llm_provider import create_provider, get_available_providers
-from computer_use_test.utils.llm_provider.openai_computer import OpenAIComputerVLMProvider
+from civStation.utils.llm_provider import create_provider, get_available_providers
+from civStation.utils.llm_provider.openai_computer import OpenAIComputerVLMProvider
 
 
 def test_openai_computer_provider_registered():

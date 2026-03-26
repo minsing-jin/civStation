@@ -5,17 +5,17 @@ import re
 
 from PIL import Image
 
-from computer_use_test.agent.modules.memory.short_term_memory import ChoiceCandidate, ShortTermMemory
-from computer_use_test.agent.modules.primitive.multi_step_process import (
+from civStation.agent.modules.memory.short_term_memory import ChoiceCandidate, ShortTermMemory
+from civStation.agent.modules.primitive.multi_step_process import (
     _POLICY_RIGHT_CARD_LIST_RATIOS,
     _POLICY_RIGHT_TAB_BAR_RATIOS,
     ObservationBundle,
     StageTransition,
     get_multi_step_process,
 )
-from computer_use_test.agent.modules.router.primitive_registry import PRIMITIVE_REGISTRY, get_primitive_prompt
-from computer_use_test.utils.llm_provider.base import BaseVLMProvider, VLMResponse
-from computer_use_test.utils.llm_provider.parser import AgentAction
+from civStation.agent.modules.router.primitive_registry import PRIMITIVE_REGISTRY, get_primitive_prompt
+from civStation.utils.llm_provider.base import BaseVLMProvider, VLMResponse
+from civStation.utils.llm_provider.parser import AgentAction
 
 
 class FakeProvider(BaseVLMProvider):

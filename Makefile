@@ -1,4 +1,4 @@
-.PHONY: help install lint format check test coverage clean
+.PHONY: help install lint format check test coverage docs-serve docs-build clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
@@ -7,6 +7,12 @@ help: ## Show this help
 install: ## Install project with test dependencies
 	pip install -e ".[test]"
 	pre-commit install
+
+docs-serve: ## Serve the documentation site locally
+	uv run --extra docs mkdocs serve -f docs/mkdocs.local.yml
+
+docs-build: ## Build the documentation site
+	uv run --extra docs mkdocs build --strict -f docs/mkdocs.yml
 
 lint: ## Run ruff linter (check only)
 	ruff check .

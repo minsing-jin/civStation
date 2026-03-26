@@ -2,12 +2,12 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-from computer_use_test.agent import turn_runner
+from civStation.agent import turn_runner
 
 
 class _DummyRunLogSession:
     def __init__(self):
-        self.path = Path(".tmp/computer_use_test/turn_runner_latest.log")
+        self.path = Path(".tmp/civStation/turn_runner_latest.log")
         self.closed = False
 
     def close(self):
@@ -16,7 +16,7 @@ class _DummyRunLogSession:
 
 class _DummyScreenshotTrajectorySession:
     def __init__(self):
-        self.path = Path(".tmp/computer_use_test/screenshot_trajectories/test-run")
+        self.path = Path(".tmp/civStation/screenshot_trajectories/test-run")
         self.closed = False
 
     def close(self):
@@ -133,25 +133,25 @@ def test_main_closes_run_log_session_after_one_turn(monkeypatch):
     monkeypatch.setattr(turn_runner, "setup_knowledge", lambda *args: None)
     monkeypatch.setattr(turn_runner, "CommandQueue", lambda: object())
     monkeypatch.setattr(turn_runner, "run_one_turn", lambda **kwargs: run_calls.append(kwargs))
-    monkeypatch.setattr("computer_use_test.utils.image_pipeline.config_from_args", lambda *args: None)
+    monkeypatch.setattr("civStation.utils.image_pipeline.config_from_args", lambda *args: None)
     monkeypatch.setitem(
         sys.modules,
-        "computer_use_test.agent.modules.context.macro_turn_manager",
+        "civStation.agent.modules.context.macro_turn_manager",
         SimpleNamespace(MacroTurnManager=lambda *args, **kwargs: object()),
     )
     monkeypatch.setitem(
         sys.modules,
-        "computer_use_test.agent.modules.context.context_updater",
+        "civStation.agent.modules.context.context_updater",
         SimpleNamespace(ContextUpdater=lambda *args, **kwargs: context_updater),
     )
     monkeypatch.setitem(
         sys.modules,
-        "computer_use_test.agent.modules.hitl.agent_gate",
+        "civStation.agent.modules.hitl.agent_gate",
         SimpleNamespace(AgentGate=_DummyAgentGate, AgentState=_DummyAgentState),
     )
     monkeypatch.setitem(
         sys.modules,
-        "computer_use_test.utils.rich_logger",
+        "civStation.utils.rich_logger",
         SimpleNamespace(RichLogger=_DummyRichLogger),
     )
 

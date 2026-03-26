@@ -15,7 +15,7 @@
 
 ### 2. VLM Provider 통합
 #### 2.1 Base Provider Framework
-- ✅ `computer_use_test/utils/provider/base.py`
+- ✅ `civStation/utils/provider/base.py`
   - `BaseVLMProvider` 추상 클래스
   - `VLMResponse` 데이터 클래스
   - `MockVLMProvider` 구현
@@ -61,7 +61,7 @@
 - ✅ Help message with examples
 
 ### 3. Prompts 모듈
-- ✅ `computer_use_test/utils/prompts/civ6_prompts.py`
+- ✅ `civStation/utils/prompts/civ6_prompts.py`
   - `UNIT_OPS_PROMPT`
   - `CITY_MANAGEMENT_PROMPT`
   - `SCIENCE_DECISION_PROMPT`
@@ -74,7 +74,7 @@
 - ✅ `__init__.py` - 편리한 import를 위한 re-export
 
 ### 4. 문서화
-- ✅ `computer_use_test/utils/provider/README.md`
+- ✅ `civStation/utils/provider/README.md`
   - Provider 사용 가이드
   - 각 provider별 설정 방법
   - 가격 정보
@@ -90,7 +90,7 @@
 ## 📁 프로젝트 구조
 
 ```
-computer_use_test/
+civStation/
 ├── agent/
 │   └── models/
 │       ├── schema.py              # Discriminated union actions
@@ -133,32 +133,32 @@ tests/
 
 ### 1. Mock 모드 (API 호출 없음 - 무료!)
 ```bash
-python -m computer_use_test.evaluator.static_eval.civ6_eval.main
+python -m civStation.evaluator.static_eval.civ6_eval.main
 ```
 
 ### 2. Claude 사용
 ```bash
 export ANTHROPIC_API_KEY="your-key"
-python -m computer_use_test.evaluator.static_eval.civ6_eval.main --provider claude
+python -m civStation.evaluator.static_eval.civ6_eval.main --provider claude
 ```
 
 ### 3. GPT-4o-mini 사용 (가장 저렴)
 ```bash
 export OPENAI_API_KEY="your-key"
-python -m computer_use_test.evaluator.static_eval.civ6_eval.main --provider gpt --model gpt-4o-mini
+python -m civStation.evaluator.static_eval.civ6_eval.main --provider gpt --model gpt-4o-mini
 ```
 
 ### 4. Gemini 사용
 ```bash
 export GOOGLE_API_KEY="your-key"
-python -m computer_use_test.evaluator.static_eval.civ6_eval.main --provider gemini
+python -m civStation.evaluator.static_eval.civ6_eval.main --provider gemini
 ```
 
 ### 5. Custom 프롬프트 사용 (코드)
 
 ```python
-from computer_use_test.utils.llm_provider import create_provider
-from computer_use_test.agent.modules.primitive.primitives import UnitOpsPrimitive
+from civStation.utils.llm_provider import create_provider
+from civStation.agent.modules.primitive.primitives import UnitOpsPrimitive
 
 provider = create_provider("claude")
 primitive = UnitOpsPrimitive(
