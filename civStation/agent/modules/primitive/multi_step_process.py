@@ -76,6 +76,21 @@ def _generic_english_extra_note(memory: ShortTermMemory) -> str:
     )
 
 
+def _policy_prompt_label(label: str, *, prompt_language: str = "eng") -> str:
+    """Translate policy-tab labels into the active prompt language when needed."""
+    if normalize_prompt_language(prompt_language) != "eng":
+        return label
+    return {
+        "군사": "military",
+        "경제": "economic",
+        "외교": "diplomatic",
+        "와일드카드": "wild",
+        "암흑": "dark",
+        "전체": "overview",
+        "황금기": "golden_age",
+    }.get(label, label)
+
+
 def _normalized_coord_note(normalizing_range: int, *, fields: str, prompt_language: str = "eng") -> str:
     """Return a shared normalization contract for structured JSON fields."""
     if normalize_prompt_language(prompt_language) == "eng":
@@ -1008,19 +1023,42 @@ class PolicyProcess(ScriptedMultiStepProcess):
 
     def build_stage_note(self, memory: ShortTermMemory, *, prompt_language: str = "eng") -> str:
         stage = memory.current_stage
+        language = normalize_prompt_language(prompt_language)
         if stage == "policy_entry":
+            if language == "eng":
+                return (
+                    "Current stage: policy_entry\n"
+                    "- Handle only the 'Change Policies' popup or the 'Choose New Government' entry branch "
+                    "until the policy-card screen is open."
+                )
             return (
                 "현재 stage: policy_entry\n"
                 "- '정책변경' 팝업 또는 '새 정부 선택' 분기만 처리해 정책 카드 화면으로 진입해."
             )
         if stage == "bootstrap_tabs":
+            if language == "eng":
+                return (
+                    "Current stage: bootstrap_tabs\n"
+                    "- After policy_entry finishes, read the left-slot semantics and the five policy-tab positions "
+                    "from the overview policy screen to build the cache."
+                )
             return (
                 "현재 stage: bootstrap_tabs\n"
                 "- policy_entry가 끝난 뒤 overview 정책 화면에서 "
                 "좌측 슬롯 의미 정보와 오른쪽 탭바의 정책 탭 위치를 읽어 cache를 만든다."
             )
         if stage == "calibrate_tabs":
-            current_tab = memory.get_policy_calibration_target_name() or "-"
+            current_tab = _policy_prompt_label(
+                memory.get_policy_calibration_target_name() or "-",
+                prompt_language=prompt_language,
+            )
+            if language == "eng":
+                return (
+                    "Current stage: calibrate_tabs\n"
+                    f"- This is a forced recalibration step. Click the cached position for policy tab '{current_tab}' "
+                    "and verify the switch.\n"
+                    "- Do not use this stage during the normal bootstrap path; enter it only for failure recovery."
+                )
             return (
                 "현재 stage: calibrate_tabs\n"
                 f"- 강제 재보정 단계다. 정책 탭 '{current_tab}'의 cached position을 클릭해 "
@@ -1028,34 +1066,76 @@ class PolicyProcess(ScriptedMultiStepProcess):
                 "- 정상 bootstrap 경로에서는 이 stage를 쓰지 않고, 실패 복구가 필요할 때만 진입한다."
             )
         if stage == "click_cached_tab":
-            current_tab = memory.get_policy_current_tab_name() or "-"
+            current_tab = _policy_prompt_label(
+                memory.get_policy_current_tab_name() or "-", prompt_language=prompt_language
+            )
+            if language == "eng":
+                return (
+                    "Current stage: click_cached_tab\n"
+                    f"- Use the cached position to click the current queued tab '{current_tab}'.\n"
+                    "- The semantic verifier decides whether the tab switch really succeeded and only promotes "
+                    "successful clicks into the confirmed cache."
+                )
             return (
                 "현재 stage: click_cached_tab\n"
                 f"- cached position을 사용해 현재 탭 '{current_tab}'을 클릭해.\n"
                 "- semantic verifier가 실제 탭 전환 성공 여부를 판정하고, 성공한 탭만 confirmed cache로 승격한다."
             )
         if stage == "plan_current_tab":
-            current_tab = memory.get_policy_current_tab_name() or "-"
+            current_tab = _policy_prompt_label(
+                memory.get_policy_current_tab_name() or "-", prompt_language=prompt_language
+            )
+            if language == "eng":
+                return (
+                    "Current stage: plan_current_tab\n"
+                    f"- Read only the currently visible cards in tab '{current_tab}' and decide keep/replace in one pass.\n"
+                    "- Return [] when no replacement is needed; otherwise return the drag action array immediately."
+                )
             return (
                 "현재 stage: plan_current_tab\n"
                 f"- 현재 탭 '{current_tab}'의 보이는 카드만 읽고 유지/교체를 한 번에 판단해.\n"
                 "- 교체가 필요 없으면 빈 배열 []을 반환하고, 필요하면 drag action 배열을 즉시 만든다."
             )
         if stage == "click_next_tab":
-            current_tab = memory.get_policy_current_tab_name() or "-"
+            current_tab = _policy_prompt_label(
+                memory.get_policy_current_tab_name() or "-", prompt_language=prompt_language
+            )
+            if language == "eng":
+                return (
+                    "Current stage: click_next_tab\n"
+                    f"- Click the next queued tab '{current_tab}' using its cached position.\n"
+                    "- If the before/after screenshots do not change, re-find only that failed tab and refresh its "
+                    "cached coordinates."
+                )
             return (
                 "현재 stage: click_next_tab\n"
                 f"- 방금 완료한 이전 탭의 다음 순서인 현재 queued tab '{current_tab}'을 cached position으로 클릭해.\n"
                 "- 클릭 전후 스크린샷 변화가 없으면 실패한 그 탭 하나만 다시 찾아 cached 좌표를 수정한다."
             )
         if stage == "generic_fallback":
-            current_tab = memory.get_policy_current_tab_name() or "-"
+            current_tab = _policy_prompt_label(
+                memory.get_policy_current_tab_name() or "-", prompt_language=prompt_language
+            )
+            if language == "eng":
+                return (
+                    "Current stage: generic_fallback\n"
+                    f"- The structured flow is blocked on tab '{current_tab}'. Perform one action that safely "
+                    "restores the policy screen inside the same policy primitive."
+                )
             return (
                 "현재 stage: generic_fallback\n"
                 f"- 현재 탭 '{current_tab}'에서 structured flow가 막혔다. "
                 "같은 policy primitive 안에서 화면을 복구하는 단일 action을 수행해."
             )
         if stage == "finalize_policy":
+            if language == "eng":
+                return (
+                    "Current stage: finalize_policy\n"
+                    "- First decide whether the lower 'Confirm Policies' button is enabled.\n"
+                    "- If nothing changed during this policy run and the button is disabled, exit with Esc.\n"
+                    "- If changes were made and the button is enabled, click only that button and move to the "
+                    "confirm-popup stage."
+                )
             return (
                 "현재 stage: finalize_policy\n"
                 "- 하단 '모든 정책 배정' 버튼이 활성인지 먼저 판단한다.\n"
@@ -1063,6 +1143,14 @@ class PolicyProcess(ScriptedMultiStepProcess):
                 "- 변경이 있고 버튼이 활성이라면 그 버튼만 누르고 confirm popup 단계로 넘겨라."
             )
         if stage == "confirm_policy_popup":
+            if language == "eng":
+                return (
+                    "Current stage: confirm_policy_popup\n"
+                    "- This is the final confirmation popup after 'Confirm Policies'.\n"
+                    "- Click only the affirmative confirm button such as 'Yes'. Do not click 'No', the background, "
+                    "or the 'Confirm Policies' button again.\n"
+                    "- Only this stage may finish with task_status='complete'."
+                )
             return (
                 "현재 stage: confirm_policy_popup\n"
                 "- 방금 '모든 정책 배정' 뒤에 뜬 마지막 '정말입니까?' 또는 "
@@ -1412,8 +1500,8 @@ class PolicyProcess(ScriptedMultiStepProcess):
             prompt_language=prompt_language,
         )
         if extra_note:
-            if normalize_prompt_language(prompt_language) == "eng" and _contains_hangul(extra_note):
-                extra_note = _generic_english_extra_note(memory)
+            # Policy runs often mix English base prompts with Korean UI labels and live HITL directives.
+            # Keep the exact note so slot/drag constraints are not collapsed into a generic fallback.
             extra_title = (
                 "[Current Extra Instruction]"
                 if normalize_prompt_language(prompt_language) == "eng"
@@ -1459,8 +1547,8 @@ class PolicyProcess(ScriptedMultiStepProcess):
             1,
         )
         if extra_note:
-            if normalize_prompt_language(prompt_language) == "eng" and _contains_hangul(extra_note):
-                extra_note = _generic_english_extra_note(memory)
+            # Policy runs often mix English base prompts with Korean UI labels and live HITL directives.
+            # Keep the exact note so slot/drag constraints are not collapsed into a generic fallback.
             extra_title = (
                 "[Current Extra Instruction]"
                 if normalize_prompt_language(prompt_language) == "eng"
@@ -2275,6 +2363,24 @@ class PolicyProcess(ScriptedMultiStepProcess):
             reason_note = f" / 현재 선택 이유:{slot.selection_reason}" if slot.selection_reason else ""
             slot_lines.append(f"- {slot.slot_id}: {slot.slot_type} / {status}{suffix}{source_note}{reason_note}")
 
+        replacement_priority_lines = [
+            "카드 교체 여부와 어떤 카드를 넣을지는 사용자 지시와 상위 전략만 기준으로 판단해.",
+        ]
+        if hitl_directive:
+            replacement_priority_lines.extend(
+                [
+                    "- 사용자 지시가 있으면 카드 교체 판단에서 최우선으로 따른다.",
+                    f"- 사용자 지시:\n{hitl_directive}",
+                ]
+            )
+        if high_level_strategy:
+            replacement_priority_lines.extend(
+                [
+                    "- 사용자 지시와 충돌하지 않는 범위에서 상위 전략을 기준으로 교체한다.",
+                    f"- 상위 전략:\n{high_level_strategy}",
+                ]
+            )
+
         multi_actions = self._plan_generic_policy_multi_actions(
             provider,
             pil_image,
@@ -2308,7 +2414,7 @@ class PolicyProcess(ScriptedMultiStepProcess):
                 "- 단순히 현재 탭에도 좋은 카드가 보인다는 이유만으로 와일드 슬롯을 매 탭 바꾸지 마.\n"
                 "- 우세 근거가 약하거나 근소하면 현재 와일드 카드를 유지한다.\n"
                 "- 남은 queue에 아직 다른 탭이 남아 있으면 와일드 슬롯 교체는 더 보수적으로 판단한다.\n\n"
-                f"상위 전략:\n{high_level_strategy}\n\n"
+                f"{chr(10).join(replacement_priority_lines)}\n\n"
                 f"왼쪽 슬롯 상태:\n{chr(10).join(slot_lines)}\n"
             ),
         )

@@ -4732,6 +4732,73 @@ class TestPolicyProcess:
         assert memory.is_policy_tab_confirmed("군사") is True
         assert memory.current_stage == "plan_current_tab"
 
+    def test_plan_current_tab_prompt_prioritizes_hitl_then_high_level_strategy_for_replacements(self):
+        process = get_multi_step_process("policy_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("policy_primitive", enable_policy_state=True)
+        memory.mark_policy_entry_done()
+        memory.init_policy_state(
+            tab_positions=[{"tab_name": "군사", "x": 700, "y": 100}],
+            eligible_tabs_queue=["군사"],
+            slot_inventory=[{"slot_id": "military_1", "slot_type": "군사", "is_empty": True}],
+            wild_slot_active=False,
+            overview_mode=False,
+            selected_tab_name="군사",
+        )
+        memory.begin_stage("plan_current_tab")
+        provider = FakeProvider([json.dumps([])])
+
+        planned = process._plan_current_tab_actions(  # noqa: SLF001
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리에서 야만인 대응을 우선한다",
+            recent_actions="없음",
+            hitl_directive="규율과 조사 카드를 넣어",
+            prompt_language="kor",
+        )
+
+        assert isinstance(planned, StageTransition)
+        assert "카드 교체 여부와 어떤 카드를 넣을지는 사용자 지시와 상위 전략만 기준으로 판단해." in provider.last_text
+        assert "사용자 지시가 있으면 카드 교체 판단에서 최우선으로 따른다" in provider.last_text
+        assert "규율과 조사 카드를 넣어" in provider.last_text
+        assert "과학 승리에서 야만인 대응을 우선한다" in provider.last_text
+
+    def test_plan_current_tab_english_prompt_keeps_policy_specific_drag_note_with_korean_hitl(self):
+        process = get_multi_step_process("policy_primitive", "")
+        memory = ShortTermMemory()
+        memory.start_task("policy_primitive", enable_policy_state=True)
+        memory.mark_policy_entry_done()
+        memory.init_policy_state(
+            tab_positions=[{"tab_name": "군사", "x": 700, "y": 100}],
+            eligible_tabs_queue=["군사"],
+            slot_inventory=[{"slot_id": "military_1", "slot_type": "군사", "is_empty": True}],
+            wild_slot_active=False,
+            overview_mode=False,
+            selected_tab_name="군사",
+        )
+        memory.begin_stage("plan_current_tab")
+        provider = FakeProvider([json.dumps([])])
+
+        planned = process._plan_current_tab_actions(  # noqa: SLF001
+            provider,
+            Image.new("RGB", (100, 100)),
+            memory,
+            normalizing_range=1000,
+            high_level_strategy="과학 승리에서 야만인 대응을 우선한다",
+            recent_actions="없음",
+            hitl_directive="규율과 조사 카드를 넣어",
+            prompt_language="eng",
+        )
+
+        assert isinstance(planned, StageTransition)
+        assert "Current stage: plan_current_tab" in provider.last_text
+        assert "Return [] when no replacement is needed" in provider.last_text
+        assert "policy_target_slot_id" in provider.last_text
+        assert "규율과 조사 카드를 넣어" in provider.last_text
+        assert "military_1: 군사 / 빈칸" in provider.last_text
+
     def test_plan_current_tab_rejects_invalid_cross_category_drag_bundle(self):
         process = get_multi_step_process("policy_primitive", "")
         memory = ShortTermMemory()
