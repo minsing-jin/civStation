@@ -1,3 +1,11 @@
+<div align="center">
+
+**언어 선택**
+
+[English](README.md) | [한국어](README.ko.md) | [中文](README.zh.md)
+
+</div>
+
 # CivStation
 
 > "그냥 봇을 돌리고 잘 되길 바란다"에서 끝나지 않는, 제어 가능한 Civ6 computer-use 스택.
@@ -18,14 +26,6 @@
 
 - Python package: `civStation`
 - Python module: `civStation`
-
-<div align="center">
-
-**언어 선택**
-
-[English](README.md) | [한국어](README.ko.md) | [中文](README.zh.md)
-
-</div>
 
 ## 📚 Index
 

@@ -1,5 +1,5 @@
 include CONTRIBUTING.md
-include HISTORY.md
+include docs/archive/HISTORY.md
 include LICENSE
 include README.md
 

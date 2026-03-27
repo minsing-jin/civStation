@@ -1,3 +1,11 @@
+<div align="center">
+
+**语言选择**
+
+[English](README.md) | [한국어](README.ko.md) | [中文](README.zh.md)
+
+</div>
+
 # CivStation
 
 > 一个可控的 Civ6 computer-use 技术栈，而不是“把机器人跑起来然后祈祷它别出错”。
@@ -14,14 +22,6 @@
 
 - Python package: `civStation`
 - Python module: `civStation`
-
-<div align="center">
-
-**语言选择**
-
-[English](README.md) | [한국어](README.ko.md) | [中文](README.zh.md)
-
-</div>
 
 ## 📚 Index
 

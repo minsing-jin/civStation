@@ -1,3 +1,11 @@
+<div align="center">
+
+**Languages**
+
+[English](README.md) | [한국어](README.ko.md) | [中文](README.zh.md)
+
+</div>
+
 # CivStation
 
 > A controllable Civ6 computer-use stack for people who want more than "run the bot and hope."
@@ -18,14 +26,6 @@ Current package and module names are still:
 
 - Python package: `civStation`
 - Python module: `civStation`
-
-<div align="center">
-
-**Languages**
-
-[English](README.md) | [한국어](README.ko.md) | [中文](README.zh.md)
-
-</div>
 
 ## 📚 Index
 
