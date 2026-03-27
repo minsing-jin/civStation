@@ -1,1 +1,0 @@
-"""Civilization VI evaluator tests package."""

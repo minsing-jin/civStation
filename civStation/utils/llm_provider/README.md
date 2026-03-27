@@ -46,23 +46,14 @@ export GENAI_API_KEY="your-api-key"
 export OPENAI_API_KEY="your-api-key"
 ```
 
-### 3. Run Evaluation
+### 3. Run the Agent
 
 ```bash
-# With mock (no API calls - FREE!)
-python -m civStation.evaluator.static_eval.civ6_eval.main
+# Recommended CLI
+uv run civstation run --provider gemini --model gemini-3-flash --turns 10
 
-# With Claude
-python -m civStation.evaluator.static_eval.civ6_eval.main --provider claude
-
-# With GPT-4o-mini (cheaper)
-python -m civStation.evaluator.static_eval.civ6_eval.main --provider gpt --model gpt-4o-mini
-
-# With Gemini
-python -m civStation.evaluator.static_eval.civ6_eval.main --provider gemini
-
-# With custom test file
-python -m civStation.evaluator.static_eval.civ6_eval.main --provider claude path/to/tests.json
+# Legacy module entrypoint still works
+python -m civStation.agent.turn_runner --provider gemini --model gemini-3-flash --turns 10
 ```
 
 ## 🧩 Provider Details
@@ -332,12 +323,10 @@ except FileNotFoundError as e:
 ## Testing
 
 ```bash
-# Run tests without VLM (mock only)
-pytest tests/evaluator/static_eval/civ6_eval/
-
-# Run with real VLM (requires API keys)
-ANTHROPIC_API_KEY=xxx python -m civStation.evaluator.static_eval.civ6_eval.main --provider claude
+pytest
 ```
+
+For live model runs, use the normal agent entrypoints above.
 
 ## Troubleshooting
 

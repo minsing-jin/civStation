@@ -34,10 +34,6 @@ Depending on the primitive, that can be:
   Main multi-step execution engine
 - `runtime_hooks.py`
   Runtime hooks and integration helpers
-- `primitives.py`
-  Older primitive classes kept for reference
-- `base_primitive.py`
-  Shared primitive interface
 
 ## 🔄 Execution Model
 

@@ -3,17 +3,12 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 from io import BytesIO
-from pathlib import Path
 
 import PIL.Image
 import PIL.ImageEnhance
 import PIL.ImageFilter
 import PIL.ImageOps
 from PIL import features
-
-from civStation.agent.models.schema import ClickAction, DragAction, KeyPressAction, WaitAction
-from civStation.evaluation.evaluator.action_eval.bbox_eval.schema import CaseResult, DatasetCase
-from civStation.evaluation.evaluator.action_eval.bbox_eval.scorer import select_best_gt_set
 
 ALLOWED_UI_FILTER_MODES = {
     "none",
@@ -187,81 +182,6 @@ def simulate_transport_encoding(
     raise ValueError(f"Unknown encode mode: {encode_mode}")
 
 
-def convert_actions_for_bbox_eval(actions: list[dict]) -> list[ClickAction | DragAction | KeyPressAction | WaitAction]:
-    converted: list[ClickAction | DragAction | KeyPressAction | WaitAction] = []
-    for raw_action in actions:
-        action_type = str(raw_action.get("action", "")).strip().lower()
-        description = str(raw_action.get("reasoning", "")).strip() or None
-
-        if action_type == "click":
-            converted.append(
-                ClickAction(
-                    x=int(raw_action.get("x", 0)),
-                    y=int(raw_action.get("y", 0)),
-                    button=str(raw_action.get("button", "left") or "left"),
-                    description=description,
-                )
-            )
-            continue
-
-        if action_type == "drag":
-            converted.append(
-                DragAction(
-                    start_x=int(raw_action.get("x", 0)),
-                    start_y=int(raw_action.get("y", 0)),
-                    end_x=int(raw_action.get("end_x", 0)),
-                    end_y=int(raw_action.get("end_y", 0)),
-                    button=str(raw_action.get("button", "left") or "left"),
-                    description=description,
-                )
-            )
-            continue
-
-        if action_type == "press":
-            keys = _normalize_keys(str(raw_action.get("key", "")))
-            if not keys:
-                raise ValueError("press action did not include any usable key value")
-            converted.append(KeyPressAction(keys=keys, description=description))
-            continue
-
-        if action_type == "wait":
-            duration = float(raw_action.get("duration", 1.0))
-            converted.append(WaitAction(duration=duration, description=description))
-            continue
-
-        raise ValueError(f"Unsupported action type for bbox evaluation: {action_type or 'empty'}")
-
-    return converted
-
-
-def score_actions_against_case(
-    case: DatasetCase,
-    actions: list[dict],
-    ignore_wait: bool = False,
-) -> CaseResult:
-    try:
-        converted_actions = convert_actions_for_bbox_eval(actions)
-    except ValueError as exc:
-        return CaseResult(case_id=case.case_id, error=str(exc))
-
-    gt_action_sets = [action_set.actions for action_set in case.action_sets]
-    best_sequence, gt_index = select_best_gt_set(gt_action_sets, converted_actions, ignore_wait=ignore_wait)
-    return CaseResult(
-        case_id=case.case_id,
-        best_sequence=best_sequence,
-        agent_actions_count=len(converted_actions),
-        gt_set_index=gt_index,
-    )
-
-
-def resolve_dataset_screenshot_path(dataset_path: str | Path, screenshot_path: str) -> Path:
-    dataset_path = Path(dataset_path)
-    screenshot = Path(screenshot_path)
-    if screenshot.is_absolute():
-        return screenshot
-    return (dataset_path.parent / screenshot).resolve()
-
-
 def _enhance_ui_contrast(image: PIL.Image.Image) -> PIL.Image.Image:
     enhanced = PIL.ImageOps.autocontrast(image, cutoff=1)
     enhanced = PIL.ImageEnhance.Contrast(enhanced).enhance(1.18)
@@ -291,14 +211,3 @@ def _decode_rgb_image(encoded: bytes) -> PIL.Image.Image:
     image = PIL.Image.open(buf)
     image.load()
     return image.convert("RGB")
-
-
-def _normalize_keys(raw_key: str) -> list[str]:
-    cleaned = raw_key.strip().lower()
-    if not cleaned or cleaned == "none":
-        return []
-    if "+" in cleaned:
-        return [part.strip() for part in cleaned.split("+") if part.strip()]
-    if "," in cleaned:
-        return [part.strip() for part in cleaned.split(",") if part.strip()]
-    return [cleaned]
