@@ -27,7 +27,7 @@ class LayeredComputerUseMCP:
         *,
         adapter_registry: LayerAdapterRegistry | None = None,
         sessions: SessionRegistry | None = None,
-        server_name: str = "computer-use-layered-mcp",
+        server_name: str = "civstation-layered-mcp",
         host: str = "127.0.0.1",
         port: int = 8000,
         mount_path: str = "/",

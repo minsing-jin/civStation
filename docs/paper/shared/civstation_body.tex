@@ -126,7 +126,7 @@ Primitive decomposition is especially important in Civilization VI because the i
 \toprule
 \textbf{Item} & \textbf{Value} \\
 \midrule
-Project name & CivStation (package name still \texttt{civStation}; module name \texttt{computer\_use\_test}) \\
+Project name & CivStation (package and module name \texttt{civStation}) \\
 Source layout & 123 Python source files; 48 files under \texttt{tests/} \\
 Primitives & 12 routable primitives, 2 HitL-only primitives \\
 MCP surface & 29 tools spanning session, context, strategy, memory, action, HitL, and workflow \\
@@ -269,7 +269,7 @@ The idea generalizes beyond a single game. If VLM-driven computer use becomes ro
 
 Computer-use systems can act on the user's machine, which creates obvious misuse and safety concerns \cite{anthropic_computer_use}. CivStation partially addresses this by giving operators multiple ways to interrupt execution, by separating strategy changes from lower-level actions, and by treating human discussion and directive channels as supported features rather than emergency patches. The system's architecture does not eliminate misuse risk, but it does make trust boundaries more explicit than an opaque loop would.
 
-Several limitations remain. First, the project still lacks a full public benchmark section with live-agent numbers against strong baselines. Second, although the repository includes exploratory latency reports and a quality-benchmark harness, it does not yet include a complete checked-in accuracy-speed Pareto study with real model calls across a representative dataset. Third, the current primitive inventory is hand-authored for Civilization VI, which means portability still depends on substantial domain work. Fourth, the codebase is in a naming transition: the public name is CivStation, but the package and module names remain \texttt{civStation} and \texttt{computer\_use\_test}. Fifth, the local environment used to prepare this paper did not include a LaTeX toolchain, so PDF compilation could not be completed here.
+Several limitations remain. First, the project still lacks a full public benchmark section with live-agent numbers against strong baselines. Second, although the repository includes exploratory latency reports and a quality-benchmark harness, it does not yet include a complete checked-in accuracy-speed Pareto study with real model calls across a representative dataset. Third, the current primitive inventory is hand-authored for Civilization VI, which means portability still depends on substantial domain work. Fourth, the local environment used to prepare this paper did not include a LaTeX toolchain, so PDF compilation could not be completed here.
 
 There are also limitations specific to online dynamic experiments. Civilization VI is not a headless benchmark environment in the same sense as a browser task suite. To run an end-to-end live experiment, a human typically has to launch the game, maintain a valid session, and often supervise progress because the model can stall, drift, or get interrupted by modal events. This makes large repeated studies operationally expensive. It also means that online evaluation can fail for reasons that are only partly about the policy itself, including slow inference, broken session state, or interruption in the middle of a multi-step action sequence.
 

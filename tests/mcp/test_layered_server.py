@@ -429,12 +429,14 @@ def test_execution_guard_transport_config_and_install_resources(tmp_path: Path):
     assert execution_log[-1]["action"] == "click"
 
     codex_resource = _read_resource(app, "civ6://install/codex-config")
+    assert "[mcp_servers.civstation-layered]" in codex_resource[0].content
     assert 'command = ".venv/bin/python"' in codex_resource[0].content
     assert '"civStation.mcp.server"' in codex_resource[0].content
     assert '"stdio"' in codex_resource[0].content
 
     claude_resource = _read_resource(app, "civ6://install/claude-code-project-mcp-json")
     assert '"mcpServers"' in claude_resource[0].content
+    assert '"civstation-layered"' in claude_resource[0].content
     assert "civStation.mcp.server" in claude_resource[0].content
 
     http_resource = _read_resource(app, "civ6://install/http-client-example")
@@ -453,8 +455,10 @@ def test_execution_guard_transport_config_and_install_resources(tmp_path: Path):
 
     codex_template = render_client_template("codex")
     claude_template = render_client_template("claude-code")
+    assert "[mcp_servers.civstation-layered]" in codex_template
     assert 'command = ".venv/bin/python"' in codex_template
     assert '"mcpServers"' in claude_template
+    assert '"civstation-layered"' in claude_template
 
 
 def test_resources_and_prompts_surface_session_information(tmp_path: Path):
