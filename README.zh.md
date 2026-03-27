@@ -215,8 +215,6 @@ MCP session/runtime 的关键价值在于，它映射了真实执行时的分离
 
 ## 🏗️ Architecture
 
-## 🏗️ Architecture
-
 ### 四个核心层
 
 | 层 | 核心问题 | 主要代码 | 详细文档 |
