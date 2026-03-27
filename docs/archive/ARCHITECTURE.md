@@ -3,7 +3,7 @@
 This document describes the internal structure of the Civ6 Computer-Use Agent
 for contributors who want to extend, debug, or build on top of the project.
 
-For a quick-start overview, see [README.md](README.md).
+For a quick-start overview, see [Quickstart](../getting-started/quickstart.md).
 
 ---
 
