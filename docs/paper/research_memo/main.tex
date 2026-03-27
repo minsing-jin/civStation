@@ -1,0 +1,105 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{xcolor}
+
+\title{Research Memo: Why CivStation Has Not Yet Become a Real Civ6 Benchmark}
+\author{Minsing Jin}
+\date{March 26, 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This memo records the gap between the intended research direction of CivStation and its current state. The project was motivated by the idea that Civilization VI could serve as a long-horizon computer-use environment for comparing agents, humans, and mixed supervision modes. In practice, the stack has not yet reached the level of reliability needed for that claim. The purpose of this memo is to preserve the failure modes, incorrect assumptions, and research lessons so that future work can start from a more realistic baseline.
+\end{abstract}
+
+\section{Initial Research Intuition}
+
+The original research intuition was attractive. A turn-based strategy game appears to offer:
+\begin{itemize}[leftmargin=*]
+    \item persistent state
+    \item delayed consequences
+    \item rich visual interfaces
+    \item strategic depth
+    \item natural benchmark modes such as human vs agent or agent vs agent
+\end{itemize}
+
+That intuition remains interesting. The problem is not that the idea is meaningless. The problem is that the current implementation does not yet support the experiments required to validate it.
+
+\section{What Went Wrong}
+
+The largest issue is that the system does not yet support stable long-running execution. The agent can route, plan, and execute single actions, but repeated online operation breaks down in ways that prevent meaningful experiments.
+
+The main failure classes are:
+\begin{itemize}[leftmargin=*]
+    \item \textbf{runtime brittleness}: multi-step flows are easy to desynchronize
+    \item \textbf{slow inference}: model latency is too high for comfortable repeated interaction
+    \item \textbf{verification bottlenecks}: confirming whether an action succeeded often requires another imperfect visual judgment
+    \item \textbf{session fragility}: the game must be manually launched and maintained
+    \item \textbf{bug accumulation}: small routing or action errors compound before they can be studied cleanly
+\end{itemize}
+
+\section{Why Experiments Did Not Materialize}
+
+The project did not fail because there was nothing to measure. It failed because the cost of obtaining reliable measurements remained too high. Running a meaningful live experiment currently requires:
+\begin{itemize}[leftmargin=*]
+    \item launching Civilization VI manually
+    \item maintaining a valid run state
+    \item keeping the system from stalling, drifting, or getting interrupted
+    \item dealing with repeated bugs before enough data is collected
+\end{itemize}
+
+That means the stack is not yet a practical benchmark harness. It is still an unstable experimental platform.
+
+\section{What The Project Actually Contributes Right Now}
+
+At the moment, CivStation contributes four things:
+\begin{itemize}[leftmargin=*]
+    \item a layered software architecture for computer-use control
+    \item explicit HITL and MCP interfaces around the same runtime
+    \item reusable action normalization and execution abstractions
+    \item a concrete record of why long-horizon VLM control is hard in practice
+\end{itemize}
+
+This is enough for a memo or technical report. It is not enough for a strong research paper.
+
+\section{A More Realistic Research Framing}
+
+The right framing is not ``we built a benchmark.'' It is:
+\begin{quote}
+we built an experimental workbench intended to support a future benchmark, and the current work mostly teaches us what infrastructure is still missing.
+\end{quote}
+
+That difference matters. The work is more honest, and more useful, when it is presented as research preparation rather than as completed empirical research.
+
+\section{Key Lessons}
+
+\begin{itemize}[leftmargin=*]
+    \item Pure VLM-driven action is too brittle for reliable long-running use by itself.
+    \item Verification is its own research problem, not an afterthought.
+    \item Long-horizon systems fail from engineering friction long before they fail from benchmark design.
+    \item A hybrid architecture is probably necessary: VLMs for visual understanding, faster models or native-action modules for micro-control.
+    \item A domain-specific VLA or native-app control layer may be more promising than repeatedly asking a frontier VLM to solve both perception and micro-action.
+\end{itemize}
+
+\section{What Would Need To Be True Before Reattempting a Paper}
+
+\begin{itemize}[leftmargin=*]
+    \item long-running Civ6 sessions complete reliably
+    \item fallback and verification logic become trustworthy enough to support repeated trials
+    \item live benchmark modes can be run without heavy manual babysitting
+    \item at least one experiment family produces stable, repeatable evidence
+\end{itemize}
+
+Until then, the most responsible form for this work is a technical report plus a research memo, not a claim-heavy benchmark paper.
+
+\section{Conclusion}
+
+CivStation is not yet a benchmark. It is not yet a stable long-horizon agent. It is an experimental stack with useful architectural ideas and equally useful failure evidence. Preserving that distinction is the main point of this memo.
+
+\end{document}

@@ -10,6 +10,10 @@
 
 - `https://github.com/minsing-jin/civStation`
 
+설치하거나 clone해서 실제로 써보셨다면 GitHub star 하나가 정말 큰 도움이 됩니다.
+
+- 가장 빠른 CLI 액션: `gh repo star minsing-jin/civStation`
+
 현재 패키지/모듈 이름은 아직 다음과 같습니다:
 
 - Python package: `civStation`
@@ -49,7 +53,7 @@
 2. 아래 명령을 실행합니다:
 
 ```bash
-python -m civStation.agent.turn_runner \
+uv run civstation run \
   --provider gemini \
   --model gemini-3-flash \
   --turns 100 \
@@ -62,6 +66,12 @@ python -m civStation.agent.turn_runner \
 4. `Start` 를 누릅니다.
 
 이게 가장 단순한 시작 경로입니다.
+
+실행 전에 체크리스트만 먼저 보고 싶다면:
+
+```bash
+uv run civstation
+```
 
 만약 macOS에서 막히면 아래 권한만 먼저 켜면 됩니다:
 

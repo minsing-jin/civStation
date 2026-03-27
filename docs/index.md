@@ -40,13 +40,21 @@ Runtime, tooling, and control surfaces for letting VLMs play Civilization VI.
 
     [Go to quickstart](getting-started/quickstart.md)
 
--   **First live run**
+-   **Mobile QR control**
 
     ---
 
-    Learn the runtime flow, what the dashboard exposes, and where logs and run artifacts land.
+    Follow the README's `civ6_tacticall` flow so the operator stays on a phone instead of covering the game window.
 
-    [Run a live session](getting-started/first-live-run.md)
+    [Open the mobile control guide](guides/mobile-qr-control.md)
+
+-   **Why CivStation**
+
+    ---
+
+    Start from the project's actual philosophy before diving into implementation details.
+
+    [Read why it exists](concepts/why-civstation.md)
 
 -   **Architecture overview**
 
@@ -94,9 +102,9 @@ Runtime, tooling, and control surfaces for letting VLMs play Civilization VI.
 
 | Section | What you get |
 | --- | --- |
-| `Getting Started` | Installation, quickstart, first live run |
-| `Concepts` | architecture overview, layers, execution loop, HITL, MCP |
-| `Guides` | Operating the agent, control surfaces, providers, evaluation |
+| `Getting Started` | Installation, quickstart, first live run, mobile QR control |
+| `Concepts` | why CivStation, runtime separation, architecture overview, layers, execution loop, HITL, MCP |
+| `Guides` | operating the agent, control surfaces, providers, evaluation |
 | `Reference` | CLI flags, `config.yaml`, MCP tool list, folder map |
 | `Development` | Contribution workflow, testing, extension points, release notes |
 | `Appendix` | legacy pages, historical summaries, design notes |
@@ -113,6 +121,6 @@ Use these names consistently when you document, script, or integrate the project
 ## Recommended Reading Order
 
 1. Start with [Quickstart](getting-started/quickstart.md).
-2. Read [Architecture Overview](concepts/mental-model.md) and [Layers](concepts/layers.md).
-3. Use [Running the Agent](guides/running-the-agent.md) and [Control and Discussion](guides/control-and-discussion.md) for day-to-day operation.
+2. Read [Why CivStation](concepts/why-civstation.md), [Runtime Separation](concepts/runtime-separation.md), and [Architecture Overview](concepts/mental-model.md).
+3. Use [Mobile QR Control](guides/mobile-qr-control.md), [Running the Agent](guides/running-the-agent.md), and [Control and Discussion](guides/control-and-discussion.md) for day-to-day operation.
 4. Use [MCP Tools](reference/mcp-tools.md) and [Extending the Stack](development/extending-the-stack.md) when building on top of the project.

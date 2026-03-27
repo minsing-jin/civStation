@@ -10,6 +10,10 @@ Canonical GitHub repository:
 
 - `https://github.com/minsing-jin/civStation`
 
+If you install, clone, or use CivStation, a GitHub star genuinely helps.
+
+- Fastest CLI action: `gh repo star minsing-jin/civStation`
+
 Current package and module names are still:
 
 - Python package: `civStation`
@@ -49,7 +53,7 @@ If you just want to see CivStation move in Civilization VI as fast as possible, 
 2. Run:
 
 ```bash
-python -m civStation.agent.turn_runner \
+uv run civstation run \
   --provider gemini \
   --model gemini-3-flash \
   --turns 100 \
@@ -63,12 +67,18 @@ python -m civStation.agent.turn_runner \
 
 That is the simplest possible path.
 
+If you just want the setup checklist first, run:
+
+```bash
+uv run civstation
+```
+
 If macOS blocks screenshot or control access, grant:
 
 - `Screen Recording`
 - `Accessibility`
 
-to your terminal / Python app, then try again.
+to your terminal, `uv`, or Python app, then try again.
 
 ## 📱 Mobile QR Quick Start
 

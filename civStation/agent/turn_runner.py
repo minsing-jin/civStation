@@ -31,7 +31,7 @@ for _noisy in ("httpx", "httpcore", "urllib3", "asyncio", "websockets"):
 logger = logging.getLogger(__name__)
 
 
-def parse_args() -> configargparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> configargparse.Namespace:
     """ConfigArgParse를 사용하여 YAML과 CLI 인자를 동시에 처리"""
     available = get_available_providers()
     provider_choices = list(available.keys())
@@ -43,7 +43,10 @@ def parse_args() -> configargparse.Namespace:
         # Use YAML parser (YAML 문법 지원)
         config_file_parser_class=configargparse.YAMLConfigFileParser,
         formatter_class=configargparse.RawDescriptionHelpFormatter,
-        epilog="Use python -m civStation.agent.turn_runner --help to see full options.",
+        epilog=(
+            "Recommended entrypoint: `uv run civstation run ...` or `civstation run ...`. "
+            "Legacy module form still works: `python -m civStation.agent.turn_runner --help`."
+        ),
     )
 
     # Override config file path (설정 파일 경로를 직접 지정)
@@ -142,7 +145,7 @@ def parse_args() -> configargparse.Namespace:
         help="Auth token for the relay server (or set RELAY_TOKEN env var)",
     )
 
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def setup_providers(args) -> tuple[object, object]:
@@ -263,10 +266,10 @@ def setup_knowledge(args, vlm_provider):
     return km
 
 
-def main():
+def main(argv: list[str] | None = None):
     # 1. Parse Arguments (YAML + CLI)
     try:
-        args = parse_args()
+        args = parse_args(argv) if argv is not None else parse_args()
     except SystemExit:
         return
 

@@ -50,6 +50,9 @@ plugins:
             Installation: Installation
             Quickstart: Quickstart
             First Live Run: First Live Run
+            Mobile QR Control: Mobile QR Control
+            Why CivStation: Why CivStation
+            Runtime Separation: Runtime Separation
             Mental Model: Architecture Overview
             Layers: Layers
             Execution Loop: Execution Loop
@@ -94,6 +97,9 @@ plugins:
             Installation: 설치
             Quickstart: 빠른 시작
             First Live Run: 첫 실전 실행
+            Mobile QR Control: 모바일 QR 제어
+            Why CivStation: 왜 CivStation인가
+            Runtime Separation: 런타임 분리
             Mental Model: 아키텍처 개요
             Layers: 레이어
             Execution Loop: 실행 루프
@@ -138,6 +144,9 @@ plugins:
             Installation: 安装
             Quickstart: 快速开始
             First Live Run: 第一次实机运行
+            Mobile QR Control: 移动端 QR 控制
+            Why CivStation: 为什么是 CivStation
+            Runtime Separation: 运行时分离
             Mental Model: 架构概览
             Layers: 分层
             Execution Loop: 执行循环
@@ -196,7 +205,10 @@ nav:
       - Installation: getting-started/installation.md
       - Quickstart: getting-started/quickstart.md
       - First Live Run: getting-started/first-live-run.md
+      - Mobile QR Control: guides/mobile-qr-control.md
   - Concepts:
+      - Why CivStation: concepts/why-civstation.md
+      - Runtime Separation: concepts/runtime-separation.md
       - Architecture Overview: concepts/mental-model.md
       - Layers: concepts/layers.md
       - Execution Loop: concepts/execution-loop.md

@@ -82,6 +82,9 @@ documentation = "https://minsing-jin.github.io/civStation/"
 homepage = "https://github.com/minsing-jin/civStation"
 
 [project.scripts]
+civstation = "civStation.cli:app"
+civstation-mcp = "civStation.mcp.server:main"
+civstation-mcp-install = "civStation.mcp.install_client_assets:main"
 civStation = "civStation.cli:app"
 civStation_mcp = "civStation.mcp.server:main"
 civStation_mcp_install = "civStation.mcp.install_client_assets:main"

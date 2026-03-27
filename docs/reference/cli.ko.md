@@ -1,12 +1,26 @@
 # CLI 레퍼런스
 
-메인 런타임 CLI:
+권장 CLI 진입점:
 
 ```bash
-python -m civStation.agent.turn_runner --help
+uv run civstation
+uv run civstation run --help
 ```
 
-parser는 ConfigArgParse 기반이라 CLI 인자와 `config.yaml`을 함께 읽을 수 있습니다.
+설치 후 실행 명령:
+
+```bash
+civstation run --help
+```
+
+fallback 모듈 실행:
+
+```bash
+python -m civStation
+```
+
+루트 CLI는 온보딩, 모바일/운영자 체크리스트, GitHub star 빠른 액션을 먼저 보여줍니다.
+`civstation run ...`은 나머지 플래그를 기존 `turn_runner` parser로 그대로 넘기므로, 여전히 ConfigArgParse가 CLI 인자와 `config.yaml`을 함께 읽습니다.
 
 ## Provider 설정
 
@@ -100,7 +114,7 @@ site별:
 빠른 로컬 실행:
 
 ```bash
-python -m civStation.agent.turn_runner \
+uv run civstation run \
   --provider gemini \
   --turns 50 \
   --status-ui
@@ -109,7 +123,7 @@ python -m civStation.agent.turn_runner \
 제어 중심 실행:
 
 ```bash
-python -m civStation.agent.turn_runner \
+uv run civstation run \
   --router-provider gemini \
   --planner-provider claude \
   --status-ui \

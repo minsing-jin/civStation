@@ -40,13 +40,21 @@
 
     [빠른 시작으로 이동](getting-started/quickstart.md)
 
--   **첫 실전 실행**
+-   **모바일 QR 제어**
 
     ---
 
-    런타임 흐름, 대시보드가 노출하는 것, 로그와 실행 산출물이 어디에 쌓이는지 설명합니다.
+    README의 `civ6_tacticall` 흐름을 따라, 운영자가 게임 화면을 덮지 않고 휴대폰에서 개입하는 방식을 설명합니다.
 
-    [라이브 세션 실행](getting-started/first-live-run.md)
+    [모바일 제어 가이드 열기](guides/mobile-qr-control.md)
+
+-   **왜 CivStation인가**
+
+    ---
+
+    구현 세부사항보다 먼저, 프로젝트가 왜 이런 구조와 철학을 택했는지 설명합니다.
+
+    [철학 읽기](concepts/why-civstation.md)
 
 -   **아키텍처 개요**
 
@@ -94,8 +102,8 @@
 
 | 섹션 | 제공 내용 |
 | --- | --- |
-| `Getting Started` | 설치, 빠른 시작, 첫 실행 |
-| `Concepts` | 아키텍처 개요, 레이어, 실행 루프, HITL, MCP |
+| `Getting Started` | 설치, 빠른 시작, 첫 실행, 모바일 QR 제어 |
+| `Concepts` | 왜 CivStation인가, 런타임 분리, 아키텍처 개요, 레이어, 실행 루프, HITL, MCP |
 | `Guides` | 에이전트 운영, 제어 표면, providers, evaluation |
 | `Reference` | CLI 플래그, `config.yaml`, MCP 도구 목록, 폴더 맵 |
 | `Development` | 기여 흐름, 테스트, 확장 포인트, 릴리스 노트 |
@@ -113,6 +121,6 @@
 ## 추천 읽기 순서
 
 1. [빠른 시작](getting-started/quickstart.md)부터 읽습니다.
-2. [아키텍처 개요](concepts/mental-model.md)와 [레이어](concepts/layers.md)를 읽습니다.
-3. 일상 운영에는 [에이전트 실행](guides/running-the-agent.md)과 [제어와 디스커션](guides/control-and-discussion.md)을 봅니다.
+2. [왜 CivStation인가](concepts/why-civstation.md), [런타임 분리](concepts/runtime-separation.md), [아키텍처 개요](concepts/mental-model.md)를 읽습니다.
+3. 일상 운영에는 [모바일 QR 제어](guides/mobile-qr-control.md), [에이전트 실행](guides/running-the-agent.md), [제어와 디스커션](guides/control-and-discussion.md)을 봅니다.
 4. 통합과 확장에는 [MCP 도구](reference/mcp-tools.md)와 [스택 확장](development/extending-the-stack.md)을 봅니다.

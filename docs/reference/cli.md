@@ -1,12 +1,26 @@
 # CLI Reference
 
-The main runtime CLI is:
+Preferred CLI entrypoints:
 
 ```bash
-python -m civStation.agent.turn_runner --help
+uv run civstation
+uv run civstation run --help
 ```
 
-The parser is built with ConfigArgParse, which means flags can come from both CLI arguments and `config.yaml`.
+Installed command:
+
+```bash
+civstation run --help
+```
+
+Fallback module entrypoint:
+
+```bash
+python -m civStation
+```
+
+The root CLI shows onboarding, the mobile/operator checklist, and a fast GitHub star action.
+`civstation run ...` forwards the remaining flags to the existing `turn_runner` parser, so ConfigArgParse still reads both CLI arguments and `config.yaml`.
 
 ## Provider Configuration
 
@@ -100,7 +114,7 @@ Per site:
 Quick local run:
 
 ```bash
-python -m civStation.agent.turn_runner \
+uv run civstation run \
   --provider gemini \
   --turns 50 \
   --status-ui
@@ -109,7 +123,7 @@ python -m civStation.agent.turn_runner \
 High-control run:
 
 ```bash
-python -m civStation.agent.turn_runner \
+uv run civstation run \
   --router-provider gemini \
   --planner-provider claude \
   --status-ui \

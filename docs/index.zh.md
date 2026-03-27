@@ -40,13 +40,21 @@
 
     [进入快速开始](getting-started/quickstart.md)
 
--   **第一次实机运行**
+-   **移动端 QR 控制**
 
     ---
 
-    说明运行流程、仪表盘暴露的能力，以及日志和运行产物的位置。
+    按 README 中的 `civ6_tacticall` 流程，让操作员在不遮挡游戏画面的情况下通过手机介入。
 
-    [启动实时会话](getting-started/first-live-run.md)
+    [打开移动控制指南](guides/mobile-qr-control.md)
+
+-   **为什么是 CivStation**
+
+    ---
+
+    先理解项目为什么要采用这种哲学与结构，再进入实现细节。
+
+    [阅读哲学部分](concepts/why-civstation.md)
 
 -   **架构概览**
 
@@ -94,8 +102,8 @@
 
 | 部分 | 你会得到什么 |
 | --- | --- |
-| `Getting Started` | 安装、快速开始、第一次运行 |
-| `Concepts` | 架构概览、分层、执行循环、HITL、MCP |
+| `Getting Started` | 安装、快速开始、第一次运行、移动端 QR 控制 |
+| `Concepts` | 为什么是 CivStation、运行时分离、架构概览、分层、执行循环、HITL、MCP |
 | `Guides` | 运行代理、控制界面、providers、evaluation |
 | `Reference` | CLI 参数、`config.yaml`、MCP 工具列表、目录结构 |
 | `Development` | 贡献流程、测试、扩展点、发布说明 |
@@ -113,6 +121,6 @@
 ## 推荐阅读顺序
 
 1. 从 [快速开始](getting-started/quickstart.md) 开始。
-2. 阅读 [架构概览](concepts/mental-model.md) 和 [分层](concepts/layers.md)。
-3. 日常运行请看 [运行代理](guides/running-the-agent.md) 与 [控制与讨论](guides/control-and-discussion.md)。
+2. 阅读 [为什么是 CivStation](concepts/why-civstation.md)、[运行时分离](concepts/runtime-separation.md)、[架构概览](concepts/mental-model.md)。
+3. 日常运行请看 [移动端 QR 控制](guides/mobile-qr-control.md)、[运行代理](guides/running-the-agent.md) 与 [控制与讨论](guides/control-and-discussion.md)。
 4. 做集成和扩展时请看 [MCP 工具](reference/mcp-tools.md) 与 [扩展栈](development/extending-the-stack.md)。
