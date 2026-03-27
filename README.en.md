@@ -25,8 +25,10 @@ Current package and module names are still:
 
 ## 📚 Index
 
-- [🚀 Quick Start](#-quick-start)
-- [🎮 Playing Civ6 With `civ6_tacticall` Mobile QR Control](#-playing-civ6-with-civ6_tacticall-mobile-qr-control)
+- [🚀 30-Second Quick Start](#-30-second-quick-start)
+- [📱 Mobile QR Quick Start](#-mobile-qr-quick-start)
+- [🧠 Why HitL Matters](#-why-hitl-matters)
+- [🎮 Detailed Mobile QR Flow](#-detailed-mobile-qr-flow)
 - [✨ Why CivStation?](#-why-civstation)
 - [🧵 Runtime Separation](#-runtime-separation)
 - [🏗️ Architecture](#-architecture)
@@ -35,62 +37,44 @@ Current package and module names are still:
 - [📖 Documentation](#-documentation)
 - [🛠️ Development](#-development)
 
-## 🚀 Quick Start
+## 🚀 30-Second Quick Start
 
-This is the fastest path to letting CivStation actually play Civilization VI through `HitL`.
+If you just want to see CivStation move in Civilization VI as fast as possible, do this:
 
 > [!NOTE]
 > Recommended starting model: `gemini-3-flash`.
 > If you want one default that is fast, practical, and easy to operate for CivStation, start with `gemini-3-flash` before tuning anything else.
 
-### 1. Prepare the host machine
-
-- Run on the same machine that has Civilization VI open.
-- Grant your terminal / Python process `Screen Recording` and `Accessibility` permissions.
-- Keep Civilization VI visible and unobstructed while the agent is running.
-- Recommended setup: Civ6 on the main screen, controller on your phone or another device.
-
-Why this matters:
-
-- CivStation captures the game screen and clicks through PyAutoGUI.
-- On macOS, when the game is in windowed or borderless mode, `capture_screen_pil()` automatically detects the Civ6 window and crops to it.
-
-### 2. Prepare the game state
-
-- Launch Civilization VI.
-- Start a new game or load an existing save.
-- Wait until the game is on a stable, playable screen.
-- If you want the agent to play from the beginning, stop on the first interactive map screen before giving the start signal.
-- If you want the agent to continue an existing run, load the save and stop on the exact screen you want it to reason from.
-
-### 3. Start the CivStation agent server in wait mode
+1. Open Civilization VI and stop on a playable map screen.
+2. Run:
 
 ```bash
 python -m civStation.agent.turn_runner \
   --provider gemini \
   --model gemini-3-flash \
   --turns 100 \
-  --strategy "Focus on science victory" \
   --status-ui \
   --wait-for-start \
   --status-port 8765
 ```
 
-Important:
+3. Open `http://127.0.0.1:8765`
+4. Press `Start`
 
-- with `--wait-for-start`, the agent does **not** begin playing immediately
-- it starts the dashboard/API/WebSocket server first
-- actual gameplay begins only after a `start` signal arrives from `HitL`
+That is the simplest possible path.
 
-Open the built-in dashboard:
+If macOS blocks screenshot or control access, grant:
 
-```text
-http://127.0.0.1:8765
-```
+- `Screen Recording`
+- `Accessibility`
 
-### 4. Start the `civ6_tacticall` mobile controller
+to your terminal / Python app, then try again.
 
-The mobile QR controller lives in the separate [`minsing-jin/civ6_tacticall`](https://github.com/minsing-jin/civ6_tacticall.git) repo.
+## 📱 Mobile QR Quick Start
+
+If you want to control the run from your phone:
+
+1. Clone and start the mobile controller:
 
 ```bash
 git clone https://github.com/minsing-jin/civ6_tacticall.git
@@ -99,97 +83,61 @@ npm install
 npm start
 ```
 
-This starts the QR-ready mobile controller UI and relay:
-
-```text
-http://127.0.0.1:8787
-ws://127.0.0.1:8787/ws
-```
-
-### 5. Configure the bridge between `civ6_tacticall` and CivStation
+2. Create the bridge config:
 
 ```bash
-cd civ6_tacticall
 cp host-config.example.json host-config.json
 ```
 
-Use a config like this:
+3. Put CivStation's local server into the config:
 
 ```json
 {
   "relayUrl": "ws://127.0.0.1:8787/ws",
-  "controllerBaseUrl": "auto",
   "localApiBaseUrl": "http://127.0.0.1:8765",
   "localAgentUrl": "ws://127.0.0.1:8765/ws",
-  "discussionUserId": "web_user",
-  "discussionMode": "in_game",
-  "discussionLanguage": "en",
   "roomId": "civ6-room",
   "hostKey": "change-this-host-key"
 }
 ```
 
-Important:
-
-- `localAgentUrl` must point to CivStation's WebSocket server
-- the default template may still point to `ws://localhost:8000/ws`
-- for CivStation it should be `ws://127.0.0.1:8765/ws`
-
-### 6. Start the bridge
+4. Start the bridge:
 
 ```bash
-cd civ6_tacticall
 npm run host
 ```
 
-What the bridge does:
+5. Scan the QR code with your phone
+6. Press `Start` on your phone
 
-1. connects to the `civ6_tacticall` relay as the host
-2. connects to the local CivStation WebSocket server
-3. prints a QR code for controller pairing
+That `Start` signal is what actually begins gameplay.
 
-### 7. Pair the controller
+## 🧠 Why HitL Matters
 
-- Scan the QR code with your phone
-- or open the controller in a browser and pair manually
-- once paired, the controller can send commands and receive live status
+> [!IMPORTANT]
+> CivStation is **not** a fully autonomous agent today.
+> If you do not use `HitL`, the agent can get noticeably dumber in real play.
 
-### 8. Start gameplay from HitL
+Why:
 
-This is the step people miss:
+- screen state can be ambiguous
+- long-term intent can drift
+- unexpected Civ6 UI states still happen
+- a human is still the fastest recovery mechanism
 
-- CivStation is still idle until `HitL start` is sent
-- pressing `Start` in the controller sends a `control:start` message
-- that message reaches CivStation through the bridge and triggers `AgentGate.start()`
-- only then does the agent begin actually playing Civilization VI
+In practice, HitL makes the agent:
 
-Equivalent ways to start the run:
+- less brittle
+- easier to recover
+- more aligned with the goal you actually want
 
-- press `Start` in the `civ6_tacticall` controller
-- press `Start` in the local CivStation dashboard
-- call `POST /api/agent/start`
-- send WebSocket `{ "type": "control", "action": "start" }`
+The easiest beginner setup is:
 
-### 9. Observe and intervene while it plays
+- local dashboard first
+- mobile QR second
+- full MCP automation later
 
-While the run is active, you can:
-
-- `pause`
-- `resume`
-- `stop`
-- send a high-level command
-- ask a discussion question
-- change the strategy mid-run
-
-### 10. Stop safely
-
-When you want the run to end:
-
-- send `stop` from the controller
-- or use `POST /api/agent/stop`
-- or stop from the local dashboard
-
-## 🎮 Playing Civ6 With `civ6_tacticall` Mobile QR Control
+## 🎮 Detailed Mobile QR Flow
 
 ### Relationship
 

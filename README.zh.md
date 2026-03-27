@@ -25,7 +25,9 @@
 
 ## 📚 Index
 
-- [🚀 Quick Start](#-quick-start)
+- [🚀 30 秒 Quick Start](#-30-秒-quick-start)
+- [📱 手机二维码 Quick Start](#-手机二维码-quick-start)
+- [🧠 为什么没有 HitL 会变笨](#-为什么没有-hitl-会变笨)
 - [🎮 通过 `civ6_tacticall` 手机二维码控制器玩 Civ6](#-通过-civ6_tacticall-手机二维码控制器玩-civ6)
 - [✨ Why CivStation?](#-why-civstation)
 - [🧵 Runtime Separation](#-runtime-separation)
@@ -35,62 +37,44 @@
 - [📖 Documentation](#-documentation)
 - [🛠️ Development](#-development)
 
-## 🚀 Quick Start
+## 🚀 30 秒 Quick Start
 
-这是让 CivStation 通过 `HitL` 真正开始玩 Civilization VI 的最快路径。
+如果你只想尽快看到 CivStation 在 Civilization VI 里开始动起来，可以这样做：
 
 > [!NOTE]
 > 推荐起始模型：`gemini-3-flash`。
 > 如果你想先用一个默认模型把 CivStation 跑起来，并兼顾速度与实用性，建议先从 `gemini-3-flash` 开始。
 
-### 1. 准备宿主机器
-
-- 在 **运行 Civilization VI 的同一台机器** 上运行代理。
-- 给终端或 Python 进程授予 `Screen Recording` 和 `Accessibility` 权限。
-- 代理运行期间，Civilization VI 必须始终可见且不要被遮挡。
-- 推荐布局：Civ6 在主屏幕，控制器放在手机或第二台设备上。
-
-为什么重要：
-
-- CivStation 会捕获游戏画面，并通过 PyAutoGUI 执行动作。
-- 在 macOS 上，如果游戏以 windowed 或 borderless 模式运行，`capture_screen_pil()` 会自动识别 Civ6 窗口并裁剪到游戏区域。
-
-### 2. 准备游戏状态
-
-- 启动 Civilization VI。
-- 新开一局或者加载现有存档。
-- 等游戏进入稳定、可操作的界面。
-- 如果想让代理从开局开始玩，就停在第一张可交互地图画面再发送开始信号。
-- 如果想从中途继续，就加载存档并停在你希望代理开始推理的那个画面。
-
-### 3. 以 wait mode 启动 CivStation 代理服务器
+1. 打开 Civilization VI，并停在可以实际操作的地图画面。
+2. 运行：
 
 ```bash
 python -m civStation.agent.turn_runner \
   --provider gemini \
   --model gemini-3-flash \
   --turns 100 \
-  --strategy "Focus on science victory" \
   --status-ui \
   --wait-for-start \
   --status-port 8765
 ```
 
-重要：
+3. 打开 `http://127.0.0.1:8765`
+4. 点击 `Start`
 
-- 开启 `--wait-for-start` 后，代理 **不会立即开始游戏**
-- 它会先启动 dashboard / API / WebSocket 服务
-- 只有收到 `HitL start` 信号后，才会真正开始操作 Civilization VI
+这就是最简单的开始方式。
 
-内置仪表盘：
+如果 macOS 拦住了截图或控制权限，只需要先打开：
 
-```text
-http://127.0.0.1:8765
-```
+- `Screen Recording`
+- `Accessibility`
 
-### 4. 启动 `civ6_tacticall` 手机控制器
+然后再试一次。
 
-手机二维码控制器位于独立仓库 [`minsing-jin/civ6_tacticall`](https://github.com/minsing-jin/civ6_tacticall.git)。
+## 📱 手机二维码 Quick Start
+
+如果你想用手机来控制：
+
+1. 启动移动端控制器：
 
 ```bash
 git clone https://github.com/minsing-jin/civ6_tacticall.git
@@ -99,95 +83,59 @@ npm install
 npm start
 ```
 
-这会启动二维码移动控制器 UI 和 relay：
-
-```text
-http://127.0.0.1:8787
-ws://127.0.0.1:8787/ws
-```
-
-### 5. 配置 `civ6_tacticall` 与 CivStation 之间的 bridge
+2. 创建 bridge 配置：
 
 ```bash
-cd civ6_tacticall
 cp host-config.example.json host-config.json
 ```
 
-配置示例：
+3. 把 CivStation 的本地服务地址写进去：
 
 ```json
 {
   "relayUrl": "ws://127.0.0.1:8787/ws",
-  "controllerBaseUrl": "auto",
   "localApiBaseUrl": "http://127.0.0.1:8765",
   "localAgentUrl": "ws://127.0.0.1:8765/ws",
-  "discussionUserId": "web_user",
-  "discussionMode": "in_game",
-  "discussionLanguage": "zh",
   "roomId": "civ6-room",
   "hostKey": "change-this-host-key"
 }
 ```
 
-重要：
-
-- `localAgentUrl` 必须指向 CivStation 的 WebSocket 服务器
-- 模板默认值可能仍然是 `ws://localhost:8000/ws`
-- 对 CivStation 应该改成 `ws://127.0.0.1:8765/ws`
-
-### 6. 启动 bridge
+4. 启动 bridge：
 
 ```bash
-cd civ6_tacticall
 npm run host
 ```
 
-bridge 会做这些事：
+5. 用手机扫描二维码
+6. 在手机上点击 `Start`
 
-1. 以 host 身份连接到 `civ6_tacticall` relay
-2. 连接本地 CivStation WebSocket 服务器
-3. 打印控制器配对二维码
+这个 `Start` 信号才是真正开始游戏的信号。
 
-### 7. 配对控制器
+## 🧠 为什么没有 HitL 会变笨
 
-- 用手机扫描二维码
-- 或在浏览器中手动打开控制器并完成配对
-- 配对成功后，控制器就可以发送命令并接收实时状态
+> [!IMPORTANT]
+> 现在的 CivStation **还不是** 完全自治代理。
+> 如果你不用 `HitL`，它在真实游戏中的判断会明显变笨。
 
-### 8. 从 HitL 真正开始游戏
+原因：
 
-很多人会漏掉这一步：
+- 屏幕状态会有歧义
+- 长期目标容易漂移
+- Civ6 UI 仍然会进入一些预期外状态
+- 人类仍然是最快的恢复机制
 
-- 此时 CivStation 仍然可能处于 idle 状态
-- 在控制器里点击 `Start` 会发送 `control:start`
-- 这个消息通过 bridge 到达 CivStation，并触发 `AgentGate.start()`
-- **只有这时** 代理才会真正开始玩 Civilization VI
+在实战里，HitL 会让代理：
 
-等价的启动方式：
+- 更不容易卡住
+- 更容易恢复
+- 更贴近你真正想要的目标
 
-- 在 `civ6_tacticall` 控制器中点击 `Start`
-- 在本地 CivStation dashboard 中点击 `Start`
-- 调用 `POST /api/agent/start`
-- 发送 WebSocket `{ "type": "control", "action": "start" }`
+对初学者最推荐的顺序是：
 
-### 9. 运行中介入
-
-运行中你可以：
-
-- `pause`
-- `resume`
-- `stop`
-- 发送高层命令
-- 发起 discussion 问题
-- 中途修改策略
-
-### 10. 安全结束
-
-想结束这次运行时：
-
-- 从控制器发送 `stop`
-- 或调用 `POST /api/agent/stop`
-- 或在本地 dashboard 中停止
+- 先用本地 dashboard
+- 再用手机二维码
+- 最后再考虑 MCP 自动化
 
 ## 🎮 通过 `civ6_tacticall` 手机二维码控制器玩 Civ6
 

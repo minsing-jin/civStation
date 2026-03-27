@@ -25,7 +25,9 @@
 
 ## 📚 Index
 
-- [🚀 Quick Start](#-quick-start)
+- [🚀 30초 Quick Start](#-30초-quick-start)
+- [📱 모바일 QR Quick Start](#-모바일-qr-quick-start)
+- [🧠 왜 HitL 없으면 멍청해지는가](#-왜-hitl-없으면-멍청해지는가)
 - [🎮 `civ6_tacticall` 모바일 QR 컨트롤러로 Civ6 플레이하기](#-civ6_tacticall-모바일-qr-컨트롤러로-civ6-플레이하기)
 - [✨ Why CivStation?](#-why-civstation)
 - [🧵 Runtime Separation](#-runtime-separation)
@@ -35,62 +37,42 @@
 - [📖 Documentation](#-documentation)
 - [🛠️ Development](#-development)
 
-## 🚀 Quick Start
+## 🚀 30초 Quick Start
 
-이 섹션은 CivStation이 실제로 Civilization VI를 플레이하기 시작하도록 만드는 가장 빠른 절차입니다.
+정말 빨리 CivStation이 문명을 움직이는 것만 보고 싶다면 이렇게 하면 됩니다:
 
 > [!NOTE]
 > 권장 시작 모델은 `gemini-3-flash`입니다.
 > CivStation에서 하나의 기본값으로 시작해야 한다면, 운영 속도와 실용성 측면에서 먼저 `gemini-3-flash`를 쓰는 것을 권장합니다.
 
-### 1. 호스트 머신 준비
-
-- Civilization VI가 실행되는 **같은 머신**에서 에이전트를 돌립니다.
-- 터미널 또는 Python 프로세스에 `Screen Recording`과 `Accessibility` 권한을 부여합니다.
-- 에이전트가 실행되는 동안 Civilization VI 창은 계속 보이고 가려지지 않아야 합니다.
-- 권장 구성: Civ6는 메인 화면, 컨트롤러는 휴대폰이나 보조 기기에서 조작
-
-왜 필요한가:
-
-- CivStation은 게임 화면을 캡처하고 PyAutoGUI로 클릭을 실행합니다.
-- macOS에서는 게임이 windowed/borderless 모드일 때 `capture_screen_pil()`이 Civ6 창을 자동 탐지하고 게임 영역만 크롭합니다.
-
-### 2. 게임 상태 준비
-
-- Civilization VI를 실행합니다.
-- 새 게임을 시작하거나 기존 저장 파일을 불러옵니다.
-- 게임이 실제로 플레이 가능한 안정된 화면에 도달할 때까지 기다립니다.
-- 턴 1부터 맡기고 싶으면 첫 지도 화면에서 멈춘 뒤 시작 신호를 보냅니다.
-- 중간 저장부터 이어서 맡기고 싶으면, 에이전트가 해석을 시작하길 원하는 정확한 화면에서 멈춥니다.
-
-### 3. CivStation 에이전트 서버를 wait mode로 실행
+1. Civilization VI를 켜고 실제 플레이 가능한 지도 화면에서 멈춥니다.
+2. 아래 명령을 실행합니다:
 
 ```bash
 python -m civStation.agent.turn_runner \
   --provider gemini \
   --model gemini-3-flash \
   --turns 100 \
-  --strategy "Focus on science victory" \
   --status-ui \
   --wait-for-start \
   --status-port 8765
 ```
 
-중요:
+3. `http://127.0.0.1:8765` 를 엽니다.
+4. `Start` 를 누릅니다.
 
-- `--wait-for-start`를 켜면 에이전트는 **즉시 플레이를 시작하지 않습니다**
-- 먼저 dashboard / API / WebSocket 서버만 띄웁니다
-- 실제 플레이는 `HitL start` 신호가 도착한 뒤에만 시작됩니다
+이게 가장 단순한 시작 경로입니다.
 
-내장 대시보드:
+만약 macOS에서 막히면 아래 권한만 먼저 켜면 됩니다:
 
-```text
-http://127.0.0.1:8765
-```
+- `Screen Recording`
+- `Accessibility`
 
-### 4. `civ6_tacticall` 모바일 컨트롤러 실행
+## 📱 모바일 QR Quick Start
 
-모바일 QR 컨트롤러는 별도 저장소 [`minsing-jin/civ6_tacticall`](https://github.com/minsing-jin/civ6_tacticall.git)에 있습니다.
+휴대폰으로 제어하고 싶다면:
+
+1. 모바일 컨트롤러를 실행합니다:
 
 ```bash
 git clone https://github.com/minsing-jin/civ6_tacticall.git
@@ -99,95 +81,59 @@ npm install
 npm start
 ```
 
-이렇게 하면 QR 기반 모바일 컨트롤러 UI와 relay가 실행됩니다:
-
-```text
-http://127.0.0.1:8787
-ws://127.0.0.1:8787/ws
-```
-
-### 5. `civ6_tacticall`과 CivStation 사이 bridge 설정
+2. bridge 설정 파일을 만듭니다:
 
 ```bash
-cd civ6_tacticall
 cp host-config.example.json host-config.json
 ```
 
-예시 설정:
+3. CivStation 로컬 서버 주소를 넣습니다:
 
 ```json
 {
   "relayUrl": "ws://127.0.0.1:8787/ws",
-  "controllerBaseUrl": "auto",
   "localApiBaseUrl": "http://127.0.0.1:8765",
   "localAgentUrl": "ws://127.0.0.1:8765/ws",
-  "discussionUserId": "web_user",
-  "discussionMode": "in_game",
-  "discussionLanguage": "ko",
   "roomId": "civ6-room",
   "hostKey": "change-this-host-key"
 }
 ```
 
-중요:
-
-- `localAgentUrl`은 CivStation의 WebSocket 서버를 가리켜야 합니다
-- 템플릿 기본값은 아직 `ws://localhost:8000/ws`일 수 있습니다
-- CivStation에는 `ws://127.0.0.1:8765/ws`를 써야 합니다
-
-### 6. bridge 실행
+4. bridge를 실행합니다:
 
 ```bash
-cd civ6_tacticall
 npm run host
 ```
 
-bridge가 하는 일:
+5. 휴대폰으로 QR을 스캔합니다.
+6. 휴대폰에서 `Start` 를 누릅니다.
 
-1. `civ6_tacticall` relay에 host로 접속
-2. 로컬 CivStation WebSocket 서버에 접속
-3. 컨트롤러 pairing용 QR 코드를 출력
+이 `Start` 신호가 실제 플레이를 시작시키는 신호입니다.
 
-### 7. 컨트롤러 페어링
+## 🧠 왜 HitL 없으면 멍청해지는가
 
-- 휴대폰으로 QR 코드를 스캔하거나
-- 브라우저에서 직접 컨트롤러를 열어 수동 pairing합니다
-- pairing이 끝나면 컨트롤러가 실시간 상태를 받고 명령을 보낼 수 있습니다
+> [!IMPORTANT]
+> 지금의 CivStation은 **완전 자율 에이전트가 아닙니다**.
+> `HitL` 없이 돌리면 실제 플레이에서 판단이 눈에 띄게 멍청해질 수 있습니다.
 
-### 8. HitL에서 실제 플레이 시작
+이유:
 
-많이 놓치는 부분이 바로 이 단계입니다.
+- 화면 상태가 애매한 경우가 있음
+- 장기 전략이 쉽게 흔들림
+- Civ6 UI가 예상 밖 상태로 들어갈 수 있음
+- 사람이 개입하는 것이 아직 가장 빠른 복구 수단임
 
-- 이 시점에서도 CivStation은 아직 idle 상태일 수 있습니다
-- 컨트롤러에서 `Start`를 누르면 `control:start` 메시지가 전송됩니다
-- 이 메시지가 bridge를 거쳐 CivStation으로 들어가고 `AgentGate.start()`를 호출합니다
-- **그때부터** 에이전트가 실제로 Civilization VI를 플레이하기 시작합니다
+실전에서는 HitL이 있어야:
 
-동일한 시작 방법:
+- 덜 깨지고
+- 더 빨리 복구되고
+- 내가 원하는 목표에 더 잘 맞습니다
 
-- `civ6_tacticall` 컨트롤러에서 `Start` 누르기
-- 로컬 CivStation dashboard에서 `Start` 누르기
-- `POST /api/agent/start` 호출
-- WebSocket `{ "type": "control", "action": "start" }` 전송
+초보자 기준 추천 순서는:
 
-### 9. 플레이 중 개입
-
-실행 중에는 다음이 가능합니다:
-
-- `pause`
-- `resume`
-- `stop`
-- high-level command 전송
-- discussion 질문
-- 전략 변경
-
-### 10. 안전하게 종료
-
-종료하고 싶으면:
-
-- 컨트롤러에서 `stop`
-- 또는 `POST /api/agent/stop`
-- 또는 로컬 dashboard에서 `stop`
+- 먼저 로컬 dashboard
+- 그 다음 모바일 QR
+- 마지막에 MCP 자동화
 
 ## 🎮 `civ6_tacticall` 모바일 QR 컨트롤러로 Civ6 플레이하기
 
