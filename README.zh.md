@@ -49,7 +49,7 @@
 2. 运行：
 
 ```bash
-python -m civStation.agent.turn_runner \
+uv run civstation run \
   --provider gemini \
   --model gemini-3-flash \
   --turns 100 \
@@ -302,7 +302,7 @@ ws://127.0.0.1:8765/ws
 运行方式：
 
 ```bash
-python -m civStation.mcp.server
+uv run civstation mcp
 ```
 
 文档：
@@ -344,7 +344,7 @@ MCP 运行时是 adapter 驱动的。
 3. 把可复用工作流写进 `SKILL.md`
 4. 把脚本和参考资料放在 skill 目录旁边
 
-## Documentation
+## 📖 Documentation
 
 详细层级文档：
 
@@ -358,6 +358,13 @@ MCP 运行时是 adapter 驱动的。
 其他语言：
 
 - [English (default)](README.md)
+
+Installer:
+
+```bash
+uv run civstation mcp-install --client codex --write
+uv run civstation mcp-install --client claude-code --write
+```
 - [한국어](README.ko.md)
 
 ## Development

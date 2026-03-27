@@ -14,6 +14,8 @@ def test_root_cli_without_args_shows_onboarding(capsys: pytest.CaptureFixture[st
     captured = capsys.readouterr()
 
     assert "CivStation CLI" in captured.out
+    assert "Run Setup" in captured.out
+    assert "Support CivStation" in captured.out
     assert "gh repo star minsing-jin/civStation" in captured.out
     assert "Keep Civilization VI visible on your main monitor" in captured.out
     assert "Use your phone or a secondary device" in captured.out
@@ -25,6 +27,7 @@ def test_star_command_shows_fast_actions(capsys: pytest.CaptureFixture[str]) -> 
 
     captured = capsys.readouterr()
 
+    assert "Support CivStation" in captured.out
     assert "If CivStation helps you, a GitHub star really helps." in captured.out
     assert "gh repo star minsing-jin/civStation" in captured.out
     assert "https://github.com/minsing-jin/civStation" in captured.out
@@ -42,7 +45,7 @@ def test_run_command_prints_preflight_and_forwards_args(
 
     captured = capsys.readouterr()
 
-    assert "Preflight Checklist" in captured.out
+    assert "Run Setup" in captured.out
     assert "main monitor" in captured.out
     assert forwarded == [["--provider", "gemini", "--turns", "5"]]
 
@@ -59,7 +62,7 @@ def test_root_cli_direct_args_alias_run(
 
     captured = capsys.readouterr()
 
-    assert "Preflight Checklist" in captured.out
+    assert "Run Setup" in captured.out
     assert forwarded == [["--provider", "gemini", "--turns", "3"]]
 
 
@@ -76,7 +79,7 @@ def test_run_guide_only_does_not_start_runner(
 
     captured = capsys.readouterr()
 
-    assert "Preflight Checklist" in captured.out
+    assert "Run Setup" in captured.out
     assert "mobile controller" in captured.out.lower()
 
 
@@ -91,3 +94,19 @@ def test_python_module_entrypoint_shows_guide() -> None:
     assert result.returncode == 0, result.stderr
     assert "CivStation CLI" in result.stdout
     assert "uv run civstation run" in result.stdout
+
+
+def test_mcp_install_command_forwards_args(monkeypatch: pytest.MonkeyPatch) -> None:
+    forwarded: list[list[str] | None] = []
+
+    monkeypatch.setattr(cli, "_run_mcp_install", lambda argv=None: forwarded.append(argv))
+
+    assert cli.main(["mcp-install", "--client", "codex", "--write"]) == 0
+    assert forwarded == [["--client", "codex", "--write"]]
+
+
+def test_help_mentions_mcp_install(capsys: pytest.CaptureFixture[str]) -> None:
+    assert cli.main(["--help"]) == 0
+
+    captured = capsys.readouterr()
+    assert "civstation mcp-install" in captured.out

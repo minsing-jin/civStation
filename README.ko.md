@@ -150,13 +150,6 @@ civstation
 civstation run --provider gemini --model gemini-3-flash --turns 100 --status-ui --wait-for-start
 ```
 
-기존 Python module 실행도 남겨두긴 했지만, 권장은 아닙니다:
-
-```bash
-python -m civStation
-python -m civStation.agent.turn_runner --provider gemini --status-ui
-```
-
 ## 📱 모바일 QR Quick Start
 
 휴대폰으로 제어하고 싶다면:
@@ -389,7 +382,7 @@ ws://127.0.0.1:8765/ws
 실행:
 
 ```bash
-python -m civStation.mcp.server
+uv run civstation mcp
 ```
 
 문서:

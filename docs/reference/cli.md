@@ -5,18 +5,14 @@ Preferred CLI entrypoints:
 ```bash
 uv run civstation
 uv run civstation run --help
+uv run civstation mcp --help
+uv run civstation mcp-install --help
 ```
 
 Installed command:
 
 ```bash
 civstation run --help
-```
-
-Fallback module entrypoint:
-
-```bash
-python -m civStation
 ```
 
 The root CLI shows onboarding, the mobile/operator checklist, and a fast GitHub star action.
@@ -108,6 +104,15 @@ Per site:
 | --- | --- |
 | `--relay-url` | WebSocket URL of the relay server |
 | `--relay-token` | relay auth token |
+
+## MCP Template Installer
+
+Use the CLI wrapper instead of `python -m ...`:
+
+```bash
+uv run civstation mcp-install --client codex --write
+uv run civstation mcp-install --client claude-code --write
+```
 
 ## Typical Commands
 

@@ -152,13 +152,6 @@ civstation
 civstation run --provider gemini --model gemini-3-flash --turns 100 --status-ui --wait-for-start
 ```
 
-Legacy fallback is still available, but not preferred:
-
-```bash
-python -m civStation
-python -m civStation.agent.turn_runner --provider gemini --status-ui
-```
-
 ## 📱 Mobile QR Quick Start
 
 If you want to control the run from your phone:
@@ -391,7 +384,7 @@ Tool groups:
 Run it with:
 
 ```bash
-python -m civStation.mcp.server
+uv run civstation mcp
 ```
 
 or install the console script and run:
@@ -403,7 +396,7 @@ civStation_mcp
 For remote or hosted MCP clients:
 
 ```bash
-python -m civStation.mcp.server \
+uv run civstation mcp \
   --transport streamable-http \
   --host 127.0.0.1 \
   --port 8000 \
@@ -453,8 +446,8 @@ Templates:
 Installer:
 
 ```bash
-python -m civStation.mcp.install_client_assets --client codex --write
-python -m civStation.mcp.install_client_assets --client claude-code --write
+uv run civstation mcp-install --client codex --write
+uv run civstation mcp-install --client claude-code --write
 ```
 
 Setup resources exposed by MCP:

@@ -152,13 +152,6 @@ civstation
 civstation run --provider gemini --model gemini-3-flash --turns 100 --status-ui --wait-for-start
 ```
 
-Legacy fallback is still available, but not preferred:
-
-```bash
-python -m civStation
-python -m civStation.agent.turn_runner --provider gemini --status-ui
-```
-
 ## 📱 Mobile QR Quick Start
 
 If you want to control the run from your phone:
@@ -391,7 +384,7 @@ Tool groups:
 Run it with:
 
 ```bash
-python -m civStation.mcp.server
+uv run civstation mcp
 ```
 
 Docs:

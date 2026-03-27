@@ -4,88 +4,161 @@ import argparse
 import sys
 from textwrap import dedent
 
+try:
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.table import Table
+except Exception:  # pragma: no cover - fallback when rich is unavailable
+    Console = None
+    Panel = None
+    Table = None
+
 REPO_SLUG = "minsing-jin/civStation"
 REPO_URL = f"https://github.com/{REPO_SLUG}"
 
 
-def _print(text: str) -> None:
+def _console() -> Console | None:
+    if Console is None:  # pragma: no cover - exercised via plain fallback
+        return None
+    return Console(highlight=False, soft_wrap=True)
+
+
+def _plain(text: str) -> None:
     print(dedent(text).strip())
 
 
 def _print_star_section() -> None:
-    _print(
-        f"""
-        If CivStation helps you, a GitHub star really helps.
+    console = _console()
+    if console is None:
+        _plain(
+            f"""
+            Support CivStation
 
-        Fastest CLI option:
-          gh repo star {REPO_SLUG}
+            If CivStation helps you, a GitHub star really helps.
 
-        Browser fallback:
-          {REPO_URL}
-        """
-    )
+            Fastest CLI option:
+              gh repo star {REPO_SLUG}
+
+            Browser fallback:
+              {REPO_URL}
+            """
+        )
+        return
+
+    table = Table.grid(padding=(0, 1))
+    table.add_column(style="bold cyan", no_wrap=True)
+    table.add_column()
+    table.add_row("Thanks", "If CivStation helps you, a GitHub star really helps.")
+    table.add_row("CLI", f"gh repo star {REPO_SLUG}")
+    table.add_row("Browser", REPO_URL)
+
+    console.print(Panel(table, title="Support CivStation", border_style="yellow"))
 
 
 def _print_preflight_checklist() -> None:
-    _print(
-        """
-        Preflight Checklist
+    console = _console()
+    if console is None:
+        _plain(
+            """
+            Run Setup
 
-        1. Keep Civilization VI visible on your main monitor.
-        2. Click back into the actual Civ6 game so the captured screen is the gameplay UI, not another app.
-        3. Do not cover the game window with the local dashboard or terminal.
-        4. Use your phone or a secondary device for the controller when possible.
-        5. On macOS, grant Screen Recording and Accessibility to your terminal or Python app.
-        6. Prefer windowed or borderless mode and keep the game resolution stable during the run.
-        7. If you use the mobile controller, start the relay host, scan the QR code, then press Start from the phone.
-        8. For live gameplay, prefer the host machine's local uv/venv environment. Docker is not recommended.
+            1. Keep Civilization VI visible on your main monitor.
+            2. Click back into the actual Civ6 game so the captured screen is the gameplay UI, not another app.
+            3. Do not cover the game window with the local dashboard or terminal.
+            4. Use your phone or a secondary device for the controller when possible.
+            5. On macOS, grant Screen Recording and Accessibility to your terminal or Python app.
+            6. Prefer windowed or borderless mode and keep the game resolution stable during the run.
+            7. If you use the mobile controller, start the relay host,
+               scan the QR code, then press Start from the phone.
+            8. For live gameplay, prefer the host machine's local uv/venv environment. Docker is not recommended.
 
-        Recommended quick start:
-          uv run civstation run --provider gemini --model gemini-3-flash --turns 100 --status-ui --wait-for-start
-        """
+            Live Run
+              uv run civstation run --provider gemini --model gemini-3-flash --turns 100 --status-ui --wait-for-start
+            """
+        )
+        return
+
+    checklist = Table.grid(padding=(0, 1))
+    checklist.add_column(style="bold cyan", no_wrap=True)
+    checklist.add_column()
+    checklist.add_row("1.", "Keep Civilization VI visible on your main monitor.")
+    checklist.add_row("2.", "Click back into the actual Civ6 game so the captured screen is the gameplay UI.")
+    checklist.add_row("3.", "Do not cover the game window with the local dashboard or terminal.")
+    checklist.add_row("4.", "Use your phone or a secondary device for the controller when possible.")
+    checklist.add_row("5.", "Grant Screen Recording and Accessibility to your terminal or Python app on macOS.")
+    checklist.add_row("6.", "Prefer windowed or borderless mode and keep the game resolution stable.")
+    checklist.add_row("7.", "For mobile controller flow, start the relay host, scan the QR code, then press Start.")
+    checklist.add_row("8.", "Prefer the host machine's local uv/venv environment. Docker is not recommended.")
+
+    console.print(Panel(checklist, title="Run Setup", border_style="cyan"))
+    console.print(
+        Panel(
+            "uv run civstation run --provider gemini --model gemini-3-flash --turns 100 --status-ui --wait-for-start",
+            title="Live Run",
+            border_style="green",
+        )
     )
 
 
 def _print_onboarding() -> None:
-    _print(
-        f"""
-        CivStation CLI
+    console = _console()
+    if console is None:
+        _plain(
+            f"""
+            CivStation CLI
 
-        Better than `python -m ...`:
-          uv run civstation
-          uv run civstation run --provider gemini --model gemini-3-flash --turns 100 --status-ui --wait-for-start
+            Better than `python -m ...`:
+              uv run civstation
+              uv run civstation run --provider gemini --model gemini-3-flash --turns 100 --status-ui --wait-for-start
 
-        Installed command:
-          civstation run --provider gemini --model gemini-3-flash --turns 100 --status-ui --wait-for-start
+            Installed command:
+              civstation run --provider gemini --model gemini-3-flash --turns 100 --status-ui --wait-for-start
 
-        Git clone flow:
-          git clone {REPO_URL}.git
-          cd civStation
-          uv sync
-          uv run civstation
+            Git clone flow:
+              git clone {REPO_URL}.git
+              cd civStation
+              uv sync
+              uv run civstation
 
-        Main commands:
-          civstation                Show this onboarding guide
-          civstation run ...        Start the Civ6 agent with a preflight checklist
-          civstation guide          Print the setup and operator checklist
-          civstation star           Show the fastest GitHub star actions
-          civstation mcp ...        Run the layered MCP server
+            Main commands:
+              civstation                Show this onboarding guide
+              civstation run ...        Start the Civ6 agent with a preflight checklist
+              civstation guide          Print the setup and operator checklist
+              civstation star           Show the fastest GitHub star actions
+              civstation mcp ...        Run the layered MCP server
+              civstation mcp-install ...  Render or write MCP client templates
+            """
+        )
+        print()
+        _print_preflight_checklist()
+        print()
+        _print_star_section()
+        return
 
-        Operator UX:
-          - Keep Civ6 visible on the main monitor at all times.
-          - Use your phone or a secondary device for live controls when possible.
-          - Let the game screen be the thing the agent actually sees and clicks.
-          - Prefer a local uv/venv environment over Docker for live gameplay.
-        """
+    overview = Table.grid(padding=(0, 1))
+    overview.add_column(style="bold cyan", no_wrap=True)
+    overview.add_column()
+    overview.add_row("Recommended", "uv run civstation")
+    overview.add_row(
+        "Quick run",
+        "uv run civstation run --provider gemini --model gemini-3-flash --turns 100 --status-ui --wait-for-start",
     )
-    print()
+    overview.add_row(
+        "Installed",
+        "civstation run --provider gemini --model gemini-3-flash --turns 100 --status-ui --wait-for-start",
+    )
+    overview.add_row("Clone", f"git clone {REPO_URL}.git")
+    overview.add_row("Setup", "cd civStation && uv sync && uv run civstation")
+    overview.add_row("Operator UX", "Keep Civ6 on the main monitor and use a phone or second device for control.")
+    overview.add_row("MCP install", "uv run civstation mcp-install --client codex --write")
+
+    console.print(Panel(overview, title="CivStation CLI", border_style="magenta"))
     _print_preflight_checklist()
-    print()
     _print_star_section()
 
 
 def _print_root_help() -> None:
-    _print(
+    _plain(
         """
         Usage:
           civstation
@@ -93,6 +166,7 @@ def _print_root_help() -> None:
           civstation star
           civstation run [--guide-only] [--skip-guide] [turn_runner args...]
           civstation mcp [mcp server args...]
+          civstation mcp-install [install args...]
 
         Tip:
           If you pass runner flags directly, they are treated like `civstation run ...`.
@@ -112,6 +186,12 @@ def _run_mcp_server(argv: list[str] | None = None) -> None:
     mcp_main(argv)
 
 
+def _run_mcp_install(argv: list[str] | None = None) -> None:
+    from civStation.mcp.install_client_assets import main as install_main
+
+    install_main(argv)
+
+
 def _handle_run(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="civstation run",
@@ -123,9 +203,7 @@ def _handle_run(argv: list[str]) -> int:
 
     if not known.skip_guide:
         _print_preflight_checklist()
-        print()
         _print_star_section()
-        print()
 
     if known.guide_only:
         return 0
@@ -136,6 +214,11 @@ def _handle_run(argv: list[str]) -> int:
 
 def _handle_mcp(argv: list[str]) -> int:
     _run_mcp_server(argv)
+    return 0
+
+
+def _handle_mcp_install(argv: list[str]) -> int:
+    _run_mcp_install(argv)
     return 0
 
 
@@ -168,6 +251,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if command == "mcp":
         return _handle_mcp(rest)
+
+    if command == "mcp-install":
+        return _handle_mcp_install(rest)
 
     return _handle_run(argv)
 

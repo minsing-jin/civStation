@@ -5,7 +5,7 @@ These are the launch patterns that matter most in practice.
 ## Minimal Local Run
 
 ```bash
-python -m civStation.agent.turn_runner \
+uv run civstation run \
   --provider gemini \
   --turns 50 \
   --strategy "Focus on science victory" \
@@ -17,7 +17,7 @@ Use this when you want one provider for everything and a local dashboard.
 ## Split Router and Planner
 
 ```bash
-python -m civStation.agent.turn_runner \
+uv run civstation run \
   --router-provider gemini \
   --planner-provider claude \
   --turns 100 \
@@ -30,7 +30,7 @@ Use this when you want lower routing cost and better planning quality.
 ## Wait for External Start
 
 ```bash
-python -m civStation.agent.turn_runner \
+uv run civstation run \
   --provider claude \
   --status-ui \
   --wait-for-start
@@ -41,7 +41,7 @@ This is the safest default for live experimentation.
 ## Run From `config.yaml`
 
 ```bash
-python -m civStation.agent.turn_runner --config config.yaml
+uv run civstation run --config config.yaml
 ```
 
 The repository config already includes defaults for:
@@ -56,7 +56,7 @@ The repository config already includes defaults for:
 ## Remote Relay Mode
 
 ```bash
-python -m civStation.agent.turn_runner \
+uv run civstation run \
   --provider gemini \
   --relay-url ws://127.0.0.1:8787/ws \
   --relay-token "$RELAY_TOKEN"
