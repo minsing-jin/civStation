@@ -88,7 +88,7 @@ def _print_star_section() -> None:
     console = _console()
     if console is None:
         _plain(
-            f"""
+            """
             Support CivStation
 
             If CivStation helps you, a GitHub star really helps.
@@ -96,7 +96,6 @@ def _print_star_section() -> None:
             Star directly from CLI:
               civstation star
               civstation star --yes
-              gh api -X PUT user/starred/{REPO_SLUG}
 
             If `gh` needs auth:
               gh auth login
@@ -107,12 +106,11 @@ def _print_star_section() -> None:
     console.print(
         Panel(
             dedent(
-                f"""
+                """
                 If CivStation helps you, a GitHub star really helps.
 
                 civstation star
                 civstation star --yes
-                gh api -X PUT user/starred/{REPO_SLUG}
 
                 If `gh` needs auth:
                 gh auth login
@@ -128,15 +126,12 @@ def _print_star_prompt_banner() -> None:
     console = _console()
     if console is None:
         _plain(
-            f"""
+            """
             Support CivStation
 
             Would you like to star CivStation from this terminal now?
             Press Enter to star now. Type `no` to skip. No browser opens.
             If you star it, thank you. That genuinely helps the project.
-
-            If you choose yes, CivStation runs:
-              gh api -X PUT user/starred/{REPO_SLUG}
             """
         )
         return
@@ -144,12 +139,10 @@ def _print_star_prompt_banner() -> None:
     console.print(
         Panel(
             dedent(
-                f"""
+                """
                 Would you like to star CivStation from this terminal now?
                 Press Enter to star now. Type `no` to skip. No browser opens.
                 If you star it, thank you. That genuinely helps the project.
-
-                gh api -X PUT user/starred/{REPO_SLUG}
                 """
             ).strip(),
             title="Support CivStation",
@@ -220,10 +213,7 @@ def _star_repo_via_gh() -> int:
         _plain("Thanks. CivStation is already starred on this GitHub account.")
         return 0
 
-    _plain(
-        output
-        or f"`gh api -X PUT user/starred/{REPO_SLUG}` failed. Run `gh auth login` and try `civstation star` again."
-    )
+    _plain(output or "Run `gh auth login` if needed, then try `civstation star` again.")
     return 1
 
 
