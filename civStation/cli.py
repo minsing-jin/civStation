@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import os
+import shutil
+import subprocess
 import sys
+from pathlib import Path
 from textwrap import dedent
 
 try:
@@ -15,6 +19,7 @@ except Exception:  # pragma: no cover - fallback when rich is unavailable
 
 REPO_SLUG = "minsing-jin/civStation"
 REPO_URL = f"https://github.com/{REPO_SLUG}"
+STAR_PROMPT_MARKER = "star_prompt_seen"
 
 
 def _console() -> Console | None:
@@ -27,6 +32,58 @@ def _plain(text: str) -> None:
     print(dedent(text).strip())
 
 
+def _cli_state_dir() -> Path:
+    override = os.environ.get("CIVSTATION_CLI_STATE_DIR")
+    if override:
+        return Path(override).expanduser()
+    if os.name == "nt":
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            return Path(appdata) / "civstation"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "civstation"
+    xdg_state_home = os.environ.get("XDG_STATE_HOME")
+    if xdg_state_home:
+        return Path(xdg_state_home).expanduser() / "civstation"
+    return Path.home() / ".local" / "state" / "civstation"
+
+
+def _star_prompt_marker_path() -> Path:
+    return _cli_state_dir() / STAR_PROMPT_MARKER
+
+
+def _is_interactive() -> bool:
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _read_star_prompt_state() -> str | None:
+    marker = _star_prompt_marker_path()
+    try:
+        if not marker.exists():
+            return None
+        state = marker.read_text(encoding="utf-8").strip().lower()
+    except OSError:
+        return None
+    return state or None
+
+
+def _has_completed_star_prompt() -> bool:
+    return _read_star_prompt_state() == "done"
+
+
+def _write_star_prompt_state(state: str) -> None:
+    marker = _star_prompt_marker_path()
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(f"{state}\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _mark_star_completed() -> None:
+    _write_star_prompt_state("done")
+
+
 def _print_star_section() -> None:
     console = _console()
     if console is None:
@@ -36,11 +93,13 @@ def _print_star_section() -> None:
 
             If CivStation helps you, a GitHub star really helps.
 
-            Fastest CLI option:
-              gh repo star {REPO_SLUG}
+            Star directly from CLI:
+              civstation star
+              civstation star --yes
+              gh api -X PUT user/starred/{REPO_SLUG}
 
-            Browser fallback:
-              {REPO_URL}
+            If `gh` needs auth:
+              gh auth login
             """
         )
         return
@@ -49,10 +108,125 @@ def _print_star_section() -> None:
     table.add_column(style="bold cyan", no_wrap=True)
     table.add_column()
     table.add_row("Thanks", "If CivStation helps you, a GitHub star really helps.")
-    table.add_row("CLI", f"gh repo star {REPO_SLUG}")
-    table.add_row("Browser", REPO_URL)
+    table.add_row("Action", "civstation star")
+    table.add_row("Fast path", "civstation star --yes")
+    table.add_row("Raw", f"gh api -X PUT user/starred/{REPO_SLUG}")
+    table.add_row("Auth", "gh auth login")
 
     console.print(Panel(table, title="Support CivStation", border_style="yellow"))
+
+
+def _print_star_prompt_banner() -> None:
+    console = _console()
+    if console is None:
+        _plain(
+            f"""
+            Support CivStation
+
+            Would you like to star CivStation from this terminal now?
+            Press Enter to star now. Type `no` to skip. No browser opens.
+            If you star it, thank you. That genuinely helps the project.
+
+            If you choose yes, CivStation runs:
+              gh api -X PUT user/starred/{REPO_SLUG}
+            """
+        )
+        return
+
+    table = Table.grid(padding=(0, 1))
+    table.add_column(style="bold cyan", no_wrap=True)
+    table.add_column()
+    table.add_row("Prompt", "Would you like to star CivStation from this terminal now?")
+    table.add_row("Input", "Press Enter to star now. Type `no` to skip. No browser opens.")
+    table.add_row("Thanks", "If you star it, thank you. That genuinely helps the project.")
+    table.add_row("Runs", f"gh api -X PUT user/starred/{REPO_SLUG}")
+
+    console.print(Panel(table, title="Support CivStation", border_style="yellow"))
+
+
+def _prompt_yes_no(prompt: str, *, default: bool = True) -> bool:
+    suffix = "[Y/n]" if default else "[y/N]"
+    try:
+        response = input(f"{prompt} {suffix}: ").strip()
+    except EOFError:
+        return default
+    if not response:
+        return default
+    return response.casefold() not in {"n", "no"}
+
+
+def _star_repo_via_gh() -> int:
+    if shutil.which("gh") is None:
+        _plain(
+            """
+            GitHub CLI `gh` is not installed.
+            Install it, run `gh auth login`, then use `civstation star` again.
+            """
+        )
+        return 1
+
+    _plain("Trying to star CivStation via GitHub CLI...")
+    try:
+        result = subprocess.run(
+            [
+                "gh",
+                "api",
+                "-X",
+                "PUT",
+                "-H",
+                "Accept: application/vnd.github+json",
+                f"user/starred/{REPO_SLUG}",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except subprocess.TimeoutExpired:
+        _plain(
+            """
+            GitHub CLI is taking too long.
+            Run `gh auth login` if needed, then try `civstation star` again.
+            """
+        )
+        return 1
+    output = (result.stdout or result.stderr).strip()
+
+    if result.returncode == 0:
+        _mark_star_completed()
+        if output:
+            _plain(output)
+        _plain("Thanks for starring CivStation. That genuinely helps.")
+        return 0
+
+    lowered = output.lower()
+    if "already" in lowered and "star" in lowered:
+        _mark_star_completed()
+        _plain(output)
+        _plain("Thanks. CivStation is already starred on this GitHub account.")
+        return 0
+
+    _plain(
+        output
+        or f"`gh api -X PUT user/starred/{REPO_SLUG}` failed. Run `gh auth login` and try `civstation star` again."
+    )
+    return 1
+
+
+def _prompt_for_star() -> int:
+    _print_star_prompt_banner()
+    if not _prompt_yes_no("Star CivStation now?"):
+        _plain("No problem. If CivStation helps you later, I'll ask again next time.")
+        return 0
+    return _star_repo_via_gh()
+
+
+def _maybe_prompt_for_star() -> None:
+    if not _is_interactive():
+        return
+    if _has_completed_star_prompt():
+        return
+    _prompt_for_star()
 
 
 def _print_preflight_checklist() -> None:
@@ -131,8 +305,6 @@ def _print_onboarding() -> None:
         )
         print()
         _print_preflight_checklist()
-        print()
-        _print_star_section()
         return
 
     overview = Table.grid(padding=(0, 1))
@@ -149,12 +321,12 @@ def _print_onboarding() -> None:
     )
     overview.add_row("Clone", f"git clone {REPO_URL}.git")
     overview.add_row("Setup", "cd civStation && uv sync && uv run civstation")
+    overview.add_row("Support", "civstation star")
     overview.add_row("Operator UX", "Keep Civ6 on the main monitor and use a phone or second device for control.")
     overview.add_row("MCP install", "uv run civstation mcp-install --client codex --write")
 
     console.print(Panel(overview, title="CivStation CLI", border_style="magenta"))
     _print_preflight_checklist()
-    _print_star_section()
 
 
 def _print_root_help() -> None:
@@ -202,8 +374,8 @@ def _handle_run(argv: list[str]) -> int:
     known, passthrough = parser.parse_known_args(argv)
 
     if not known.skip_guide:
+        _maybe_prompt_for_star()
         _print_preflight_checklist()
-        _print_star_section()
 
     if known.guide_only:
         return 0
@@ -222,10 +394,29 @@ def _handle_mcp_install(argv: list[str]) -> int:
     return 0
 
 
+def _handle_star(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="civstation star",
+        description="Star the CivStation GitHub repo directly from the CLI.",
+    )
+    parser.add_argument("-y", "--yes", action="store_true", help="Run the star command without prompting.")
+    known = parser.parse_args(argv)
+
+    if known.yes:
+        return _star_repo_via_gh()
+
+    if not _is_interactive():
+        _print_star_section()
+        return 0
+
+    return _prompt_for_star()
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
 
     if not argv:
+        _maybe_prompt_for_star()
         _print_onboarding()
         return 0
 
@@ -239,12 +430,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if command == "guide":
+        _maybe_prompt_for_star()
         _print_onboarding()
         return 0
 
     if command == "star":
-        _print_star_section()
-        return 0
+        return _handle_star(rest)
 
     if command == "run":
         return _handle_run(rest)
