@@ -35,6 +35,7 @@ def test_star_command_shows_cli_only_actions(capsys: pytest.CaptureFixture[str])
     assert "gh api -X PUT user/starred/minsing-jin/civStation" in captured.out
     assert "gh auth login" in captured.out
     assert "https://github.com/minsing-jin/civStation" not in captured.out
+    assert "Action " not in captured.out
 
 
 def test_interactive_cli_run_prompts_again_when_user_skips(
@@ -57,6 +58,8 @@ def test_interactive_cli_run_prompts_again_when_user_skips(
     assert "Type `no` to skip." in first.out
     assert "If you star it, thank you. That genuinely helps the project." in first.out
     assert "No problem. If CivStation helps you later, I'll ask again next time." in first.out
+    assert "Prompt " not in first.out
+    assert "Input " not in first.out
 
     assert cli.main([]) == 0
 

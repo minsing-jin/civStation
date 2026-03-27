@@ -104,16 +104,24 @@ def _print_star_section() -> None:
         )
         return
 
-    table = Table.grid(padding=(0, 1))
-    table.add_column(style="bold cyan", no_wrap=True)
-    table.add_column()
-    table.add_row("Thanks", "If CivStation helps you, a GitHub star really helps.")
-    table.add_row("Action", "civstation star")
-    table.add_row("Fast path", "civstation star --yes")
-    table.add_row("Raw", f"gh api -X PUT user/starred/{REPO_SLUG}")
-    table.add_row("Auth", "gh auth login")
+    console.print(
+        Panel(
+            dedent(
+                f"""
+                If CivStation helps you, a GitHub star really helps.
 
-    console.print(Panel(table, title="Support CivStation", border_style="yellow"))
+                civstation star
+                civstation star --yes
+                gh api -X PUT user/starred/{REPO_SLUG}
+
+                If `gh` needs auth:
+                gh auth login
+                """
+            ).strip(),
+            title="Support CivStation",
+            border_style="yellow",
+        )
+    )
 
 
 def _print_star_prompt_banner() -> None:
@@ -133,15 +141,21 @@ def _print_star_prompt_banner() -> None:
         )
         return
 
-    table = Table.grid(padding=(0, 1))
-    table.add_column(style="bold cyan", no_wrap=True)
-    table.add_column()
-    table.add_row("Prompt", "Would you like to star CivStation from this terminal now?")
-    table.add_row("Input", "Press Enter to star now. Type `no` to skip. No browser opens.")
-    table.add_row("Thanks", "If you star it, thank you. That genuinely helps the project.")
-    table.add_row("Runs", f"gh api -X PUT user/starred/{REPO_SLUG}")
+    console.print(
+        Panel(
+            dedent(
+                f"""
+                Would you like to star CivStation from this terminal now?
+                Press Enter to star now. Type `no` to skip. No browser opens.
+                If you star it, thank you. That genuinely helps the project.
 
-    console.print(Panel(table, title="Support CivStation", border_style="yellow"))
+                gh api -X PUT user/starred/{REPO_SLUG}
+                """
+            ).strip(),
+            title="Support CivStation",
+            border_style="yellow",
+        )
+    )
 
 
 def _prompt_yes_no(prompt: str, *, default: bool = True) -> bool:
