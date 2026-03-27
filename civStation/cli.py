@@ -91,7 +91,7 @@ def _print_star_section() -> None:
             """
             Support CivStation
 
-            If CivStation helps you, a GitHub star really helps.
+            If CivStation has been helpful, I'd really appreciate a GitHub star.
 
             Star directly from CLI:
               civstation star
@@ -107,7 +107,7 @@ def _print_star_section() -> None:
         Panel(
             dedent(
                 """
-                If CivStation helps you, a GitHub star really helps.
+                If CivStation has been helpful, I'd really appreciate a GitHub star.
 
                 civstation star
                 civstation star --yes
@@ -129,9 +129,9 @@ def _print_star_prompt_banner() -> None:
             """
             Support CivStation
 
-            Would you like to star CivStation from this terminal now?
-            Press Enter to star now. Type `no` to skip. No browser opens.
-            If you star it, thank you. That genuinely helps the project.
+            If CivStation has been helpful, would you mind starring it from this terminal?
+            Press Enter to star it now, or type `no` to skip. No browser opens.
+            Thanks either way. It genuinely helps the project.
             """
         )
         return
@@ -140,9 +140,9 @@ def _print_star_prompt_banner() -> None:
         Panel(
             dedent(
                 """
-                Would you like to star CivStation from this terminal now?
-                Press Enter to star now. Type `no` to skip. No browser opens.
-                If you star it, thank you. That genuinely helps the project.
+                If CivStation has been helpful, would you mind starring it from this terminal?
+                Press Enter to star it now, or type `no` to skip. No browser opens.
+                Thanks either way. It genuinely helps the project.
                 """
             ).strip(),
             title="Support CivStation",

@@ -30,7 +30,7 @@ def test_star_command_shows_cli_only_actions(capsys: pytest.CaptureFixture[str])
     captured = capsys.readouterr()
 
     assert "Support CivStation" in captured.out
-    assert "If CivStation helps you, a GitHub star really helps." in captured.out
+    assert "If CivStation has been helpful, I'd really appreciate a GitHub star." in captured.out
     assert "civstation star --yes" in captured.out
     assert "gh auth login" in captured.out
     assert "https://github.com/minsing-jin/civStation" not in captured.out
@@ -50,13 +50,12 @@ def test_interactive_cli_run_prompts_again_when_user_skips(
     assert cli.main([]) == 0
 
     first = capsys.readouterr()
-    assert "Would you like to star CivStation from this terminal now?" in first.out
-    assert first.out.index("Would you like to star CivStation from this terminal now?") < first.out.index(
-        "CivStation CLI"
-    )
+    assert "If CivStation has been helpful" in first.out
+    assert "would you mind starring it" in first.out
+    assert first.out.index("Support CivStation") < first.out.index("CivStation CLI")
     assert "No browser opens." in first.out
-    assert "Type `no` to skip." in first.out
-    assert "If you star it, thank you. That genuinely helps the project." in first.out
+    assert "type `no` to skip." in first.out
+    assert "Thanks either way." in first.out
     assert "No problem. If CivStation helps you later, I'll ask again next time." in first.out
     assert "Prompt " not in first.out
     assert "Input " not in first.out
@@ -65,7 +64,7 @@ def test_interactive_cli_run_prompts_again_when_user_skips(
     assert cli.main([]) == 0
 
     second = capsys.readouterr()
-    assert "Would you like to star CivStation from this terminal now?" in second.out
+    assert "If CivStation has been helpful" in second.out
 
 
 def test_legacy_seen_state_does_not_suppress_prompt(
@@ -83,7 +82,7 @@ def test_legacy_seen_state_does_not_suppress_prompt(
     assert cli.main([]) == 0
 
     captured = capsys.readouterr()
-    assert "Would you like to star CivStation from this terminal now?" in captured.out
+    assert "If CivStation has been helpful" in captured.out
 
 
 @pytest.mark.parametrize("reply", ["y", "yes", "Yes", ""])
@@ -108,9 +107,9 @@ def test_star_command_can_run_from_cli_with_yes_or_enter_and_marks_done(
     assert cli.main(["star"]) == 0
 
     captured = capsys.readouterr()
-    assert "Would you like to star CivStation from this terminal now?" in captured.out
+    assert "If CivStation has been helpful" in captured.out
     assert "No browser opens." in captured.out
-    assert "Type `no` to skip." in captured.out
+    assert "type `no` to skip." in captured.out
     assert "Trying to star CivStation via GitHub CLI..." in captured.out
     assert "Thanks for starring CivStation. That genuinely helps." in captured.out
     assert "https://github.com/minsing-jin/civStation" not in captured.out
@@ -155,11 +154,9 @@ def test_run_guide_only_shows_star_prompt_before_preflight_when_interactive(
     assert cli.main(["run", "--guide-only"]) == 0
 
     captured = capsys.readouterr()
-    assert "Would you like to star CivStation from this terminal now?" in captured.out
+    assert "If CivStation has been helpful" in captured.out
     assert "Run Setup" in captured.out
-    assert captured.out.index("Would you like to star CivStation from this terminal now?") < captured.out.index(
-        "Run Setup"
-    )
+    assert captured.out.index("Support CivStation") < captured.out.index("Run Setup")
 
 
 def test_root_cli_direct_args_alias_run(
