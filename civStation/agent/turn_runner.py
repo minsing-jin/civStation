@@ -31,6 +31,30 @@ for _noisy in ("httpx", "httpcore", "urllib3", "asyncio", "websockets"):
 logger = logging.getLogger(__name__)
 
 
+class _ConsoleLogSilencer:
+    """Temporarily suppress INFO/DEBUG logs on console handlers only."""
+
+    def __init__(self, logger: logging.Logger | None = None, minimum_level: int = logging.WARNING) -> None:
+        self._logger = logger or logging.getLogger()
+        self._minimum_level = minimum_level
+        self._original_levels: list[tuple[logging.Handler, int]] = []
+
+    def enable(self) -> None:
+        if self._original_levels:
+            return
+
+        for handler in self._logger.handlers:
+            if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
+                self._original_levels.append((handler, handler.level))
+                if handler.level == logging.NOTSET or handler.level < self._minimum_level:
+                    handler.setLevel(self._minimum_level)
+
+    def disable(self) -> None:
+        while self._original_levels:
+            handler, level = self._original_levels.pop()
+            handler.setLevel(level)
+
+
 def parse_args(argv: list[str] | None = None) -> configargparse.Namespace:
     """ConfigArgParse를 사용하여 YAML과 CLI 인자를 동시에 처리"""
     available = get_available_providers()
@@ -267,6 +291,15 @@ def setup_knowledge(args, vlm_provider):
 
 
 def main(argv: list[str] | None = None):
+    console_log_silencer = _ConsoleLogSilencer()
+    console_log_silencer.enable()
+    try:
+        return _main(argv, console_log_silencer)
+    finally:
+        console_log_silencer.disable()
+
+
+def _main(argv: list[str] | None, console_log_silencer: _ConsoleLogSilencer):
     # 1. Parse Arguments (YAML + CLI)
     try:
         args = parse_args(argv) if argv is not None else parse_args()
@@ -521,6 +554,7 @@ def main(argv: list[str] | None = None):
                 close_run_log_session()
                 close_trajectory_session()
                 return
+            console_log_silencer.disable()
             logger.info("Start signal received. Beginning execution.")
         else:
             from civStation.agent.modules.hitl.agent_gate import AgentState
@@ -556,6 +590,7 @@ def main(argv: list[str] | None = None):
                     return
                 if should_start:
                     agent_gate.set_state(AgentState.RUNNING)
+                    console_log_silencer.disable()
                     logger.info("Chatapp start signal received. Beginning execution.")
                     break
     else:
@@ -563,6 +598,7 @@ def main(argv: list[str] | None = None):
         from civStation.agent.modules.hitl.agent_gate import AgentState
 
         agent_gate.set_state(AgentState.RUNNING)
+        console_log_silencer.disable()
 
     from civStation.utils.rich_logger import RichLogger
 

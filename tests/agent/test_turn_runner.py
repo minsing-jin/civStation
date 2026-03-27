@@ -1,3 +1,5 @@
+import io
+import logging
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -164,3 +166,42 @@ def test_main_closes_run_log_session_after_one_turn(monkeypatch):
     assert rich_logger.stopped == 1
     assert session.closed is True
     assert trajectory_session.closed is True
+
+
+def test_console_log_silencer_hides_info_from_stream_handlers_only(tmp_path):
+    logger = logging.getLogger("tests.turn_runner.console_silencer")
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+
+    stream = io.StringIO()
+    stream_handler = logging.StreamHandler(stream)
+    stream_handler.setLevel(logging.INFO)
+
+    file_path = tmp_path / "run.log"
+    file_handler = logging.FileHandler(file_path)
+    file_handler.setLevel(logging.INFO)
+
+    original_handlers = logger.handlers[:]
+    logger.handlers = [stream_handler, file_handler]
+
+    try:
+        silencer = turn_runner._ConsoleLogSilencer(logger=logger)
+        silencer.enable()
+
+        logger.info("hidden info")
+        logger.warning("visible warning")
+
+        silencer.disable()
+    finally:
+        for handler in logger.handlers:
+            handler.flush()
+            handler.close()
+        logger.handlers = original_handlers
+
+    stream_output = stream.getvalue()
+    file_output = file_path.read_text(encoding="utf-8")
+
+    assert "hidden info" not in stream_output
+    assert "visible warning" in stream_output
+    assert "hidden info" in file_output
+    assert "visible warning" in file_output
