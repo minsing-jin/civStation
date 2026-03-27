@@ -30,6 +30,8 @@
 ## 📚 Index
 
 - [🚀 30초 Quick Start](#-30초-quick-start)
+- [🧭 Docker를 써야 하나?](#-docker를-써야-하나)
+- [▶️ 권장 실행 흐름](#-권장-실행-흐름)
 - [📱 모바일 QR Quick Start](#-모바일-qr-quick-start)
 - [🧠 왜 HitL 없으면 멍청해지는가](#-왜-hitl-없으면-멍청해지는가)
 - [🎮 `civ6_tacticall` 모바일 QR 컨트롤러로 Civ6 플레이하기](#-civ6_tacticall-모바일-qr-컨트롤러로-civ6-플레이하기)
@@ -77,6 +79,83 @@ uv run civstation
 
 - `Screen Recording`
 - `Accessibility`
+
+## 🧭 Docker를 써야 하나?
+
+짧게 말하면, live 플레이에는 `아니오`입니다.
+
+이유:
+
+- CivStation은 [screen.py](/Users/jinminseong/Desktop/civStation/civStation/utils/screen.py)에서 `pyautogui`로 호스트 데스크톱과 Civ6 창을 직접 캡처하고 제어합니다.
+- 상태 스트리머도 [screen_streamer.py](/Users/jinminseong/Desktop/civStation/civStation/agent/modules/hitl/status_ui/screen_streamer.py)에서 `mss`로 메인 모니터를 직접 읽습니다.
+- macOS에서는 런타임에 `Screen Recording`, `Accessibility` 같은 호스트 권한이 필요합니다.
+- 실제 플레이에서는 에이전트가 같은 머신의 같은 데스크톱 세션에 떠 있는 실제 Civ6 창을 보고 클릭해야 합니다.
+
+즉 Docker는 다음 용도에는 기본 선택지가 아닙니다:
+
+- 실시간 Civ6 플레이
+- 로컬 화면 캡처
+- 마우스/키보드 제어
+- 게임을 돌리는 같은 호스트에서 모바일 컨트롤 플로우를 붙이는 경우
+
+Docker가 그나마 괜찮은 건 이런 비-GUI 작업입니다:
+
+- 문서 빌드
+- lint
+- 실제 게임 창이 필요 없는 테스트
+
+## ▶️ 권장 실행 흐름
+
+git clone해서 CivStation을 제대로 실행하려면:
+
+1. 저장소를 clone하고 들어갑니다.
+
+```bash
+git clone https://github.com/minsing-jin/civStation.git
+cd civStation
+```
+
+2. 로컬 환경을 맞춥니다.
+
+```bash
+uv sync
+```
+
+3. 먼저 운영 가이드를 출력합니다.
+
+```bash
+uv run civstation
+```
+
+4. Civ6를 메인 모니터에 띄우고 실제 게임 화면이 계속 보이게 둡니다.
+5. 원격 제어를 쓸 거면 대시보드가 게임 화면을 가리지 않게 하고, 가능하면 휴대폰이나 보조 디바이스로 조작합니다.
+6. 에이전트를 실행합니다.
+
+```bash
+uv run civstation run \
+  --provider gemini \
+  --model gemini-3-flash \
+  --turns 100 \
+  --status-ui \
+  --wait-for-start \
+  --status-port 8765
+```
+
+7. `http://127.0.0.1:8765` 를 열고 `Start` 를 누릅니다.
+
+설치된 console command도 그대로 쓸 수 있습니다:
+
+```bash
+civstation
+civstation run --provider gemini --model gemini-3-flash --turns 100 --status-ui --wait-for-start
+```
+
+기존 Python module 실행도 남겨두긴 했지만, 권장은 아닙니다:
+
+```bash
+python -m civStation
+python -m civStation.agent.turn_runner --provider gemini --status-ui
+```
 
 ## 📱 모바일 QR Quick Start
 

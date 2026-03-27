@@ -30,6 +30,8 @@ Current package and module names are still:
 ## 📚 Index
 
 - [🚀 30-Second Quick Start](#-30-second-quick-start)
+- [🧭 Should I Use Docker?](#-should-i-use-docker)
+- [▶️ Recommended Run Flow](#-recommended-run-flow)
 - [📱 Mobile QR Quick Start](#-mobile-qr-quick-start)
 - [🧠 Why HitL Matters](#-why-hitl-matters)
 - [🎮 Detailed Mobile QR Flow](#-detailed-mobile-qr-flow)
@@ -79,6 +81,83 @@ If macOS blocks screenshot or control access, grant:
 - `Accessibility`
 
 to your terminal, `uv`, or Python app, then try again.
+
+## 🧭 Should I Use Docker?
+
+Short answer: `no` for live gameplay.
+
+Why:
+
+- CivStation captures the host desktop and Civ6 window with `pyautogui` in [screen.py](/Users/jinminseong/Desktop/civStation/civStation/utils/screen.py).
+- The status streamer captures the primary monitor directly with `mss` in [screen_streamer.py](/Users/jinminseong/Desktop/civStation/civStation/agent/modules/hitl/status_ui/screen_streamer.py).
+- The runtime also needs host-level `Screen Recording` and `Accessibility` permissions on macOS.
+- For actual play, the agent must see and click the real Civ6 window on the same machine and desktop session.
+
+That means Docker is the wrong default for:
+
+- live Civ6 play
+- local screen capture
+- mouse/keyboard control
+- the mobile-control flow where the host machine is also running the game
+
+Docker is only reasonable here for non-GUI tasks such as:
+
+- docs builds
+- linting
+- tests that do not need the real game window
+
+## ▶️ Recommended Run Flow
+
+If you cloned the repo and want to run CivStation correctly:
+
+1. Clone and enter the repo.
+
+```bash
+git clone https://github.com/minsing-jin/civStation.git
+cd civStation
+```
+
+2. Sync the local environment.
+
+```bash
+uv sync
+```
+
+3. Print the operator guide first.
+
+```bash
+uv run civstation
+```
+
+4. Put Civ6 on the main monitor and leave the actual game screen visible.
+5. If you want remote control, keep the dashboard off the game screen and use your phone or a secondary device.
+6. Start the agent.
+
+```bash
+uv run civstation run \
+  --provider gemini \
+  --model gemini-3-flash \
+  --turns 100 \
+  --status-ui \
+  --wait-for-start \
+  --status-port 8765
+```
+
+7. Open `http://127.0.0.1:8765` and press `Start`.
+
+Installed command aliases also work:
+
+```bash
+civstation
+civstation run --provider gemini --model gemini-3-flash --turns 100 --status-ui --wait-for-start
+```
+
+Legacy fallback is still available, but not preferred:
+
+```bash
+python -m civStation
+python -m civStation.agent.turn_runner --provider gemini --status-ui
+```
 
 ## 📱 Mobile QR Quick Start
 

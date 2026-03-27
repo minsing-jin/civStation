@@ -38,6 +38,7 @@ def _print_preflight_checklist() -> None:
         5. On macOS, grant Screen Recording and Accessibility to your terminal or Python app.
         6. Prefer windowed or borderless mode and keep the game resolution stable during the run.
         7. If you use the mobile controller, start the relay host, scan the QR code, then press Start from the phone.
+        8. For live gameplay, prefer the host machine's local uv/venv environment. Docker is not recommended.
 
         Recommended quick start:
           uv run civstation run --provider gemini --model gemini-3-flash --turns 100 --status-ui --wait-for-start
@@ -74,6 +75,7 @@ def _print_onboarding() -> None:
           - Keep Civ6 visible on the main monitor at all times.
           - Use your phone or a secondary device for live controls when possible.
           - Let the game screen be the thing the agent actually sees and clicks.
+          - Prefer a local uv/venv environment over Docker for live gameplay.
         """
     )
     print()

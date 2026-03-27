@@ -36,9 +36,17 @@ Runtime, tooling, and control surfaces for letting VLMs play Civilization VI.
 
     ---
 
-    Install the project, set API keys, run the agent with the status UI, and open the dashboard.
+    Install with `uv`, run locally on the host machine, start the agent with the status UI, and open the dashboard.
 
     [Go to quickstart](getting-started/quickstart.md)
+
+-   **Runtime environment**
+
+    ---
+
+    Understand why live Civ6 sessions should run from the local host environment instead of Docker.
+
+    [Open installation guidance](getting-started/installation.md)
 
 -   **Mobile QR control**
 

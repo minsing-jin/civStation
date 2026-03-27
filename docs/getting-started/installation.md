@@ -9,17 +9,37 @@ Start with the concrete path that gets you a runnable local environment.
 - API keys for any model provider you plan to use
 - Screen capture and input permissions for your operating system
 
+## Recommended Runtime Environment
+
+For live gameplay, use the host machine's local `uv` / `.venv` environment.
+
+Do not treat Docker as the default runtime for real Civ6 sessions.
+
+Why:
+
+- CivStation captures the host desktop and Civ6 window directly.
+- CivStation sends mouse and keyboard actions back to the real local desktop session.
+- macOS permissions such as `Screen Recording` and `Accessibility` must be granted on the host.
+
+Docker is reasonable for non-GUI tasks such as docs builds, linting, and tests that do not need the real game window. It is not the recommended runtime for playing Civ6 through CivStation.
+
 If you plan to use voice or run the full dashboard stack on Linux, system packages such as PortAudio may be required. The CI job installs `portaudio19-dev` and `gcc` on Ubuntu for that reason.
 
 ## Core Install
 
-For normal project work:
+For normal project work and live runs:
+
+```bash
+git clone https://github.com/minsing-jin/civStation.git
+cd civStation
+uv sync
+```
+
+If you want the editable development workflow with test dependencies and `pre-commit`, you can still use:
 
 ```bash
 make install
 ```
-
-That installs the project in editable mode with test dependencies and sets up `pre-commit`.
 
 ## Install With Docs Support
 
@@ -54,13 +74,14 @@ Provider aliases are documented in [Providers and Image Pipeline](../guides/prov
 Check the CLI:
 
 ```bash
-python -m civStation.agent.turn_runner --help
+uv run civstation
+uv run civstation run --help
 ```
 
 Check the MCP server entry point:
 
 ```bash
-python -m civStation.mcp.server
+uv run civstation mcp --help
 ```
 
 The MCP server runs on stdio by default, so it will wait for a client instead of opening a browser page.
