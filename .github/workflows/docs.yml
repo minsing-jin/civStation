@@ -19,6 +19,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      pages_enabled: ${{ steps.pages_status.outputs.enabled }}
 
     steps:
     - uses: actions/checkout@v4
@@ -36,18 +38,46 @@ jobs:
     - name: Build documentation site
       run: mkdocs build --strict -f docs/mkdocs.yml
 
-    - name: Configure GitHub Pages
+    - name: Check GitHub Pages availability
+      id: pages_status
       if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+      uses: actions/github-script@v7
+      with:
+        script: |
+          try {
+            const { data } = await github.rest.repos.getPages({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            });
+            const buildType = data.build_type || "";
+            if (buildType !== "workflow") {
+              core.notice(`GitHub Pages exists but build_type=${buildType}; skipping Pages deployment.`);
+              core.setOutput("enabled", "false");
+              return;
+            }
+            core.notice("GitHub Pages is enabled with GitHub Actions; continuing deployment steps.");
+            core.setOutput("enabled", "true");
+          } catch (error) {
+            if (error.status === 404) {
+              core.notice("GitHub Pages is not enabled for this repository; skipping deployment steps.");
+              core.setOutput("enabled", "false");
+              return;
+            }
+            throw error;
+          }
+
+    - name: Configure GitHub Pages
+      if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && steps.pages_status.outputs.enabled == 'true'
       uses: actions/configure-pages@v5
 
     - name: Upload Pages artifact
-      if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+      if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && steps.pages_status.outputs.enabled == 'true'
       uses: actions/upload-pages-artifact@v3
       with:
         path: site
 
   deploy:
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && needs.build.outputs.pages_enabled == 'true'
     needs: build
     runs-on: ubuntu-latest
     environment:
