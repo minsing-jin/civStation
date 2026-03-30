@@ -317,7 +317,7 @@ This is the core value of the layered runtime:
 ### The Four Layers
 
 <div align="center">
-  <img src="docs/readme_resources/simple_architecture.svg" alt="Simple architecture diagram showing HITL orders flowing into a background strategy agent, strategy and order flowing to a main-process action agent, and context flowing back upward." width="100%" />
+  <img src="docs/readme_resources/architecture_abstraction.png" alt="Simple architecture diagram showing HITL orders flowing into a background strategy agent, strategy and order flowing to a main-process action agent, and context flowing back upward." width="100%" />
 </div>
 
 | Layer | Core question | Main code | Details |

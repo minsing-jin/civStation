@@ -238,7 +238,7 @@ MCP session/runtime 的关键价值在于，它映射了真实执行时的分离
 ### 四个核心层
 
 <div align="center">
-  <img src="docs/readme_resources/simple_architecture.svg" alt="一个简单架构图，展示 HITL 指令进入后台 strategy agent，strategy 和 order 下发到主进程 action agent，context 再向上回流。" width="100%" />
+  <img src="docs/readme_resources/architecture_abstraction.png" alt="一个简单架构图，展示 HITL 指令进入后台 strategy agent，strategy 和 order 下发到主进程 action agent，context 再向上回流。" width="100%" />
 </div>
 
 | 层 | 核心问题 | 主要代码 | 详细文档 |
