@@ -1,0 +1,31 @@
+name: Question / usage help
+description: Ask for help using CivStation or clarify expected behavior
+title: "[Question] "
+labels:
+  - question
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: What are you trying to understand or accomplish?
+      placeholder: Ask your question as clearly as possible
+    validations:
+      required: true
+  - type: textarea
+    id: current_setup
+    attributes:
+      label: Current setup
+      description: Share the command, environment, or repo state you are using
+      render: bash
+  - type: textarea
+    id: what_you_tried
+    attributes:
+      label: What you already tried
+      description: This helps avoid repeating the same suggestions
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional context
+      description: Logs, screenshots, or links that might help
+

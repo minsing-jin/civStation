@@ -1,0 +1,43 @@
+name: Feature request
+description: Propose a new capability or improvement for CivStation
+title: "[Feature] "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please describe the user-facing problem first, then the proposed solution.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What is hard, missing, or frustrating right now?
+      placeholder: Describe the concrete workflow or limitation
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should CivStation do instead?
+      placeholder: Describe the feature you want
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and constraints
+      description: Note any constraints, non-goals, or compatibility concerns
+      placeholder: e.g. should work with HITL dashboard only, should not change MCP surface
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: List any workarounds or alternative ideas
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Links, mockups, screenshots, or examples
+
