@@ -45,6 +45,10 @@
 > 推荐起始模型：`gemini-3-flash`。
 > 如果你想先用一个默认模型把 CivStation 跑起来，并兼顾速度与实用性，建议先从 `gemini-3-flash` 开始。
 
+> [!IMPORTANT]
+> 请从一开始就在网络稳定的 Wi-Fi 环境下运行。
+> 如果你要用手机控制或二维码流程，手机和正在运行 Civilization VI 的桌面必须处在同一个 Wi-Fi 网络里。
+
 1. 打开 Civilization VI，并停在可以实际操作的地图画面。
 2. 运行：
 
@@ -73,6 +77,10 @@ uv run civstation run \
 ## 📱 手机二维码 Quick Start
 
 如果你想用手机来控制：
+
+> [!IMPORTANT]
+> 请在网络稳定的 Wi-Fi 环境下操作。
+> 为了让配对和控制稳定工作，手机和正在运行 Civilization VI 的桌面必须处在同一个 Wi-Fi 网络里。
 
 1. 启动移动端控制器：
 

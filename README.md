@@ -18,10 +18,6 @@ Canonical GitHub repository:
 
 - `https://github.com/minsing-jin/civStation`
 
-If you install, clone, or use CivStation, a GitHub star genuinely helps.
-
-- Fastest CLI action: `gh repo star minsing-jin/civStation`
-
 Current package and module names are still:
 
 - Python package: `civStation`
@@ -50,6 +46,10 @@ If you just want to see CivStation move in Civilization VI as fast as possible, 
 > [!NOTE]
 > Recommended starting model: `gemini-3-flash`.
 > If you want one default that is fast, practical, and easy to operate for CivStation, start with `gemini-3-flash` before tuning anything else.
+
+> [!IMPORTANT]
+> Use a stable Wi-Fi connection with reliable internet from the start.
+> If you use phone control or the QR flow, the phone and the desktop running Civilization VI must stay on the same Wi-Fi network.
 
 1. Open Civilization VI and stop on a playable map screen.
 2. Run:
@@ -155,6 +155,10 @@ civstation run --provider gemini --model gemini-3-flash --turns 100 --status-ui 
 ## 📱 Mobile QR Quick Start
 
 If you want to control the run from your phone:
+
+> [!IMPORTANT]
+> Use a stable Wi-Fi connection with reliable internet.
+> The phone and the desktop running Civilization VI must stay on the same Wi-Fi network for pairing and control to work reliably.
 
 1. Clone and start the mobile controller:
 

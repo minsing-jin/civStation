@@ -18,10 +18,6 @@
 
 - `https://github.com/minsing-jin/civStation`
 
-설치하거나 clone해서 실제로 써보셨다면 GitHub star 하나가 정말 큰 도움이 됩니다.
-
-- 가장 빠른 CLI 액션: `gh repo star minsing-jin/civStation`
-
 현재 패키지/모듈 이름은 아직 다음과 같습니다:
 
 - Python package: `civStation`
@@ -50,6 +46,10 @@
 > [!NOTE]
 > 권장 시작 모델은 `gemini-3-flash`입니다.
 > CivStation에서 하나의 기본값으로 시작해야 한다면, 운영 속도와 실용성 측면에서 먼저 `gemini-3-flash`를 쓰는 것을 권장합니다.
+
+> [!IMPORTANT]
+> 시작부터 인터넷이 안정적인 Wi-Fi 환경에서 실행하세요.
+> 휴대폰 제어나 QR 플로우를 쓸 때는 휴대폰과 Civilization VI를 실행 중인 데스크톱이 반드시 같은 Wi-Fi에 있어야 합니다.
 
 1. Civilization VI를 켜고 실제 플레이 가능한 지도 화면에서 멈춥니다.
 2. 아래 명령을 실행합니다:
@@ -153,6 +153,10 @@ civstation run --provider gemini --model gemini-3-flash --turns 100 --status-ui 
 ## 📱 모바일 QR Quick Start
 
 휴대폰으로 제어하고 싶다면:
+
+> [!IMPORTANT]
+> 인터넷이 안정적인 Wi-Fi 환경에서 진행하세요.
+> 페어링과 제어가 안정적으로 동작하려면 휴대폰과 Civilization VI를 실행 중인 데스크톱이 반드시 같은 Wi-Fi에 있어야 합니다.
 
 1. 모바일 컨트롤러를 실행합니다:
 

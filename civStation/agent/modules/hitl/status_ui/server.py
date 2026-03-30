@@ -226,9 +226,17 @@ class StatusServer:
             if not discussion:
                 return JSONResponse(content={"error": "discussion engine not initialized"}, status_code=503)
 
+            reference_snapshot = discussion.get_reference_snapshot()
             session = discussion.get_active_session(user_id)
             if not session:
-                return JSONResponse(content={"active": False, "messages": []})
+                return JSONResponse(
+                    content={
+                        "active": False,
+                        "messages": [],
+                        "current_strategy": reference_snapshot["current_strategy"],
+                        "combined_context": reference_snapshot["combined_context"],
+                    }
+                )
 
             messages = [{"role": m.role, "content": m.content} for m in session.messages]
             return JSONResponse(
@@ -238,6 +246,8 @@ class StatusServer:
                     "mode": session.mode.value,
                     "message_count": len(messages),
                     "messages": messages,
+                    "current_strategy": reference_snapshot["current_strategy"],
+                    "combined_context": reference_snapshot["combined_context"],
                 }
             )
 

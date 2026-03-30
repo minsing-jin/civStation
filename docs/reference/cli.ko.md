@@ -19,7 +19,7 @@ fallback 모듈 실행:
 python -m civStation
 ```
 
-루트 CLI는 온보딩, 모바일/운영자 체크리스트, GitHub star 빠른 액션을 먼저 보여줍니다.
+루트 CLI는 온보딩과 모바일/운영자 체크리스트를 먼저 보여줍니다.
 `civstation run ...`은 나머지 플래그를 기존 `turn_runner` parser로 그대로 넘기므로, 여전히 ConfigArgParse가 CLI 인자와 `config.yaml`을 함께 읽습니다.
 
 ## Provider 설정

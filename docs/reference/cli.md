@@ -15,7 +15,7 @@ Installed command:
 civstation run --help
 ```
 
-The root CLI shows onboarding, the mobile/operator checklist, and a fast GitHub star action.
+The root CLI shows onboarding and the mobile/operator checklist.
 `civstation run ...` forwards the remaining flags to the existing `turn_runner` parser, so ConfigArgParse still reads both CLI arguments and `config.yaml`.
 
 ## Provider Configuration

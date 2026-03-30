@@ -117,14 +117,14 @@ class StrategyDiscussion:
         # Add user message
         session.add_user_message(user_message)
 
-        # Build context
-        context_str = ""
-        if self.context_manager:
-            context_str = f"현재 게임 상태:\n{self.context_manager.get_combined_context()}"
+        reference_snapshot = self.get_reference_snapshot()
 
         # Build conversation prompt with language instruction
         lang_instruction = DISCUSSION_LANGUAGE_INSTRUCTION.get(language, DISCUSSION_LANGUAGE_INSTRUCTION["ko"])
-        system_prompt = DISCUSSION_SYSTEM_PROMPT.format(context=context_str, language_instruction=lang_instruction)
+        system_prompt = DISCUSSION_SYSTEM_PROMPT.format(
+            reference_snapshot=reference_snapshot["reference_snapshot"],
+            language_instruction=lang_instruction,
+        )
 
         # Build conversation as a single prompt (since we use _send_to_api with text content)
         conversation_text = system_prompt + "\n\n"
@@ -169,8 +169,13 @@ class StrategyDiscussion:
             history_lines.append(f"{role_label}: {msg['content']}")
         conversation_history = "\n".join(history_lines)
 
+        reference_snapshot = self.get_reference_snapshot()
+
         # Build finalize prompt
-        prompt = DISCUSSION_FINALIZE_PROMPT.format(conversation_history=conversation_history)
+        prompt = DISCUSSION_FINALIZE_PROMPT.format(
+            conversation_history=conversation_history,
+            reference_snapshot=reference_snapshot["reference_snapshot"],
+        )
 
         try:
             response = self._call_vlm(prompt)
@@ -224,11 +229,11 @@ class StrategyDiscussion:
             return "활성 세션이 없습니다."
 
         # Get current strategy string
-        current_strategy = ""
+        reference_snapshot = self.get_reference_snapshot()
+        current_strategy = reference_snapshot["current_strategy"]
         context_str = ""
-        if self.context_manager:
-            current_strategy = self.context_manager.get_strategy_string()
-            context_str = f"게임 상태:\n{self.context_manager.get_combined_context()}"
+        if reference_snapshot["combined_context"]:
+            context_str = f"게임 상태:\n{reference_snapshot['combined_context']}"
 
         prompt = DISCUSSION_TURN_FEEDBACK_PROMPT.format(
             turn_summary=turn_summary,
@@ -243,6 +248,26 @@ class StrategyDiscussion:
         except Exception as e:
             logger.error(f"Turn feedback failed: {e}")
             return f"턴 피드백 생성 중 오류: {e}"
+
+    def get_reference_snapshot(self) -> dict[str, str]:
+        """Return the current strategy/context snapshot used to ground discussions."""
+        current_strategy = ""
+        combined_context = ""
+        if self.context_manager:
+            current_strategy = self.context_manager.get_strategy_string().strip()
+            combined_context = self.context_manager.get_combined_context().strip()
+
+        sections = []
+        if current_strategy:
+            sections.append(f"현재 High-Level Strategy:\n{current_strategy}")
+        if combined_context:
+            sections.append(f"현재 게임 Context:\n{combined_context}")
+
+        return {
+            "current_strategy": current_strategy,
+            "combined_context": combined_context,
+            "reference_snapshot": "\n\n".join(sections),
+        }
 
     @property
     def state(self) -> DiscussionState:

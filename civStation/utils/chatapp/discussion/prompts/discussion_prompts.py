@@ -22,7 +22,7 @@ DISCUSSION_SYSTEM_PROMPT = """\
 - 구체적인 건물, 기술, 유닛 이름을 사용합니다
 - 한 번에 너무 많은 정보를 제공하지 않습니다
 
-{context}
+{reference_snapshot}
 """
 
 DISCUSSION_FINALIZE_PROMPT = """\
@@ -30,6 +30,9 @@ DISCUSSION_FINALIZE_PROMPT = """\
 
 토론 내역:
 {conversation_history}
+
+현재 참고 정보:
+{reference_snapshot}
 
 다음 JSON 형식으로 출력해주세요:
 ```json
