@@ -1,0 +1,51 @@
+% IEEE-style arXiv manuscript for CivStation
+\documentclass[conference]{IEEEtran}
+
+\IEEEoverridecommandlockouts
+
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{enumitem}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{url}
+\usepackage{tikz}
+\usepackage{threeparttable}
+\usepackage{cuted}
+
+\usetikzlibrary{arrows.meta,positioning,fit,backgrounds,calc}
+
+\definecolor{layerblue}{RGB}{62,112,191}
+\definecolor{layergreen}{RGB}{73,151,105}
+\definecolor{layerorange}{RGB}{214,126,44}
+\definecolor{layerred}{RGB}{188,76,76}
+\definecolor{layergray}{RGB}{92,99,112}
+
+\begin{document}
+
+\title{CivStation: Layered Control and Benchmarking Infrastructure for Civilization VI Computer-Use Agents}
+
+\author{
+\IEEEauthorblockN{Minsing Jin}
+\IEEEauthorblockA{
+Affiliation TBD \\
+Email: developerminsing@gmail.com
+}
+}
+
+\maketitle
+
+\begin{IEEEkeywords}
+computer-use agents, game AI, Civilization VI, human-in-the-loop, Model Context Protocol, multimodal systems
+\end{IEEEkeywords}
+
+\input{../shared/civstation_body.tex}
+
+\bibliographystyle{IEEEtran}
+\bibliography{ref}
+
+\end{document}

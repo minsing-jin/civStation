@@ -1,4 +1,4 @@
-* computer-use-test version:
+* civStation version:
 * Python version:
 * Operating System:
 

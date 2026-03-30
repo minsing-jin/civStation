@@ -1,6 +1,6 @@
 """Unit tests for action parsing and validation."""
 
-from computer_use_test.utils.llm_provider.parser import (
+from civStation.utils.llm_provider.parser import (
     AgentAction,
     parse_action_json,
     parse_action_json_list,

@@ -1,6 +1,6 @@
 """Unit tests for the new choice-catalog short-term memory."""
 
-from computer_use_test.agent.modules.memory.short_term_memory import ShortTermMemory
+from civStation.agent.modules.memory.short_term_memory import ShortTermMemory
 
 
 class TestShortTermMemoryChoiceCatalog:

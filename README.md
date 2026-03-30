@@ -1,398 +1,503 @@
-# Civ6 Computer Use Agent
+<div align="center">
 
-An autonomous Civilization VI game agent powered by Vision-Language Models (VLMs).
-Captures screenshots, classifies game state via routing, then dispatches to specialized primitives that generate normalized-coordinate actions executed through PyAutoGUI.
+**Languages**
 
----
+[English](README.md) | [한국어](README.ko.md) | [中文](README.zh.md)
 
-## Architecture
+</div>
 
-### Core Flow (One Turn)
+# CivStation
 
-```
-Screenshot Capture
-    │
-    ▼
-Router VLM ─── Classify Game State ──▶ Select Primitive
-    │
-    ▼
-Planner VLM ─── Generate Action (normalized coords 0-1000)
-    │
-    ▼
-execute_action() ─── Convert Coords ──▶ PyAutoGUI Execution
-```
+> A controllable Civ6 computer-use stack for people who want more than "run the bot and hope."
+>
+> Observe the screen, refine strategy, plan the next move, and intervene live through `HitL` or `MCP`.
 
-### Project Structure
+You can also think of CivStation as a `VLM harness` for Civilization VI: it gives a vision-language model a structured loop for observation, strategy, action planning, execution, and human override.
 
-```
-computer_use_test/
-├── agent/
-│   ├── turn_runner.py              # CLI entry point (ConfigArgParse + config.yaml)
-│   ├── turn_executor.py            # run_one_turn / run_multi_turn execution logic
-│   └── modules/
-│       ├── router/
-│       │   └── primitive_registry.py       # Central primitive registry (auto-generates router prompt)
-│       ├── primitive/                      # Primitive execution logic
-│       ├── context/
-│       │   ├── context_manager.py          # Game state context tracking
-│       │   ├── context_updater.py          # Background screenshot analysis
-│       │   └── macro_turn_manager.py       # In-game turn boundary detection
-│       ├── strategy/
-│       │   └── strategy_planner.py         # Strategy generation / HITL refinement
-│       ├── knowledge/
-│       │   ├── knowledge_manager.py        # Orchestrates document + web retrieval
-│       │   ├── document_retriever.py       # Civopedia JSON index search
-│       │   └── web_search_retriever.py     # Tavily web search integration
-│       └── hitl/
-│           ├── command_queue.py            # Thread-safe directive queue
-│           ├── agent_gate.py              # External control gate (start/stop/pause)
-│           ├── queue_listener.py          # Stdin listener
-│           ├── status_ui/
-│           │   ├── server.py              # FastAPI server (REST + WS + Discussion)
-│           │   ├── state_bridge.py        # Agent ↔ UI thread bridge
-│           │   ├── websocket_manager.py   # WS connection management + broadcast
-│           │   ├── screen_streamer.py     # Real-time screen streaming via WS
-│           │   └── dashboard.py           # Built-in HTML/JS dashboard
-│           └── relay/
-│               └── relay_client.py        # Remote HITL via external relay server
-├── utils/
-│   ├── llm_provider/               # Claude / Gemini / GPT / Mock providers
-│   ├── screen.py                   # Screenshot capture + coord conversion (Retina-aware)
-│   └── chatapp/
-│       ├── discord_app.py          # Discord bot integration
-│       ├── whatsapp_app.py         # WhatsApp bot integration
-│       └── discussion/
-│           ├── discussion_engine.py    # Multi-turn strategy discussion engine
-│           └── discussion_schemas.py   # Session & message data models
-└── evaluator/
-    └── civ6/static_eval/           # Static evaluation framework (ground truth comparison)
-```
+Canonical GitHub repository:
 
-### Primitive System
+- `https://github.com/minsing-jin/civStation`
 
-The router classifies each screenshot into one of 10 specialized primitives:
+If you install, clone, or use CivStation, a GitHub star genuinely helps.
 
-| Primitive | Responsibility |
-|---|---|
-| `unit_ops_primitive` | Unit movement, actions, and combat |
-| `popup_primitive` | Popup / notification handling |
-| `research_select_primitive` | Technology research selection |
-| `city_production_primitive` | City production queue |
-| `science_decision_primitive` | Tech tree decisions |
-| `culture_decision_primitive` | Civics tree decisions |
-| `governor_primitive` | Governor placement & promotion |
-| `diplomatic_primitive` | Diplomacy interactions |
-| `combat_primitive` | Dedicated combat situations |
-| `policy_primitive` | Policy card management |
+- Fastest CLI action: `gh repo star minsing-jin/civStation`
 
-**Adding a new primitive:** Add an entry to `PRIMITIVE_REGISTRY` in `primitive_registry.py` — the router prompt, primitive names, and prompt lookup all auto-update.
+Current package and module names are still:
 
-### HITL (Human-in-the-Loop) System
+- Python package: `civStation`
+- Python module: `civStation`
 
-```
-External Controller (Web UI / Chat App / Relay)
-    │  HTTP / WebSocket
-    ▼
-FastAPI Server (server.py)
-    │
-    ├── AgentGate ─── Start / Stop / Pause lifecycle
-    │
-    ├── CommandQueue ─── Directive queue
-    │       │
-    │       ▼
-    │   turn_executor ─── Checks queue each turn
-    │
-    └── DiscussionEngine ─── Multi-turn strategy discussion via LLM
-```
+## 📚 Index
 
-**Directive priority:** `STOP` > `PRIMITIVE_OVERRIDE` > `PAUSE` > `CHANGE_STRATEGY`
+- [🚀 30-Second Quick Start](#-30-second-quick-start)
+- [🧭 Should I Use Docker?](#-should-i-use-docker)
+- [▶️ Recommended Run Flow](#-recommended-run-flow)
+- [📱 Mobile QR Quick Start](#-mobile-qr-quick-start)
+- [🧠 Why HitL Matters](#-why-hitl-matters)
+- [🎮 Detailed Mobile QR Flow](#-detailed-mobile-qr-flow)
+- [✨ Why CivStation?](#-why-civstation)
+- [🧵 Runtime Separation](#-runtime-separation)
+- [🏗️ Architecture](#-architecture)
+- [🕹️ HitL Control Surfaces](#-hitl-control-surfaces)
+- [🧩 MCP and Skill Extensibility](#-mcp-and-skill-extensibility)
+- [📖 Documentation](#-documentation)
+- [🛠️ Development](#-development)
 
-### Strategy Discussion
+## 🚀 30-Second Quick Start
 
-The discussion system enables real-time, multi-turn strategy conversations between the player and the LLM through the REST API. The LLM uses the current game context and strategy to provide advice.
+If you just want to see CivStation move in Civilization VI as fast as possible, do this:
 
-- Supports multiple languages (`ko`, `en`, `ja`, `zh`) — set via the `language` field in requests
-- Sessions are per-user and persist across multiple messages
-- Finalization extracts a structured strategy (victory goal, phase, priorities) from the conversation
+> [!NOTE]
+> Recommended starting model: `gemini-3-flash`.
+> If you want one default that is fast, practical, and easy to operate for CivStation, start with `gemini-3-flash` before tuning anything else.
 
-### Knowledge Retrieval
-
-Optional modules that augment primitive decisions with external knowledge:
-
-- **Document Retriever** — Searches a local Civopedia JSON index (`--knowledge-index`)
-- **Web Search Retriever** — Queries Tavily for real-time game strategy info (`--enable-web-search`)
-
----
-
-## Installation
+1. Open Civilization VI and stop on a playable map screen.
+2. Run:
 
 ```bash
-# Install dependencies + pre-commit hooks
-make install
-
-# Or install directly
-pip install -e ".[ui]"   # Includes FastAPI + uvicorn
+uv run civstation run \
+  --provider gemini \
+  --model gemini-3-flash \
+  --turns 100 \
+  --status-ui \
+  --wait-for-start \
+  --status-port 8765
 ```
 
-### Environment Variables
+3. Open `http://127.0.0.1:8765`
+4. Press `Start`
 
-Create a `.env` file in the project root:
+That is the simplest possible path.
 
-```env
-ANTHROPIC_API_KEY=sk-ant-...
-GENAI_API_KEY=AIza...
-OPENAI_API_KEY=sk-...          # Optional
-DISCORD_BOT_TOKEN=...          # Optional, for Discord HITL
-WHATSAPP_BOT_TOKEN=...         # Optional, for WhatsApp HITL
-```
-
----
-
-## Usage
-
-### Basic Run
+If you just want the setup checklist first, run:
 
 ```bash
-# Use config.yaml defaults
-python -m computer_use_test.agent.turn_runner
-
-# Specify via CLI
-python -m computer_use_test.agent.turn_runner \
-    --provider claude \
-    --turns 20 \
-    --strategy "Focus on science victory"
+uv run civstation
 ```
 
-### Real-Time Dashboard
+If macOS blocks screenshot or control access, grant:
+
+- `Screen Recording`
+- `Accessibility`
+
+to your terminal, `uv`, or Python app, then try again.
+
+## 🧭 Should I Use Docker?
+
+Short answer: `no` for live gameplay.
+
+Why:
+
+- CivStation captures the host desktop and Civ6 window with `pyautogui` in [screen.py](/Users/jinminseong/Desktop/civStation/civStation/utils/screen.py).
+- The status streamer captures the primary monitor directly with `mss` in [screen_streamer.py](/Users/jinminseong/Desktop/civStation/civStation/agent/modules/hitl/status_ui/screen_streamer.py).
+- The runtime also needs host-level `Screen Recording` and `Accessibility` permissions on macOS.
+- For actual play, the agent must see and click the real Civ6 window on the same machine and desktop session.
+
+That means Docker is the wrong default for:
+
+- live Civ6 play
+- local screen capture
+- mouse/keyboard control
+- the mobile-control flow where the host machine is also running the game
+
+Docker is only reasonable here for non-GUI tasks such as:
+
+- docs builds
+- linting
+- tests that do not need the real game window
+
+## ▶️ Recommended Run Flow
+
+If you cloned the repo and want to run CivStation correctly:
+
+1. Clone and enter the repo.
 
 ```bash
-python -m computer_use_test.agent.turn_runner \
-    --status-ui \
-    --status-port 8765 \
-    --turns 50
+git clone https://github.com/minsing-jin/civStation.git
+cd civStation
 ```
 
-Open `http://localhost:8765` in a browser.
-
-### Mobile QR Connect
-
-1. Run the agent with `--status-ui`
-2. Open `http://localhost:8765` on your PC browser
-3. Click **"QR Connect"** in the top-right header
-4. Scan the QR code with your phone (must be on the same Wi-Fi)
-
-> The QR code auto-detects the server's LAN IP (`http://192.168.x.x:8765`).
-
-### External Controller (Wait-for-Start Mode)
-
-The agent starts the server first and waits for an external signal before executing turns:
+2. Sync the local environment.
 
 ```bash
-python -m computer_use_test.agent.turn_runner \
-    --status-ui \
-    --wait-for-start \
-    --turns 100
+uv sync
 ```
 
-Control via HTTP:
+3. Print the operator guide first.
 
 ```bash
-curl -X POST http://localhost:8765/api/agent/start
-curl -X POST http://localhost:8765/api/agent/pause
-curl -X POST http://localhost:8765/api/agent/resume
-curl -X POST http://localhost:8765/api/agent/stop
-curl http://localhost:8765/api/agent/state
-# → {"state": "running"}  # idle / running / paused / stopped
+uv run civstation
 ```
 
-### Split Router / Planner Providers
+4. Put Civ6 on the main monitor and leave the actual game screen visible.
+5. If you want remote control, keep the dashboard off the game screen and use your phone or a secondary device.
+6. Start the agent.
 
 ```bash
-python -m computer_use_test.agent.turn_runner \
-    --router-provider gemini --router-model gemini-2.0-flash \
-    --planner-provider claude --planner-model claude-sonnet-4-5
+uv run civstation run \
+  --provider gemini \
+  --model gemini-3-flash \
+  --turns 100 \
+  --status-ui \
+  --wait-for-start \
+  --status-port 8765
 ```
 
-### Computer-Use Planner Providers
+7. Open `http://127.0.0.1:8765` and press `Start`.
 
-Use the normal vision provider for routing, and switch only the planner to a
-computer-use provider for single-step action planning:
+Installed command aliases also work:
 
 ```bash
-python -m computer_use_test.agent.turn_runner \
-    --router-provider gemini --router-model gemini-2.0-flash \
-    --planner-provider openai-computer --planner-model computer-use-preview
-
-python -m computer_use_test.agent.turn_runner \
-    --router-provider claude --router-model claude-4-5-sonnet-20241022 \
-    --planner-provider anthropic-computer --planner-model claude-4-5-sonnet-20241022
+civstation
+civstation run --provider gemini --model gemini-3-flash --turns 100 --status-ui --wait-for-start
 ```
 
-Notes:
+## 📱 Mobile QR Quick Start
 
-- `openai-computer` and `anthropic-computer` override only planner `analyze()` calls.
-- Router classification and multi-action JSON flows still use the normal VLM path.
-- Environment variables follow the existing vendor keys: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`.
+If you want to control the run from your phone:
 
-### Chat App Integration (Discord / WhatsApp)
+1. Clone and start the mobile controller:
 
 ```bash
-# Discord
-python -m computer_use_test.agent.turn_runner \
-    --chatapp discord \
-    --discord-token $DISCORD_BOT_TOKEN \
-    --discord-channel 123456789 \
-    --enable-discussion
-
-# WhatsApp
-python -m computer_use_test.agent.turn_runner \
-    --chatapp whatsapp \
-    --whatsapp-token $WHATSAPP_BOT_TOKEN \
-    --whatsapp-phone-number-id 123456
+git clone https://github.com/minsing-jin/civ6_tacticall.git
+cd civ6_tacticall
+npm install
+npm start
 ```
 
-### Remote Relay (Headless HITL)
+2. Create the bridge config:
 
 ```bash
-python -m computer_use_test.agent.turn_runner \
-    --relay-url wss://your-relay-server.com \
-    --relay-token $RELAY_TOKEN \
-    --status-ui
+cp host-config.example.json host-config.json
 ```
 
-### config.yaml
-
-```yaml
-provider: gemini
-model: gemini-3-flash-preview
-turns: 10
-strategy: "Focus on science victory and strengthen scouting."
-status-ui: true
-```
-
----
-
-## API Endpoints
-
-### Agent Control
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/` | Real-time dashboard (HTML) |
-| `GET` | `/api/status` | Agent status snapshot (JSON) |
-| `POST` | `/api/directive` | Submit a text directive |
-| `GET` | `/api/agent/state` | Agent lifecycle state |
-| `POST` | `/api/agent/start` | Start the agent |
-| `POST` | `/api/agent/pause` | Pause execution |
-| `POST` | `/api/agent/resume` | Resume execution |
-| `POST` | `/api/agent/stop` | Stop the agent |
-| `GET` | `/api/connection-info` | LAN IP + access URL |
-| `WS` | `/ws` | WebSocket real-time channel |
-
-### Strategy Discussion
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `POST` | `/api/discuss` | Send a message (auto-creates session) |
-| `POST` | `/api/discuss/finalize` | Finalize session → extract strategy |
-| `GET` | `/api/discuss/status` | Get session state + message history |
-
-**`POST /api/discuss`** request body:
+3. Put CivStation's local server into the config:
 
 ```json
 {
-  "message": "Should I prioritize Campus districts?",
-  "user_id": "web_user",
-  "mode": "in_game",
-  "language": "en"
+  "relayUrl": "ws://127.0.0.1:8787/ws",
+  "localApiBaseUrl": "http://127.0.0.1:8765",
+  "localAgentUrl": "ws://127.0.0.1:8765/ws",
+  "roomId": "civ6-room",
+  "hostKey": "change-this-host-key"
 }
 ```
 
-Response:
-
-```json
-{
-  "session_id": "a1b2c3d4",
-  "response": "Yes, Campus districts are essential for...",
-  "message_count": 3
-}
-```
-
-**`POST /api/discuss/finalize`** request body:
-
-```json
-{ "user_id": "web_user" }
-```
-
-Response:
-
-```json
-{ "ok": true, "strategy": "StructuredStrategy(...)" }
-```
-
-**`GET /api/discuss/status?user_id=web_user`** response:
-
-```json
-{
-  "active": true,
-  "session_id": "a1b2c3d4",
-  "mode": "in_game",
-  "message_count": 4,
-  "messages": [
-    { "role": "user", "content": "..." },
-    { "role": "assistant", "content": "..." }
-  ]
-}
-```
-
-### WebSocket Protocol
-
-**Type-based (recommended):**
-
-```json
-{"type": "control", "action": "start|stop|pause|resume"}
-{"type": "command", "content": "Switch to culture victory"}
-{"type": "ping"}
-```
-
-**Legacy mode-based:**
-
-```json
-{"mode": "high_level", "content": "Switch to culture victory"}
-{"mode": "primitive", "content": "{\"action\":\"click\",\"x\":500,\"y\":300}"}
-{"mode": "pause"}
-```
-
----
-
-## Development
+4. Start the bridge:
 
 ```bash
-make lint       # Ruff check
-make format     # Ruff format + fix
-make check      # Lint + type check
-make test       # Run all tests
-make coverage   # Coverage report
+npm run host
 ```
 
-### Testing
+5. Scan the QR code with your phone
+6. Press `Start` on your phone
+
+That `Start` signal is what actually begins gameplay.
+
+## 🧠 Why HitL Matters
+
+> [!IMPORTANT]
+> CivStation is **not** a fully autonomous agent today.
+> If you do not use `HitL`, the agent can get noticeably dumber in real play.
+
+Why:
+
+- screen state can be ambiguous
+- long-term intent can drift
+- unexpected Civ6 UI states still happen
+- a human is still the fastest recovery mechanism
+
+In practice, HitL makes the agent:
+
+- less brittle
+- easier to recover
+- more aligned with the goal you actually want
+
+The easiest beginner setup is:
+
+- local dashboard first
+- mobile QR second
+- full MCP automation later
+
+## 🎮 Detailed Mobile QR Flow
+
+### Relationship
+
+```text
+Civilization VI game window
+  <- screen capture + action execution -> CivStation
+  <- local WebSocket/API bridge -> civ6_tacticall
+  <- remote mobile UI -> phone browser via QR
+```
+
+### End-to-end control flow
+
+```text
+Phone / Browser
+  -> civ6_tacticall controller
+  -> civ6_tacticall relay
+  -> bridge.js on host
+  -> CivStation WebSocket/API
+  -> AgentGate / CommandQueue / Discussion API
+  -> Civ6 gameplay
+```
+
+### What `start` actually does
+
+```text
+Controller Start button
+  -> WebSocket control:start
+  -> bridge.js
+  -> ws://127.0.0.1:8765/ws
+  -> AgentGate.start()
+  -> turn_runner exits wait state
+  -> turn_executor begins playing turns
+```
+
+### Recommended operator setup
+
+- Keep Civ6 on the main display and visible at all times.
+- Do not cover the game window with the local controller UI.
+- Prefer controlling from a phone or secondary device.
+- Pair the mobile browser by scanning the QR code printed by `npm run host`.
+- Use windowed or borderless mode if you want reliable automatic game-window cropping on macOS.
+- Keep the game at a stable resolution during a run.
+
+## ✨ Why CivStation?
+
+- `Layered by design`: the agent is broken into inspectable layers instead of one opaque loop.
+- `Human-steerable`: pause, resume, stop, change strategy, and discuss the next move while the run is live.
+- `MCP-first`: the same architecture is exposed as a stable external control surface.
+- `Real runtime separation`: context/strategy work, main-thread action work, and HITL control are split into different runtime lanes.
+- `Extensible`: swap adapters, add skills, and change orchestration without rewriting the whole system.
+- `Operator-friendly`: local dashboard, WebSocket control, and remote phone control are all supported.
+- `A practical VLM harness`: instead of calling a VLM on raw screenshots ad hoc, CivStation wraps the model in a reusable control loop with context, routing, planning, execution, and intervention points.
+
+## 🧵 Runtime Separation
+
+The MCP session/runtime model matters because it mirrors the real execution split:
+
+- `background runtime`
+  - context observation and turn tracking
+  - strategy refresh and background reasoning
+- `main-thread action runtime`
+  - route the current screen
+  - plan the primitive action
+  - execute the action safely on the game window
+- `hitl runtime`
+  - external controller, dashboard, relay, or mobile client
+  - sends lifecycle and strategy/control directives into the running system
+
+This is the core value of the layered runtime:
+
+- expensive background reasoning does not have to block the action loop
+- the action loop stays deterministic and interruptible
+- HITL stays outside the action thread, but can still steer it safely through queues and gates
+- MCP sessions become real runtime containers instead of just serialized state blobs
+
+## 🏗️ Architecture
+
+### The Four Layers
+
+| Layer | Core question | Main code | Details |
+|---|---|---|---|
+| `Context` | What is on the screen and what is the current game state? | `civStation/agent/modules/context/` | [Context README](civStation/agent/modules/context/README.md) |
+| `Strategy` | Given the state and human intent, what should matter next? | `civStation/agent/modules/strategy/` | [Strategy README](civStation/agent/modules/strategy/README.md) |
+| `Action` | Which primitive should handle this screen, and what action should it take? | `civStation/agent/modules/router/`, `civStation/agent/modules/primitive/` | [Router README](civStation/agent/modules/router/README.md), [Primitive README](civStation/agent/modules/primitive/README.md) |
+| `HitL` | How can a human intervene while the agent is running? | `civStation/agent/modules/hitl/` | [HitL README](civStation/agent/modules/hitl/README.md) |
+
+### Folder Mapping
+
+Yes, the abstractions now map directly to folders.
+
+- `Context` lives in `civStation/agent/modules/context/`
+- `Strategy` lives in `civStation/agent/modules/strategy/`
+- `HitL` lives in `civStation/agent/modules/hitl/`
+- `Action` is the one deliberate split:
+  it lives across `civStation/agent/modules/router/` and `civStation/agent/modules/primitive/`
+
+That split is intentional: routing and primitive execution are separate responsibilities.
+
+### High-Level Flow
+
+```text
+Screenshot
+  -> Context
+  -> Strategy
+  -> Action
+  -> Execution
+
+Human-in-the-Loop can intervene at:
+  - lifecycle: start / pause / resume / stop
+  - strategy: high-level intent change
+  - action: primitive override / direct command
+```
+
+## 🕹️ HitL Control Surfaces
+
+### Local dashboard
+
+- `http://127.0.0.1:8765`
+- `POST /api/agent/start`
+- `POST /api/agent/pause`
+- `POST /api/agent/resume`
+- `POST /api/agent/stop`
+- `POST /api/directive`
+- `POST /api/discuss`
+
+### WebSocket
+
+```text
+ws://127.0.0.1:8765/ws
+```
+
+Supported messages:
+
+```json
+{ "type": "control", "action": "start" }
+{ "type": "control", "action": "pause" }
+{ "type": "control", "action": "resume" }
+{ "type": "control", "action": "stop" }
+{ "type": "command", "content": "Switch to culture victory and stop expanding" }
+```
+
+### Remote controller
+
+- [`minsing-jin/civ6_tacticall`](https://github.com/minsing-jin/civ6_tacticall.git)
+- mobile QR controller + relay + bridge
+
+## 🧩 MCP and Skill Extensibility
+
+### MCP
+
+This repository exposes the same architecture through a layered MCP server so the Civ agent can be reused as a portable capability instead of only as an internal code path.
+
+Tool groups:
+
+- `context_*`
+- `strategy_*`
+- `action_*`
+- `hitl_*`
+- `workflow_*`
+- `session_*`
+
+Run it with:
 
 ```bash
-pytest tests/evaluator/civ6_eval/ -v          # All evaluator tests
-pytest tests/evaluator/civ6_eval/test_tolerance.py -v  # Single file
-pytest -m "not integration"                    # Skip integration tests
+uv run civstation mcp
 ```
 
----
+or install the console script and run:
 
-## Coordinate Normalization
+```bash
+civStation_mcp
+```
 
-The VLM always works with `0 ~ normalizing_range` (default 1000) coordinates.
-Conversion to actual screen coordinates is handled by `norm_to_real()` in `screen.py`.
-Mac Retina display logical/physical pixel mismatch is handled automatically.
+For remote or hosted MCP clients:
 
----
+```bash
+uv run civstation mcp \
+  --transport streamable-http \
+  --host 127.0.0.1 \
+  --port 8000 \
+  --streamable-http-path /mcp \
+  --json-response \
+  --stateless-http
+```
 
-## License
+Docs:
 
-MIT
+- [MCP README](civStation/mcp/README.md)
+- [Layered MCP Tool Map](docs/layered_mcp.md)
+
+### Strict Layer Separation
+
+The MCP contract preserves the runtime split used by the project:
+
+- `strategy/context`: background-oriented
+- `primitive action`: main-thread oriented
+- `hitl`: external queue / relay oriented
+
+This separation is exposed as a portable contract through tools, resources, and prompts rather than through host-specific wrapper logic.
+
+### Adapter extensibility
+
+The MCP runtime is still adapter-driven inside those layer boundaries.
+
+Default extension slots:
+
+- `action_router`
+- `action_planner`
+- `context_observer`
+- `strategy_refiner`
+- `action_executor`
+
+You can register adapters in `LayerAdapterRegistry` and select them per session through `adapter_overrides`.
+
+### Portable host setup
+
+This repo ships host templates and an installer instead of hard-wiring one host's local skill/config folder into the repository.
+
+Templates:
+
+- `templates/clients/codex/`
+- `templates/clients/claude-code/`
+
+Installer:
+
+```bash
+uv run civstation mcp-install --client codex --write
+uv run civstation mcp-install --client claude-code --write
+```
+
+Setup resources exposed by MCP:
+
+- `civ6://install/codex-config`
+- `civ6://install/claude-code-project-mcp-json`
+- `civ6://install/http-client-example`
+- `civ6://contracts/layers`
+
+### Safety defaults
+
+Live action execution is disabled by default.
+
+- default session runtime: `execution_mode="dry_run"`
+- live execution requires `session_config_update(... execution_mode="live")`
+- if confirmation is enabled, callers must also pass `confirm_execute=true`
+
+That keeps the MCP surface safe for new users while still allowing real execution when explicitly unlocked.
+
+## 📖 Documentation
+
+Hosted docs:
+
+- `https://minsing-jin.github.io/civStation/`
+
+Local docs:
+
+- `make docs-serve`
+- `make docs-build`
+
+Detailed layer docs:
+
+- [Context README](civStation/agent/modules/context/README.md)
+- [Strategy README](civStation/agent/modules/strategy/README.md)
+- [Router README](civStation/agent/modules/router/README.md)
+- [Primitive README](civStation/agent/modules/primitive/README.md)
+- [HitL README](civStation/agent/modules/hitl/README.md)
+- [MCP README](civStation/mcp/README.md)
+
+Other languages:
+
+- [한국어](README.ko.md)
+- [中文](README.zh.md)
+
+## 🛠️ Development
+
+```bash
+make lint
+make format
+make check
+make test
+make coverage
+```

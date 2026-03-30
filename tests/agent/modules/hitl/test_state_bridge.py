@@ -1,8 +1,8 @@
 """Unit tests for AgentStateBridge — snapshot consistency."""
 
-from computer_use_test.agent.modules.context.context_manager import ContextManager
-from computer_use_test.agent.modules.hitl.command_queue import CommandQueue, Directive, DirectiveType
-from computer_use_test.agent.modules.hitl.status_ui.state_bridge import AgentStateBridge
+from civStation.agent.modules.context.context_manager import ContextManager
+from civStation.agent.modules.hitl.command_queue import CommandQueue, Directive, DirectiveType
+from civStation.agent.modules.hitl.status_ui.state_bridge import AgentStateBridge
 
 
 class TestAgentStateBridge:

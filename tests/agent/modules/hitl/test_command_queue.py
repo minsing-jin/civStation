@@ -2,7 +2,7 @@
 
 import threading
 
-from computer_use_test.agent.modules.hitl.command_queue import CommandQueue, Directive, DirectiveType
+from civStation.agent.modules.hitl.command_queue import CommandQueue, Directive, DirectiveType
 
 
 def _make_directive(dtype: DirectiveType = DirectiveType.CHANGE_STRATEGY, payload: str = "test") -> Directive:

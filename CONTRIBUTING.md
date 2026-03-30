@@ -8,7 +8,7 @@ You can contribute in many ways:
 
 ### Report Bugs
 
-Report bugs at https://github.com/minsing-jin/computer_use_test/issues.
+Report bugs at https://github.com/minsing-jin/civStation/issues.
 
 If you are reporting a bug, please include:
 
@@ -26,11 +26,11 @@ Look through the GitHub issues for features. Anything tagged with "enhancement" 
 
 ### Write Documentation
 
-computer-use-test could always use more documentation, whether as part of the official docs, in docstrings, or even on the web in blog posts, articles, and such.
+civStation could always use more documentation, whether as part of the official docs, in docstrings, or even on the web in blog posts, articles, and such.
 
 ### Submit Feedback
 
-The best way to send feedback is to file an issue at https://github.com/minsing-jin/computer_use_test/issues.
+The best way to send feedback is to file an issue at https://github.com/minsing-jin/civStation/issues.
 
 If you are proposing a feature:
 
@@ -40,20 +40,20 @@ If you are proposing a feature:
 
 ## Get Started!
 
-Ready to contribute? Here's how to set up `computer_use_test` for local development.
+Ready to contribute? Here's how to set up `civStation` for local development.
 
-1. Fork the `computer_use_test` repo on GitHub.
+1. Fork the `civStation` repo on GitHub.
 2. Clone your fork locally:
 
    ```sh
-   git clone git@github.com:your_name_here/computer_use_test.git
+   git clone git@github.com:your_name_here/civStation.git
    ```
 
 3. Install your local copy into a virtualenv. Assuming you have virtualenvwrapper installed, this is how you set up your fork for local development:
 
    ```sh
-   mkvirtualenv computer_use_test
-   cd computer_use_test/
+   mkvirtualenv civStation
+   cd civStation/
    python setup.py develop
    ```
 
@@ -99,12 +99,12 @@ Before you submit a pull request, check that it meets these guidelines:
 To run a subset of tests:
 
 ```sh
-pytest tests.test_computer_use_test
+pytest tests.test_civStation
 ```
 
 ## Deploying
 
-A reminder for the maintainers on how to deploy. Make sure all your changes are committed (including an entry in HISTORY.md). Then run:
+A reminder for the maintainers on how to deploy. Make sure all your changes are committed (including an entry in `docs/archive/HISTORY.md`). Then run:
 
 ```sh
 bump2version patch # possible: major / minor / patch

@@ -2,7 +2,7 @@
 
 **Problem**
 
-`python -m computer_use_test.agent.turn_runner` currently favors Rich live output for operator visibility, but it does not preserve a plain-text execution log that external coding agents can inspect after a failure. When a run crashes, the useful context is spread across terminal state and traceback output.
+`python -m civStation.agent.turn_runner` currently favors Rich live output for operator visibility, but it does not preserve a plain-text execution log that external coding agents can inspect after a failure. When a run crashes, the useful context is spread across terminal state and traceback output.
 
 **Goal**
 
@@ -33,7 +33,7 @@ Use option 2. It meets the debugging need without changing the terminal UI or br
 
 **Design**
 
-- Add `computer_use_test/utils/run_log_cache.py`.
+- Add `civStation/utils/run_log_cache.py`.
 - Expose a small session object that:
   - resolves a temp-cache path for the latest run,
   - opens the file in write mode to guarantee overwrite semantics,
@@ -42,7 +42,7 @@ Use option 2. It meets the debugging need without changing the terminal UI or br
   - restores the previous hook and removes the handler during cleanup.
 - Initialize the session near the start of `turn_runner.main()` so startup failures are included.
 - Close the session in `main()` cleanup regardless of success or failure.
-- Keep the cache path deterministic for the latest run, for example under the system temp directory in a `computer_use_test` subdirectory.
+- Keep the cache path deterministic for the latest run, for example under the system temp directory in a `civStation` subdirectory.
 
 **Testing**
 

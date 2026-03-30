@@ -14,7 +14,7 @@
 
 **Files:**
 - Modify: `tests/agent/modules/primitive/test_multi_step_process.py`
-- Modify: `computer_use_test/agent/modules/primitive/multi_step_process.py`
+- Modify: `civStation/agent/modules/primitive/multi_step_process.py`
 
 **Step 1: Write the failing tests**
 
@@ -42,7 +42,7 @@ Expected: PASS
 
 **Files:**
 - Modify: `tests/agent/modules/primitive/test_multi_step_process.py`
-- Modify: `computer_use_test/agent/modules/primitive/multi_step_process.py`
+- Modify: `civStation/agent/modules/primitive/multi_step_process.py`
 
 **Step 1: Write the failing tests**
 
@@ -72,7 +72,7 @@ Expected: PASS
 
 **Files:**
 - Modify: `tests/agent/test_turn_executor.py`
-- Modify: `computer_use_test/agent/turn_executor.py` if needed
+- Modify: `civStation/agent/turn_executor.py` if needed
 
 **Step 1: Write the failing test**
 

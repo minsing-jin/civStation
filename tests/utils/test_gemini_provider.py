@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 from google.genai import types
 
-from computer_use_test.utils.llm_provider.gemini import GeminiVLMProvider
+from civStation.utils.llm_provider.gemini import GeminiVLMProvider
 
 
 class _DummyModels:

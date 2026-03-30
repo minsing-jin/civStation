@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "civstation-layered": {
+      "command": ".venv/bin/python",
+      "args": ["-m", "civStation.mcp.server", "--transport", "stdio"]
+    }
+  }
+}

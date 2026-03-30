@@ -1,0 +1,305 @@
+{
+  "dataset": "docs/paper/arxiv/benchmarks/synthetic_ui/synthetic_bbox_dataset.jsonl",
+  "results": [
+    {
+      "provider": "gpt",
+      "model": "gpt-4o-mini",
+      "aggregate": {
+        "total_cases": 3,
+        "strict_success_rate": 0.3333333333333333,
+        "avg_step_accuracy": 0.3333333333333333,
+        "avg_prefix_len": 0.3333333333333333,
+        "error_count": 0,
+        "timeout_count": 0,
+        "per_action_type": [
+          {
+            "action_type": "click",
+            "total": 1,
+            "correct": 0,
+            "accuracy": 0.0
+          },
+          {
+            "action_type": "drag",
+            "total": 1,
+            "correct": 0,
+            "accuracy": 0.0
+          },
+          {
+            "action_type": "press",
+            "total": 1,
+            "correct": 1,
+            "accuracy": 1.0
+          }
+        ]
+      },
+      "cases": [
+        {
+          "case_id": "synthetic_confirm_001",
+          "best_sequence": {
+            "strict_success": false,
+            "prefix_len": 0,
+            "step_accuracy": 0.0,
+            "step_results": [
+              {
+                "step_index": 0,
+                "correct": false,
+                "gt_type": "click",
+                "pred_type": "click",
+                "distance_to_center": 0.5268044568716332,
+                "levenshtein_similarity": null
+              }
+            ]
+          },
+          "agent_actions_count": 3,
+          "gt_set_index": 0,
+          "error": null,
+          "timed_out": false
+        },
+        {
+          "case_id": "synthetic_escape_002",
+          "best_sequence": {
+            "strict_success": true,
+            "prefix_len": 1,
+            "step_accuracy": 1.0,
+            "step_results": [
+              {
+                "step_index": 0,
+                "correct": true,
+                "gt_type": "press",
+                "pred_type": "press",
+                "distance_to_center": null,
+                "levenshtein_similarity": 1.0
+              }
+            ]
+          },
+          "agent_actions_count": 1,
+          "gt_set_index": 0,
+          "error": null,
+          "timed_out": false
+        },
+        {
+          "case_id": "synthetic_drag_003",
+          "best_sequence": {
+            "strict_success": false,
+            "prefix_len": 0,
+            "step_accuracy": 0.0,
+            "step_results": [
+              {
+                "step_index": 0,
+                "correct": false,
+                "gt_type": "drag",
+                "pred_type": "click",
+                "distance_to_center": null,
+                "levenshtein_similarity": null
+              }
+            ]
+          },
+          "agent_actions_count": 3,
+          "gt_set_index": 0,
+          "error": null,
+          "timed_out": false
+        }
+      ]
+    },
+    {
+      "provider": "gpt",
+      "model": "gpt-4o",
+      "aggregate": {
+        "total_cases": 3,
+        "strict_success_rate": 0.0,
+        "avg_step_accuracy": 0.0,
+        "avg_prefix_len": 0.0,
+        "error_count": 0,
+        "timeout_count": 0,
+        "per_action_type": [
+          {
+            "action_type": "click",
+            "total": 1,
+            "correct": 0,
+            "accuracy": 0.0
+          },
+          {
+            "action_type": "drag",
+            "total": 1,
+            "correct": 0,
+            "accuracy": 0.0
+          },
+          {
+            "action_type": "press",
+            "total": 1,
+            "correct": 0,
+            "accuracy": 0.0
+          }
+        ]
+      },
+      "cases": [
+        {
+          "case_id": "synthetic_confirm_001",
+          "best_sequence": {
+            "strict_success": false,
+            "prefix_len": 0,
+            "step_accuracy": 0.0,
+            "step_results": [
+              {
+                "step_index": 0,
+                "correct": false,
+                "gt_type": "click",
+                "pred_type": "click",
+                "distance_to_center": 0.5268044568716332,
+                "levenshtein_similarity": null
+              }
+            ]
+          },
+          "agent_actions_count": 3,
+          "gt_set_index": 0,
+          "error": null,
+          "timed_out": false
+        },
+        {
+          "case_id": "synthetic_escape_002",
+          "best_sequence": {
+            "strict_success": false,
+            "prefix_len": 0,
+            "step_accuracy": 0.0,
+            "step_results": [
+              {
+                "step_index": 0,
+                "correct": false,
+                "gt_type": "press",
+                "pred_type": "press",
+                "distance_to_center": null,
+                "levenshtein_similarity": 0.0
+              }
+            ]
+          },
+          "agent_actions_count": 1,
+          "gt_set_index": 0,
+          "error": null,
+          "timed_out": false
+        },
+        {
+          "case_id": "synthetic_drag_003",
+          "best_sequence": {
+            "strict_success": false,
+            "prefix_len": 0,
+            "step_accuracy": 0.0,
+            "step_results": [
+              {
+                "step_index": 0,
+                "correct": false,
+                "gt_type": "drag",
+                "pred_type": "click",
+                "distance_to_center": null,
+                "levenshtein_similarity": null
+              }
+            ]
+          },
+          "agent_actions_count": 3,
+          "gt_set_index": 0,
+          "error": null,
+          "timed_out": false
+        }
+      ]
+    },
+    {
+      "provider": "claude",
+      "model": "claude-sonnet-4-20250514",
+      "aggregate": {
+        "total_cases": 3,
+        "strict_success_rate": 0.6666666666666666,
+        "avg_step_accuracy": 0.6666666666666666,
+        "avg_prefix_len": 0.6666666666666666,
+        "error_count": 0,
+        "timeout_count": 0,
+        "per_action_type": [
+          {
+            "action_type": "click",
+            "total": 1,
+            "correct": 1,
+            "accuracy": 1.0
+          },
+          {
+            "action_type": "drag",
+            "total": 1,
+            "correct": 1,
+            "accuracy": 1.0
+          },
+          {
+            "action_type": "press",
+            "total": 1,
+            "correct": 0,
+            "accuracy": 0.0
+          }
+        ]
+      },
+      "cases": [
+        {
+          "case_id": "synthetic_confirm_001",
+          "best_sequence": {
+            "strict_success": true,
+            "prefix_len": 1,
+            "step_accuracy": 1.0,
+            "step_results": [
+              {
+                "step_index": 0,
+                "correct": true,
+                "gt_type": "click",
+                "pred_type": "click",
+                "distance_to_center": 0.00638550856814101,
+                "levenshtein_similarity": null
+              }
+            ]
+          },
+          "agent_actions_count": 1,
+          "gt_set_index": 0,
+          "error": null,
+          "timed_out": false
+        },
+        {
+          "case_id": "synthetic_escape_002",
+          "best_sequence": {
+            "strict_success": false,
+            "prefix_len": 0,
+            "step_accuracy": 0.0,
+            "step_results": [
+              {
+                "step_index": 0,
+                "correct": false,
+                "gt_type": "press",
+                "pred_type": "press",
+                "distance_to_center": null,
+                "levenshtein_similarity": 0.0
+              }
+            ]
+          },
+          "agent_actions_count": 1,
+          "gt_set_index": 0,
+          "error": null,
+          "timed_out": false
+        },
+        {
+          "case_id": "synthetic_drag_003",
+          "best_sequence": {
+            "strict_success": true,
+            "prefix_len": 1,
+            "step_accuracy": 1.0,
+            "step_results": [
+              {
+                "step_index": 0,
+                "correct": true,
+                "gt_type": "drag",
+                "pred_type": "drag",
+                "distance_to_center": null,
+                "levenshtein_similarity": null
+              }
+            ]
+          },
+          "agent_actions_count": 1,
+          "gt_set_index": 0,
+          "error": null,
+          "timed_out": false
+        }
+      ]
+    }
+  ]
+}

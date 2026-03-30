@@ -31,8 +31,8 @@ Expected: FAIL because the new placement follow-up stage and prompt text do not 
 ### Task 2: Implement placement follow-up state
 
 **Files:**
-- Modify: `computer_use_test/agent/modules/memory/short_term_memory.py`
-- Modify: `computer_use_test/agent/modules/primitive/multi_step_process.py`
+- Modify: `civStation/agent/modules/memory/short_term_memory.py`
+- Modify: `civStation/agent/modules/primitive/multi_step_process.py`
 
 **Step 1: Write minimal implementation**
 
@@ -50,9 +50,9 @@ Expected: PASS
 ### Task 3: Verify the full regression slice
 
 **Files:**
-- Modify: `computer_use_test/utils/prompts/primitive_prompt.py`
-- Modify: `computer_use_test/agent/modules/primitive/multi_step_process.py`
-- Modify: `computer_use_test/agent/modules/memory/short_term_memory.py`
+- Modify: `civStation/utils/prompts/primitive_prompt.py`
+- Modify: `civStation/agent/modules/primitive/multi_step_process.py`
+- Modify: `civStation/agent/modules/memory/short_term_memory.py`
 - Test: `tests/agent/modules/primitive/test_multi_step_process.py`
 
 **Step 1: Run broader verification**
@@ -62,10 +62,10 @@ Expected: PASS
 
 **Step 2: Run static checks**
 
-Run: `ruff check computer_use_test/agent/modules/memory/short_term_memory.py computer_use_test/agent/modules/primitive/multi_step_process.py computer_use_test/utils/prompts/primitive_prompt.py tests/agent/modules/primitive/test_multi_step_process.py`
+Run: `ruff check civStation/agent/modules/memory/short_term_memory.py civStation/agent/modules/primitive/multi_step_process.py civStation/utils/prompts/primitive_prompt.py tests/agent/modules/primitive/test_multi_step_process.py`
 Expected: PASS
 
-Run: `ruff format --check computer_use_test/agent/modules/memory/short_term_memory.py computer_use_test/agent/modules/primitive/multi_step_process.py computer_use_test/utils/prompts/primitive_prompt.py tests/agent/modules/primitive/test_multi_step_process.py`
+Run: `ruff format --check civStation/agent/modules/memory/short_term_memory.py civStation/agent/modules/primitive/multi_step_process.py civStation/utils/prompts/primitive_prompt.py tests/agent/modules/primitive/test_multi_step_process.py`
 Expected: PASS
 
 ### Task 4: Commit and publish
@@ -76,7 +76,7 @@ Expected: PASS
 **Step 1: Commit**
 
 ```bash
-git add docs/plans/2026-03-16-city-production-blue-placement-followup.md tests/agent/modules/primitive/test_multi_step_process.py computer_use_test/agent/modules/memory/short_term_memory.py computer_use_test/agent/modules/primitive/multi_step_process.py computer_use_test/utils/prompts/primitive_prompt.py
+git add docs/plans/2026-03-16-city-production-blue-placement-followup.md tests/agent/modules/primitive/test_multi_step_process.py civStation/agent/modules/memory/short_term_memory.py civStation/agent/modules/primitive/multi_step_process.py civStation/utils/prompts/primitive_prompt.py
 git commit -m "feat: support blue-tile city placement follow-up"
 ```
 
@@ -84,5 +84,5 @@ git commit -m "feat: support blue-tile city placement follow-up"
 
 ```bash
 git push -u origin Feature/#56
-gh api repos/minsing-jin/computer-use-test/pulls/57 -X PATCH -f body='...'
+gh api repos/minsing-jin/civStation/pulls/57 -X PATCH -f body='...'
 ```

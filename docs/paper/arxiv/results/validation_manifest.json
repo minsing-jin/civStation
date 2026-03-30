@@ -1,0 +1,65 @@
+{
+  "dataset": "tests/evaluator/civ6_eval/fixtures/sample_bbox_dataset.jsonl",
+  "outputs": {
+    "mock_bbox_eval": "docs/paper/arxiv/results/mock_bbox_eval.json",
+    "perfect_bbox_eval": "docs/paper/arxiv/results/perfect_bbox_eval.json",
+    "latency_tradeoff_summary": "docs/paper/arxiv/results/latency_tradeoff_summary.md"
+  },
+  "latency_source_report": "tests/rough_test/reports/vlm_policy_speed_report_allmodes_20260305_231703.md",
+  "mock_aggregate": {
+    "total_cases": 3,
+    "strict_success_rate": 0.0,
+    "avg_step_accuracy": 0.0,
+    "avg_prefix_len": 0.0,
+    "error_count": 0,
+    "timeout_count": 0,
+    "per_action_type": [
+      {
+        "action_type": "click",
+        "total": 1,
+        "correct": 0,
+        "accuracy": 0.0
+      },
+      {
+        "action_type": "drag",
+        "total": 1,
+        "correct": 0,
+        "accuracy": 0.0
+      },
+      {
+        "action_type": "press",
+        "total": 2,
+        "correct": 0,
+        "accuracy": 0.0
+      }
+    ]
+  },
+  "perfect_aggregate": {
+    "total_cases": 3,
+    "strict_success_rate": 1.0,
+    "avg_step_accuracy": 1.0,
+    "avg_prefix_len": 1.3333333333333333,
+    "error_count": 0,
+    "timeout_count": 0,
+    "per_action_type": [
+      {
+        "action_type": "click",
+        "total": 1,
+        "correct": 1,
+        "accuracy": 1.0
+      },
+      {
+        "action_type": "drag",
+        "total": 1,
+        "correct": 1,
+        "accuracy": 1.0
+      },
+      {
+        "action_type": "press",
+        "total": 2,
+        "correct": 2,
+        "accuracy": 1.0
+      }
+    ]
+  }
+}

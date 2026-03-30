@@ -2,15 +2,15 @@ from pathlib import Path
 
 from PIL import Image
 
-from computer_use_test.utils.screen import capture_screen_pil
-from computer_use_test.utils.screenshot_trajectory import (
+from civStation.utils.screen import capture_screen_pil
+from civStation.utils.screenshot_trajectory import (
     get_screenshot_trajectory_root,
     start_screenshot_trajectory_session,
 )
 
 
 def test_get_screenshot_trajectory_root_defaults_to_project_tmp_root():
-    expected = Path(__file__).resolve().parents[2] / ".tmp" / "computer_use_test" / "screenshot_trajectories"
+    expected = Path(__file__).resolve().parents[2] / ".tmp" / "civStation" / "screenshot_trajectories"
     assert get_screenshot_trajectory_root() == expected
 
 
@@ -30,12 +30,12 @@ def test_screenshot_trajectory_session_keeps_latest_20_images(tmp_path):
 
 
 def test_capture_screen_pil_records_trajectory_when_session_is_active(tmp_path, monkeypatch):
-    monkeypatch.setattr("computer_use_test.utils.screen.pyautogui.size", lambda: (100, 50))
+    monkeypatch.setattr("civStation.utils.screen.pyautogui.size", lambda: (100, 50))
     monkeypatch.setattr(
-        "computer_use_test.utils.screen.pyautogui.screenshot",
+        "civStation.utils.screen.pyautogui.screenshot",
         lambda: Image.new("RGB", (100, 50), "white"),
     )
-    monkeypatch.setattr("computer_use_test.utils.screen._detect_game_window", lambda: None)
+    monkeypatch.setattr("civStation.utils.screen._detect_game_window", lambda: None)
 
     session = start_screenshot_trajectory_session(base_dir=tmp_path, max_images=20)
 

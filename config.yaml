@@ -14,6 +14,7 @@ planner-model: gemini-3-flash-preview
 # --- 2. Execution Parameters ---
 turns: 100
 range: 10000
+prompt-language: eng
 debug: "all"   # comma-separated: context | turns | all
 router-img-max-long-edge: 1024
 

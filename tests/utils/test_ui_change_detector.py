@@ -2,8 +2,8 @@
 
 from PIL import Image, ImageDraw
 
-from computer_use_test.utils.llm_provider.parser import AgentAction
-from computer_use_test.utils.ui_change_detector import screenshots_similar, ui_changed
+from civStation.utils.llm_provider.parser import AgentAction
+from civStation.utils.ui_change_detector import screenshots_similar, ui_changed
 
 
 def _blank() -> Image.Image:

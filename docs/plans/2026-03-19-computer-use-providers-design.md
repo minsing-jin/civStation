@@ -64,10 +64,10 @@ For planner single-action flows:
 
 ## Files to touch
 
-- Create: `computer_use_test/utils/llm_provider/openai_computer.py`
-- Create: `computer_use_test/utils/llm_provider/anthropic_computer.py`
-- Create: `computer_use_test/utils/llm_provider/computer_use_actions.py`
-- Modify: `computer_use_test/utils/llm_provider/__init__.py`
+- Create: `civStation/utils/llm_provider/openai_computer.py`
+- Create: `civStation/utils/llm_provider/anthropic_computer.py`
+- Create: `civStation/utils/llm_provider/computer_use_actions.py`
+- Modify: `civStation/utils/llm_provider/__init__.py`
 - Modify: `README.md`
 - Test: `tests/utils/test_openai_computer_provider.py`
 - Test: `tests/utils/test_anthropic_computer_provider.py`
