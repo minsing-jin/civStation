@@ -1,4 +1,4 @@
-<img width="1024" height="575" alt="image" src="https://github.com/user-attachments/assets/ff5112c8-89cf-457b-b39d-f3c5bfc2f4cf" />
+<img width="1364" height="711" alt="image" src="https://github.com/user-attachments/assets/e5de0d91-4df0-4e8c-a4dd-a69a138a0196" />
 
 # CivStation
 
