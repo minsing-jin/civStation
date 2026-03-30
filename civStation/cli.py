@@ -302,6 +302,7 @@ def _print_onboarding() -> None:
               civstation                Show this onboarding guide
               civstation run ...        Start the Civ6 agent with a preflight checklist
               civstation guide          Print the setup and operator checklist
+              civstation star           Show the fastest GitHub star actions
               civstation mcp ...        Run the layered MCP server
               civstation mcp-install ...  Render or write MCP client templates
             """
@@ -324,6 +325,7 @@ def _print_onboarding() -> None:
     )
     overview.add_row("Clone", f"git clone {REPO_URL}.git")
     overview.add_row("Setup", "cd civStation && uv sync && uv run civstation")
+    overview.add_row("Support", "civstation star")
     overview.add_row("Operator UX", "Keep Civ6 on the main monitor and use a phone or second device for control.")
     overview.add_row("MCP install", "uv run civstation mcp-install --client codex --write")
 
@@ -337,6 +339,7 @@ def _print_root_help() -> None:
         Usage:
           civstation
           civstation guide
+          civstation star
           civstation run [--guide-only] [--skip-guide] [turn_runner args...]
           civstation mcp [mcp server args...]
           civstation mcp-install [install args...]
@@ -375,6 +378,7 @@ def _handle_run(argv: list[str]) -> int:
     known, passthrough = parser.parse_known_args(argv)
 
     if not known.skip_guide:
+        _maybe_prompt_for_star()
         _print_preflight_checklist()
 
     if known.guide_only:
@@ -416,6 +420,7 @@ def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
 
     if not argv:
+        _maybe_prompt_for_star()
         _print_onboarding()
         return 0
 
@@ -429,6 +434,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if command == "guide":
+        _maybe_prompt_for_star()
         _print_onboarding()
         return 0
 
