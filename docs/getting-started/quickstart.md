@@ -10,6 +10,13 @@ cd civStation
 uv sync
 ```
 
+`uv sync` creates the repo-local `.venv`.
+`uv run ...` works without activation, but if you want to enter it directly:
+
+```bash
+source .venv/bin/activate
+```
+
 ## 2. Set API Keys
 
 ```env

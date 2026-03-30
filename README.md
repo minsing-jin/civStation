@@ -32,7 +32,8 @@ Current package and module names are still:
 
 - [🚀 30-Second Quick Start](#quick-start)
 - [🧭 Should I Use Docker?](#docker)
-- [▶️ Recommended Run Flow](#run-flow)
+- [▶️ Recommended First-Time Run Flow](#run-flow)
+- [🛠️ Permission Troubleshooting](#permission-troubleshooting)
 - [📱 Mobile QR Quick Start](#mobile-qr)
 - [🧠 Why HitL Matters](#hitl-matters)
 - [🎮 Detailed Mobile QR Flow](#mobile-flow)
@@ -47,7 +48,11 @@ Current package and module names are still:
 <a id="quick-start"></a>
 ## 🚀 30-Second Quick Start
 
-If you just want to see CivStation move in Civilization VI as fast as possible, do this:
+If the repo is already installed and you just want to see CivStation move in Civilization VI as fast as possible, do this:
+
+> [!TIP]
+> This section assumes you already cloned the repo, ran `uv sync`, prepared the local `.venv`, and exported the provider API key you plan to use.
+> If this is your first setup, use `Recommended First-Time Run Flow` below.
 
 > [!NOTE]
 > Recommended starting model: `gemini-3-flash`.
@@ -56,6 +61,10 @@ If you just want to see CivStation move in Civilization VI as fast as possible, 
 > [!IMPORTANT]
 > Use a stable Wi-Fi connection with reliable internet from the start.
 > If you use phone control or the QR flow, the phone and the desktop running Civilization VI must stay on the same Wi-Fi network.
+
+> [!WARNING]
+> The agent runs from your terminal, but before you start you must click back into the actual Civilization VI page/window so the runtime is inside the live game.
+> If you use multiple monitors, keep Civ6 on the primary monitor, click the page where Civ6 is actually running to enter the runtime, and then press `Start` from your phone.
 
 1. Open Civilization VI and stop on a playable map screen.
 2. Run:
@@ -88,6 +97,9 @@ If macOS blocks screenshot or control access, grant:
 
 to your terminal, `uv`, or Python app, then try again.
 
+If you run `civStation` or `civ6_tacticall` inside `tmux`, iTerm, Terminal, WezTerm, or another terminal app, make sure that terminal path also has `Screen Recording`.
+If macOS shows `tmux` or `civ6_tacticall` separately in Privacy & Security, grant `Screen Recording` there too.
+
 <a id="docker"></a>
 ## 🧭 Should I Use Docker?
 
@@ -114,7 +126,7 @@ Docker is only reasonable here for non-GUI tasks such as:
 - tests that do not need the real game window
 
 <a id="run-flow"></a>
-## ▶️ Recommended Run Flow
+## ▶️ Recommended First-Time Run Flow
 
 If you cloned the repo and want to run CivStation correctly:
 
@@ -125,21 +137,34 @@ git clone https://github.com/minsing-jin/civStation.git
 cd civStation
 ```
 
-2. Sync the local environment.
+2. Create or sync the local virtual environment.
 
 ```bash
 uv sync
 ```
 
-3. Print the operator guide first.
+`uv sync` creates or updates the repo-local `.venv`.
+`uv run ...` works without activation, but if you want to enter it directly:
+
+```bash
+source .venv/bin/activate
+```
+
+3. Export the provider key you actually plan to use. For the `gemini` command below:
+
+```bash
+export GENAI_API_KEY=...
+```
+
+4. Print the operator guide first.
 
 ```bash
 uv run civstation
 ```
 
-4. Put Civ6 on the main monitor and leave the actual game screen visible.
-5. If you want remote control, keep the dashboard off the game screen and use your phone or a secondary device.
-6. Start the agent.
+5. Put Civ6 on the main monitor and leave the actual game screen visible.
+6. If you want remote control, keep the dashboard off the game screen and use your phone or a secondary device.
+7. Start the agent.
 
 ```bash
 uv run civstation run \
@@ -151,7 +176,7 @@ uv run civstation run \
   --status-port 8765
 ```
 
-7. Open `http://127.0.0.1:8765` and press `Start`.
+8. Open `http://127.0.0.1:8765` and press `Start`.
 
 Installed command aliases also work:
 
@@ -159,6 +184,16 @@ Installed command aliases also work:
 civstation
 civstation run --provider gemini --model gemini-3-flash --turns 100 --status-ui --wait-for-start
 ```
+
+<a id="permission-troubleshooting"></a>
+## 🛠️ Permission Troubleshooting
+
+If screenshots are black, stale, or never update on macOS:
+
+1. Grant `Screen Recording` to the terminal app that launched `civStation` or `civ6_tacticall`.
+2. If you launched them from `tmux`, check whether `tmux` or `civ6_tacticall` also appears in Privacy & Security and grant `Screen Recording` there too.
+3. Grant `Accessibility` to the app path that sends input back to Civ6.
+4. Fully quit and relaunch the terminal app, the `tmux` session, and the running agent after changing permissions.
 
 <a id="mobile-qr"></a>
 ## 📱 Mobile QR Quick Start
@@ -168,6 +203,8 @@ If you want to control the run from your phone:
 > [!IMPORTANT]
 > Use a stable Wi-Fi connection with reliable internet.
 > The phone and the desktop running Civilization VI must stay on the same Wi-Fi network for pairing and control to work reliably.
+> The agent still runs from your terminal, so before you press `Start` on your phone, click back into the live Civ6 page/window to enter the runtime.
+> If you use multiple monitors, keep Civ6 on the primary monitor and leave the live game page focused.
 
 1. Clone and start the mobile controller:
 

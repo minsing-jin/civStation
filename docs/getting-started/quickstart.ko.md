@@ -10,6 +10,13 @@ cd civStation
 uv sync
 ```
 
+`uv sync`는 저장소 로컬 `.venv`를 만듭니다.
+`uv run ...`을 쓸 때는 활성화가 필수는 아니지만, 직접 들어가고 싶다면:
+
+```bash
+source .venv/bin/activate
+```
+
 ## 2. API 키 설정
 
 ```env

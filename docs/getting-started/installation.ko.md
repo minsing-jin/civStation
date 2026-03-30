@@ -35,6 +35,13 @@ cd civStation
 uv sync
 ```
 
+`uv sync`는 저장소 로컬 `.venv`를 만들거나 업데이트합니다.
+`uv run ...`을 쓸 때는 활성화가 필수는 아니지만, 직접 환경에 들어가고 싶다면:
+
+```bash
+source .venv/bin/activate
+```
+
 editable 개발 워크플로와 test dependencies, `pre-commit`까지 같이 잡고 싶다면 기존 방식도 그대로 사용할 수 있습니다:
 
 ```bash

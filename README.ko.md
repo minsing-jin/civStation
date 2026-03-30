@@ -32,7 +32,8 @@
 
 - [🚀 30초 Quick Start](#quick-start)
 - [🧭 Docker를 써야 하나?](#docker)
-- [▶️ 권장 실행 흐름](#run-flow)
+- [▶️ 처음 설치용 권장 실행 흐름](#run-flow)
+- [🛠️ 권한 Troubleshooting](#permission-troubleshooting)
 - [📱 모바일 QR Quick Start](#mobile-qr)
 - [🧠 왜 HitL 없으면 멍청해지는가](#hitl-matters)
 - [🎮 `civ6_tacticall` 모바일 QR 컨트롤러로 Civ6 플레이하기](#mobile-flow)
@@ -47,7 +48,11 @@
 <a id="quick-start"></a>
 ## 🚀 30초 Quick Start
 
-정말 빨리 CivStation이 문명을 움직이는 것만 보고 싶다면 이렇게 하면 됩니다:
+저장소 설치와 로컬 환경 준비가 끝난 상태에서, 정말 빨리 CivStation이 문명을 움직이는 것만 보고 싶다면 이렇게 하면 됩니다:
+
+> [!TIP]
+> 이 섹션은 이미 저장소를 clone했고, `uv sync`로 로컬 `.venv`를 준비했고, 사용할 provider API 키까지 설정한 상태를 전제로 합니다.
+> 처음 설치하는 경우에는 아래 `처음 설치용 권장 실행 흐름`부터 보세요.
 
 > [!NOTE]
 > 권장 시작 모델은 `gemini-3-flash`입니다.
@@ -56,6 +61,10 @@
 > [!IMPORTANT]
 > 시작부터 인터넷이 안정적인 Wi-Fi 환경에서 실행하세요.
 > 휴대폰 제어나 QR 플로우를 쓸 때는 휴대폰과 Civilization VI를 실행 중인 데스크톱이 반드시 같은 Wi-Fi에 있어야 합니다.
+
+> [!WARNING]
+> 에이전트는 터미널에서 실행되지만, 시작 전에 반드시 실제 Civilization VI 페이지/창을 다시 클릭해서 런타임이 게임 안으로 들어간 상태여야 합니다.
+> 모니터가 여러 개라면 문명은 반드시 메인 모니터에 띄우고, 문명이 실제로 돌아가는 페이지를 클릭해 런타임으로 들어간 다음 휴대폰에서 `Start` 를 누르세요.
 
 1. Civilization VI를 켜고 실제 플레이 가능한 지도 화면에서 멈춥니다.
 2. 아래 명령을 실행합니다:
@@ -86,6 +95,9 @@ uv run civstation
 - `Screen Recording`
 - `Accessibility`
 
+`civStation`이나 `civ6_tacticall`을 `tmux`, iTerm, Terminal, WezTerm 같은 터미널 앱 안에서 실행한다면, 그 터미널 경로에도 `Screen Recording` 권한이 있어야 합니다.
+macOS 개인정보 보호 설정에 `tmux`나 `civ6_tacticall`이 별도로 보이면 그쪽에도 `Screen Recording`을 허용하세요.
+
 <a id="docker"></a>
 ## 🧭 Docker를 써야 하나?
 
@@ -112,7 +124,7 @@ Docker가 그나마 괜찮은 건 이런 비-GUI 작업입니다:
 - 실제 게임 창이 필요 없는 테스트
 
 <a id="run-flow"></a>
-## ▶️ 권장 실행 흐름
+## ▶️ 처음 설치용 권장 실행 흐름
 
 git clone해서 CivStation을 제대로 실행하려면:
 
@@ -123,21 +135,34 @@ git clone https://github.com/minsing-jin/civStation.git
 cd civStation
 ```
 
-2. 로컬 환경을 맞춥니다.
+2. 로컬 가상환경을 만들거나 동기화합니다.
 
 ```bash
 uv sync
 ```
 
-3. 먼저 운영 가이드를 출력합니다.
+`uv sync`는 저장소 로컬 `.venv`를 만들거나 업데이트합니다.
+`uv run ...`을 쓸 때는 활성화가 필수는 아니지만, 직접 들어가고 싶다면:
+
+```bash
+source .venv/bin/activate
+```
+
+3. 실제로 사용할 provider API 키를 설정합니다. 아래 예시는 `gemini` 실행 기준입니다.
+
+```bash
+export GENAI_API_KEY=...
+```
+
+4. 먼저 운영 가이드를 출력합니다.
 
 ```bash
 uv run civstation
 ```
 
-4. Civ6를 메인 모니터에 띄우고 실제 게임 화면이 계속 보이게 둡니다.
-5. 원격 제어를 쓸 거면 대시보드가 게임 화면을 가리지 않게 하고, 가능하면 휴대폰이나 보조 디바이스로 조작합니다.
-6. 에이전트를 실행합니다.
+5. Civ6를 메인 모니터에 띄우고 실제 게임 화면이 계속 보이게 둡니다.
+6. 원격 제어를 쓸 거면 대시보드가 게임 화면을 가리지 않게 하고, 가능하면 휴대폰이나 보조 디바이스로 조작합니다.
+7. 에이전트를 실행합니다.
 
 ```bash
 uv run civstation run \
@@ -149,7 +174,7 @@ uv run civstation run \
   --status-port 8765
 ```
 
-7. `http://127.0.0.1:8765` 를 열고 `Start` 를 누릅니다.
+8. `http://127.0.0.1:8765` 를 열고 `Start` 를 누릅니다.
 
 설치된 console command도 그대로 쓸 수 있습니다:
 
@@ -157,6 +182,16 @@ uv run civstation run \
 civstation
 civstation run --provider gemini --model gemini-3-flash --turns 100 --status-ui --wait-for-start
 ```
+
+<a id="permission-troubleshooting"></a>
+## 🛠️ 권한 Troubleshooting
+
+macOS에서 스크린샷이 검게 나오거나, 멈춰 있거나, 갱신되지 않으면:
+
+1. `civStation` 또는 `civ6_tacticall`을 실행한 터미널 앱에 `Screen Recording` 권한을 줍니다.
+2. `tmux`에서 실행했다면 개인정보 보호 설정에 `tmux`나 `civ6_tacticall`이 따로 보이는지도 확인하고, 보이면 그쪽에도 `Screen Recording` 권한을 줍니다.
+3. Civ6로 입력을 보내는 경로에는 `Accessibility` 권한도 줍니다.
+4. 권한을 바꾼 뒤에는 터미널 앱, `tmux` 세션, 실행 중인 에이전트를 완전히 종료했다가 다시 시작합니다.
 
 <a id="mobile-qr"></a>
 ## 📱 모바일 QR Quick Start
@@ -166,6 +201,8 @@ civstation run --provider gemini --model gemini-3-flash --turns 100 --status-ui 
 > [!IMPORTANT]
 > 인터넷이 안정적인 Wi-Fi 환경에서 진행하세요.
 > 페어링과 제어가 안정적으로 동작하려면 휴대폰과 Civilization VI를 실행 중인 데스크톱이 반드시 같은 Wi-Fi에 있어야 합니다.
+> 에이전트는 여전히 터미널에서 실행되므로, 휴대폰에서 `Start` 를 누르기 전에 실제 Civ6가 돌아가는 페이지/창을 다시 클릭해서 런타임으로 들어가야 합니다.
+> 모니터가 여러 개라면 Civ6는 반드시 메인 모니터에 띄워 두고, 실제 게임 페이지에 포커스를 둔 상태를 유지하세요.
 
 1. 모바일 컨트롤러를 실행합니다:
 

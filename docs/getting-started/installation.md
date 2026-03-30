@@ -35,6 +35,13 @@ cd civStation
 uv sync
 ```
 
+`uv sync` creates or updates the repo-local `.venv`.
+`uv run ...` works without activation, but if you want to enter the environment directly:
+
+```bash
+source .venv/bin/activate
+```
+
 If you want the editable development workflow with test dependencies and `pre-commit`, you can still use:
 
 ```bash
