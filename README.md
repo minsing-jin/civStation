@@ -1,14 +1,15 @@
-<img width="1364" height="711" alt="image" src="https://github.com/user-attachments/assets/e5de0d91-4df0-4e8c-a4dd-a69a138a0196" />
+<div align="center">
+  <img src="docs/readme_resources/readme_page.png" alt="CivStation hero art" width="100%" />
+</div>
 
 <div align="center">
-    
 **Languages**
 
 [English](README.md) | [한국어](README.ko.md) | [中文](README.zh.md)
 
 </div>
 
-
+# CivStation
 
 > A controllable Civ6 computer-use stack for people who want more than "run the bot and hope."
 >
@@ -25,22 +26,24 @@ Current package and module names are still:
 - Python package: `civStation`
 - Python module: `civStation`
 
+<a id="index"></a>
 ## 📚 Index
 
-- [🚀 30-Second Quick Start](#-30-second-quick-start)
-- [🧭 Should I Use Docker?](#-should-i-use-docker)
-- [▶️ Recommended Run Flow](#-recommended-run-flow)
-- [📱 Mobile QR Quick Start](#-mobile-qr-quick-start)
-- [🧠 Why HitL Matters](#-why-hitl-matters)
-- [🎮 Detailed Mobile QR Flow](#-detailed-mobile-qr-flow)
-- [✨ Why CivStation?](#-why-civstation)
-- [🧵 Runtime Separation](#-runtime-separation)
-- [🏗️ Architecture](#-architecture)
-- [🕹️ HitL Control Surfaces](#-hitl-control-surfaces)
-- [🧩 MCP and Skill Extensibility](#-mcp-and-skill-extensibility)
-- [📖 Documentation](#-documentation)
-- [🛠️ Development](#-development)
+- [🚀 30-Second Quick Start](#quick-start)
+- [🧭 Should I Use Docker?](#docker)
+- [▶️ Recommended Run Flow](#run-flow)
+- [📱 Mobile QR Quick Start](#mobile-qr)
+- [🧠 Why HitL Matters](#hitl-matters)
+- [🎮 Detailed Mobile QR Flow](#mobile-flow)
+- [✨ Why CivStation?](#why-civstation)
+- [🧵 Runtime Separation](#runtime-separation)
+- [🏗️ Architecture](#architecture)
+- [🕹️ HitL Control Surfaces](#hitl-control)
+- [🧩 MCP and Skill Extensibility](#mcp-skill)
+- [📖 Documentation](#documentation)
+- [🛠️ Development](#development)
 
+<a id="quick-start"></a>
 ## 🚀 30-Second Quick Start
 
 If you just want to see CivStation move in Civilization VI as fast as possible, do this:
@@ -84,6 +87,7 @@ If macOS blocks screenshot or control access, grant:
 
 to your terminal, `uv`, or Python app, then try again.
 
+<a id="docker"></a>
 ## 🧭 Should I Use Docker?
 
 Short answer: `no` for live gameplay.
@@ -108,6 +112,7 @@ Docker is only reasonable here for non-GUI tasks such as:
 - linting
 - tests that do not need the real game window
 
+<a id="run-flow"></a>
 ## ▶️ Recommended Run Flow
 
 If you cloned the repo and want to run CivStation correctly:
@@ -154,6 +159,7 @@ civstation
 civstation run --provider gemini --model gemini-3-flash --turns 100 --status-ui --wait-for-start
 ```
 
+<a id="mobile-qr"></a>
 ## 📱 Mobile QR Quick Start
 
 If you want to control the run from your phone:
@@ -200,6 +206,7 @@ npm run host
 
 That `Start` signal is what actually begins gameplay.
 
+<a id="hitl-matters"></a>
 ## 🧠 Why HitL Matters
 
 > [!IMPORTANT]
@@ -225,6 +232,7 @@ The easiest beginner setup is:
 - mobile QR second
 - full MCP automation later
 
+<a id="mobile-flow"></a>
 ## 🎮 Detailed Mobile QR Flow
 
 ### Relationship
@@ -269,6 +277,7 @@ Controller Start button
 - Use windowed or borderless mode if you want reliable automatic game-window cropping on macOS.
 - Keep the game at a stable resolution during a run.
 
+<a id="why-civstation"></a>
 ## ✨ Why CivStation?
 
 - `Layered by design`: the agent is broken into inspectable layers instead of one opaque loop.
@@ -279,6 +288,7 @@ Controller Start button
 - `Operator-friendly`: local dashboard, WebSocket control, and remote phone control are all supported.
 - `A practical VLM harness`: instead of calling a VLM on raw screenshots ad hoc, CivStation wraps the model in a reusable control loop with context, routing, planning, execution, and intervention points.
 
+<a id="runtime-separation"></a>
 ## 🧵 Runtime Separation
 
 The MCP session/runtime model matters because it mirrors the real execution split:
@@ -301,9 +311,14 @@ This is the core value of the layered runtime:
 - HITL stays outside the action thread, but can still steer it safely through queues and gates
 - MCP sessions become real runtime containers instead of just serialized state blobs
 
+<a id="architecture"></a>
 ## 🏗️ Architecture
 
 ### The Four Layers
+
+<div align="center">
+  <img src="docs/readme_resources/simple_architecture.svg" alt="Simple architecture diagram showing HITL orders flowing into a background strategy agent, strategy and order flowing to a main-process action agent, and context flowing back upward." width="100%" />
+</div>
 
 | Layer | Core question | Main code | Details |
 |---|---|---|---|
@@ -339,6 +354,7 @@ Human-in-the-Loop can intervene at:
   - action: primitive override / direct command
 ```
 
+<a id="hitl-control"></a>
 ## 🕹️ HitL Control Surfaces
 
 ### Local dashboard
@@ -372,6 +388,7 @@ Supported messages:
 - [`minsing-jin/civ6_tacticall`](https://github.com/minsing-jin/civ6_tacticall.git)
 - mobile QR controller + relay + bridge
 
+<a id="mcp-skill"></a>
 ## 🧩 MCP and Skill Extensibility
 
 ### MCP
@@ -473,6 +490,7 @@ Live action execution is disabled by default.
 
 That keeps the MCP surface safe for new users while still allowing real execution when explicitly unlocked.
 
+<a id="documentation"></a>
 ## 📖 Documentation
 
 Hosted docs:
@@ -498,6 +516,7 @@ Other languages:
 - [한국어](README.ko.md)
 - [中文](README.zh.md)
 
+<a id="development"></a>
 ## 🛠️ Development
 
 ```bash

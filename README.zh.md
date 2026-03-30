@@ -1,4 +1,8 @@
 <div align="center">
+  <img src="docs/readme_resources/readme_page.png" alt="CivStation hero art" width="100%" />
+</div>
+
+<div align="center">
 
 **语言选择**
 
@@ -23,20 +27,22 @@
 - Python package: `civStation`
 - Python module: `civStation`
 
+<a id="index"></a>
 ## 📚 Index
 
-- [🚀 30 秒 Quick Start](#-30-秒-quick-start)
-- [📱 手机二维码 Quick Start](#-手机二维码-quick-start)
-- [🧠 为什么没有 HitL 会变笨](#-为什么没有-hitl-会变笨)
-- [🎮 通过 `civ6_tacticall` 手机二维码控制器玩 Civ6](#-通过-civ6_tacticall-手机二维码控制器玩-civ6)
-- [✨ Why CivStation?](#-why-civstation)
-- [🧵 Runtime Separation](#-runtime-separation)
-- [🏗️ Architecture](#-architecture)
-- [🕹️ HitL 控制面](#-hitl-控制面)
-- [🧩 MCP 与 Skill 可扩展性](#-mcp-与-skill-可扩展性)
-- [📖 Documentation](#-documentation)
-- [🛠️ Development](#-development)
+- [🚀 30 秒 Quick Start](#quick-start)
+- [📱 手机二维码 Quick Start](#mobile-qr)
+- [🧠 为什么没有 HitL 会变笨](#hitl-matters)
+- [🎮 通过 `civ6_tacticall` 手机二维码控制器玩 Civ6](#mobile-flow)
+- [✨ Why CivStation?](#why-civstation)
+- [🧵 Runtime Separation](#runtime-separation)
+- [🏗️ Architecture](#architecture)
+- [🕹️ HitL 控制面](#hitl-control)
+- [🧩 MCP 与 Skill 可扩展性](#mcp-skill)
+- [📖 Documentation](#documentation)
+- [🛠️ Development](#development)
 
+<a id="quick-start"></a>
 ## 🚀 30 秒 Quick Start
 
 如果你只想尽快看到 CivStation 在 Civilization VI 里开始动起来，可以这样做：
@@ -74,6 +80,7 @@ uv run civstation run \
 
 然后再试一次。
 
+<a id="mobile-qr"></a>
 ## 📱 手机二维码 Quick Start
 
 如果你想用手机来控制：
@@ -120,6 +127,7 @@ npm run host
 
 这个 `Start` 信号才是真正开始游戏的信号。
 
+<a id="hitl-matters"></a>
 ## 🧠 为什么没有 HitL 会变笨
 
 > [!IMPORTANT]
@@ -145,6 +153,7 @@ npm run host
 - 再用手机二维码
 - 最后再考虑 MCP 自动化
 
+<a id="mobile-flow"></a>
 ## 🎮 通过 `civ6_tacticall` 手机二维码控制器玩 Civ6
 
 ### 关系
@@ -189,6 +198,7 @@ Controller Start button
 - 在 macOS 上，如果想稳定使用自动窗口裁剪，推荐 windowed 或 borderless 模式。
 - 运行过程中尽量不要改变分辨率。
 
+<a id="why-civstation"></a>
 ## ✨ Why CivStation?
 
 - `Layered by design`：代理被拆成可观察、可替换的层，而不是一个黑盒循环。
@@ -199,6 +209,7 @@ Controller Start button
 - `Operator-friendly`：支持本地仪表盘、WebSocket 控制和手机远程控制。
 - `实用型 VLM harness`：不是临时把 VLM 调在原始截图上，而是把上下文、路由、规划、执行和介入点组织成可复用的控制循环。
 
+<a id="runtime-separation"></a>
 ## 🧵 Runtime Separation
 
 MCP session/runtime 的关键价值在于，它映射了真实执行时的分离结构：
@@ -221,9 +232,14 @@ MCP session/runtime 的关键价值在于，它映射了真实执行时的分离
 - HITL 位于 action thread 之外，但仍能通过 queue/gate 安全地介入
 - MCP session 不再只是序列化状态块，而是真正的 runtime container
 
+<a id="architecture"></a>
 ## 🏗️ Architecture
 
 ### 四个核心层
+
+<div align="center">
+  <img src="docs/readme_resources/simple_architecture.svg" alt="一个简单架构图，展示 HITL 指令进入后台 strategy agent，strategy 和 order 下发到主进程 action agent，context 再向上回流。" width="100%" />
+</div>
 
 | 层 | 核心问题 | 主要代码 | 详细文档 |
 |---|---|---|---|
@@ -259,6 +275,7 @@ Human-in-the-Loop can intervene at:
   - action: primitive override / direct command
 ```
 
+<a id="hitl-control"></a>
 ## 🕹️ HitL 控制面
 
 ### 本地 dashboard
@@ -292,6 +309,7 @@ ws://127.0.0.1:8765/ws
 - [`minsing-jin/civ6_tacticall`](https://github.com/minsing-jin/civ6_tacticall.git)
 - 手机二维码控制器 + relay + bridge
 
+<a id="mcp-skill"></a>
 ## 🧩 MCP 与 Skill 可扩展性
 
 ### MCP
@@ -352,6 +370,7 @@ MCP 运行时是 adapter 驱动的。
 3. 把可复用工作流写进 `SKILL.md`
 4. 把脚本和参考资料放在 skill 目录旁边
 
+<a id="documentation"></a>
 ## 📖 Documentation
 
 详细层级文档：
@@ -375,6 +394,7 @@ uv run civstation mcp-install --client claude-code --write
 ```
 - [한국어](README.ko.md)
 
+<a id="development"></a>
 ## Development
 
 ```bash
