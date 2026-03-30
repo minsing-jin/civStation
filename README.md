@@ -27,6 +27,15 @@ Current package and module names are still:
 - Python package: `civStation`
 - Python module: `civStation`
 
+---------
+## Demo
+
+[Watch the demo video](https://github.com/user-attachments/assets/a9459993-df8f-4cc7-a603-1306ffcf4e48)
+
+
+----------
+
+
 <a id="index"></a>
 ## 📚 Index
 
