@@ -1,12 +1,14 @@
 <img width="1364" height="711" alt="image" src="https://github.com/user-attachments/assets/e5de0d91-4df0-4e8c-a4dd-a69a138a0196" />
 
-# CivStation
-
 <div align="center">
+    
 **Languages**
 
 [English](README.md) | [한국어](README.ko.md) | [中文](README.zh.md)
+
 </div>
+
+
 
 > A controllable Civ6 computer-use stack for people who want more than "run the bot and hope."
 >
