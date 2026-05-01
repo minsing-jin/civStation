@@ -102,6 +102,32 @@ def parse_args(argv: list[str] | None = None) -> configargparse.Namespace:
         help="Primitive prompt language (default: eng)",
     )
     exec_group.add_argument(
+        "--backend",
+        choices=["vlm", "civ6-mcp"],
+        default="vlm",
+        help=(
+            "Action backend. 'vlm' uses screenshots + computer-use (default). "
+            "'civ6-mcp' drives Civ6 directly through the upstream civ6-mcp server "
+            "(github.com/lmwilki/civ6-mcp). Mutually exclusive with the VLM "
+            "click-by-click pipeline."
+        ),
+    )
+    exec_group.add_argument(
+        "--civ6-mcp-path",
+        help=(
+            "Path to a local civ6-mcp checkout (the directory containing pyproject.toml). "
+            "Defaults to $CIV6_MCP_PATH or ~/civ6-mcp. Only used when --backend civ6-mcp."
+        ),
+    )
+    exec_group.add_argument(
+        "--civ6-mcp-launcher",
+        choices=["uv", "python"],
+        help=(
+            "How to spawn civ6-mcp. 'uv' (default) runs `uv run --directory <path> civ-mcp`. "
+            "'python' runs `python -m civ_mcp` (requires civ6-mcp's own venv to be active)."
+        ),
+    )
+    exec_group.add_argument(
         "--debug",
         default="",
         help=(
@@ -173,14 +199,31 @@ def parse_args(argv: list[str] | None = None) -> configargparse.Namespace:
 
 
 def setup_providers(args) -> tuple[object, object]:
-    """Router와 Planner Provider 초기화"""
-    router_p_name = args.router_provider or args.provider
-    router_model = args.router_model or args.model
+    """Router and Planner Provider initialization.
+
+    For ``--backend civ6-mcp`` only the planner provider is required (the
+    civ6-mcp backend has no VLM router). We still construct one provider so
+    legacy callers that read both slots keep working; both slots point to
+    the same instance in that case.
+    """
+    backend_kind = getattr(args, "backend", None) or "vlm"
+
     planner_p_name = args.planner_provider or args.provider
     planner_model = args.planner_model or args.model
 
-    if not router_p_name or not planner_p_name:
+    if not planner_p_name:
         raise ValueError("Provider not specified. Check config.yaml or use --provider CLI arg.")
+
+    if backend_kind == "civ6-mcp":
+        planner = create_provider(provider_name=planner_p_name, model=planner_model)
+        logger.info(f"civ6-mcp backend: planner-only provider ({planner.get_provider_name()} / {planner.model})")
+        return planner, planner
+
+    router_p_name = args.router_provider or args.provider
+    router_model = args.router_model or args.model
+
+    if not router_p_name:
+        raise ValueError("Router provider not specified for VLM backend.")
 
     # Create router provider (Router 생성)
     router = create_provider(provider_name=router_p_name, model=router_model)
@@ -605,53 +648,99 @@ def _main(argv: list[str] | None, console_log_silencer: _ConsoleLogSilencer):
     rl = RichLogger.get()
     rl.start_live()
 
-    logger.info(f"Starting execution for {args.turns} turn(s)...")
-    try:
-        runner_kwargs = {
-            "router_provider": router_provider,
-            "planner_provider": planner_provider,
-            "normalizing_range": args.range,
-            "delay_before_action": args.delay_action,
-            "prompt_language": getattr(args, "prompt_language", "eng"),
-            "high_level_strategy": args.strategy,
-            "context_manager": ctx,
-            "strategy_planner": strategy_planner,
-            "knowledge_manager": knowledge_manager,
-            "strategy_updater": strategy_updater,
-            "turn_detector": turn_detector,
-            "router_img_config": router_img_config,
-            "planner_img_config": planner_img_config,
-        }
+    backend_kind = getattr(args, "backend", None) or "vlm"
 
-        if args.turns == 1:
-            run_one_turn(
-                **runner_kwargs,
-                macro_turn_manager=macro_turn_manager,
-                state_bridge=state_bridge,
-                context_updater=context_updater,
-                debug_options=debug_options,
-                command_queue=command_queue,
-                agent_gate=agent_gate,
+    civ6_mcp_client = None
+    logger.info(f"Starting execution for {args.turns} turn(s) (backend={backend_kind})...")
+    try:
+        if backend_kind == "civ6-mcp":
+            from civStation.agent.modules.backend.civ6_mcp.turn_loop import (
+                Civ6McpUnavailableError,
+                build_civ6_mcp_client,
+                run_multi_turn_civ6_mcp,
+                run_one_turn_civ6_mcp,
             )
+
+            try:
+                civ6_mcp_client = build_civ6_mcp_client(
+                    install_path=getattr(args, "civ6_mcp_path", None),
+                    launcher=getattr(args, "civ6_mcp_launcher", None),
+                )
+            except Civ6McpUnavailableError as exc:
+                logger.error("civ6-mcp backend unavailable: %s", exc)
+                return
+
+            mcp_kwargs = {
+                "civ6_mcp_client": civ6_mcp_client,
+                "planner_provider": planner_provider,
+                "context_manager": ctx,
+                "strategy_planner": strategy_planner,
+                "strategy_updater": strategy_updater,
+                "high_level_strategy": args.strategy,
+                "command_queue": command_queue,
+                "agent_gate": agent_gate,
+                "state_bridge": state_bridge,
+            }
+
+            if args.turns == 1:
+                run_one_turn_civ6_mcp(**mcp_kwargs, turn_index=0)
+            else:
+                run_multi_turn_civ6_mcp(
+                    num_turns=args.turns,
+                    delay_between_turns=args.delay_turn,
+                    **mcp_kwargs,
+                )
         else:
-            run_multi_turn(
-                num_turns=args.turns,
-                delay_between_turns=args.delay_turn,
-                hitl_mode=args.hitl_mode,
-                command_queue=command_queue,
-                macro_turn_manager=macro_turn_manager,
-                state_bridge=state_bridge,
-                context_updater=context_updater,
-                debug_options=debug_options,
-                agent_gate=agent_gate,
-                **runner_kwargs,
-            )
+            runner_kwargs = {
+                "router_provider": router_provider,
+                "planner_provider": planner_provider,
+                "normalizing_range": args.range,
+                "delay_before_action": args.delay_action,
+                "prompt_language": getattr(args, "prompt_language", "eng"),
+                "high_level_strategy": args.strategy,
+                "context_manager": ctx,
+                "strategy_planner": strategy_planner,
+                "knowledge_manager": knowledge_manager,
+                "strategy_updater": strategy_updater,
+                "turn_detector": turn_detector,
+                "router_img_config": router_img_config,
+                "planner_img_config": planner_img_config,
+            }
+
+            if args.turns == 1:
+                run_one_turn(
+                    **runner_kwargs,
+                    macro_turn_manager=macro_turn_manager,
+                    state_bridge=state_bridge,
+                    context_updater=context_updater,
+                    debug_options=debug_options,
+                    command_queue=command_queue,
+                    agent_gate=agent_gate,
+                )
+            else:
+                run_multi_turn(
+                    num_turns=args.turns,
+                    delay_between_turns=args.delay_turn,
+                    hitl_mode=args.hitl_mode,
+                    command_queue=command_queue,
+                    macro_turn_manager=macro_turn_manager,
+                    state_bridge=state_bridge,
+                    context_updater=context_updater,
+                    debug_options=debug_options,
+                    agent_gate=agent_gate,
+                    **runner_kwargs,
+                )
     finally:
         rl.stop_live()
         if agent_gate:
             from civStation.agent.modules.hitl.agent_gate import AgentState
 
             agent_gate.set_state(AgentState.STOPPED)
+        if civ6_mcp_client is not None:
+            try:
+                civ6_mcp_client.stop()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("civ6-mcp client stop failed: %s", exc)
         if turn_detector:
             turn_detector.stop()
         if strategy_updater:

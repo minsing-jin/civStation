@@ -212,3 +212,36 @@ class LayerAdapterRegistry:
             "strategy_refiner": sorted(self.strategy_refiners),
             "action_executor": sorted(self.action_executors),
         }
+
+    def enable_civ6_mcp(
+        self,
+        *,
+        install_path: str | None = None,
+        launcher: str | None = None,
+        env_overrides: dict[str, str] | None = None,
+    ) -> None:
+        """Lazily start a civ6-mcp client and register `"civ6_mcp"` adapters.
+
+        Sessions can then opt into the new pipeline with
+        ``adapter_overrides={"action_router": "civ6_mcp", ...}``. Calling this
+        from outward MCP server config keeps the existing VLM adapters intact.
+        """
+        from civStation.agent.modules.backend.civ6_mcp.turn_loop import build_civ6_mcp_client
+        from civStation.mcp.civ6_mcp_adapters import register_civ6_mcp_adapters
+
+        client = build_civ6_mcp_client(
+            install_path=install_path,
+            launcher=launcher,
+            env_overrides=env_overrides,
+        )
+        register_civ6_mcp_adapters(self, client, provider_factory=self.provider_factory)
+        self._civ6_mcp_client = client
+
+    def shutdown(self) -> None:
+        """Tear down any lazily-created civ6-mcp client."""
+        client = getattr(self, "_civ6_mcp_client", None)
+        if client is not None:
+            try:
+                client.stop()
+            finally:
+                self._civ6_mcp_client = None

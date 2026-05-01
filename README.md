@@ -41,6 +41,7 @@ Current package and module names are still:
 - [🧵 Runtime Separation](#runtime-separation)
 - [🏗️ Architecture](#architecture)
 - [🕹️ HitL Control Surfaces](#hitl-control)
+- [🧠 Backend Selection (VLM vs civ6-mcp)](#backend-selection)
 - [🧩 MCP and Skill Extensibility](#mcp-skill)
 - [📖 Documentation](#documentation)
 - [🛠️ Development](#development)
@@ -425,6 +426,73 @@ Supported messages:
 
 - [`minsing-jin/civ6_tacticall`](https://github.com/minsing-jin/civ6_tacticall.git)
 - mobile QR controller + relay + bridge
+
+<a id="backend-selection"></a>
+## 🧠 Backend Selection (VLM vs civ6-mcp)
+
+CivStation can be driven by one of two completely separate action backends.
+This is **not** a fallback chain — it's a clean, mutually-exclusive split
+selected at startup with the `--backend` flag.
+
+### `vlm` (default)
+
+The original pipeline, unchanged.
+- Capture screenshots and analyze them with a VLM / computer-use model.
+- Route to one of 14 primitives → click / drag / keypress.
+- Requires macOS Screen Recording / Accessibility permissions.
+
+```bash
+uv run civstation run --backend vlm --provider gemini --model gemini-3-flash --turns 100
+```
+
+### `civ6-mcp` (additive, new)
+
+Drive Civ6 directly through the upstream
+[lmwilki/civ6-mcp](https://github.com/lmwilki/civ6-mcp) MCP server, which
+talks to the game over the FireTuner protocol.
+
+**Prerequisites**:
+
+1. Civilization VI (Steam) + the Gathering Storm DLC.
+2. FireTuner enabled.
+   - macOS / Linux: edit `AppOptions.txt` so `EnableTuner 1`.
+   - Windows: install the "Sid Meier's Civilization VI SDK" via Steam Tools.
+   - This disables Steam achievements while active.
+3. Local clone of civ6-mcp:
+   ```bash
+   git clone https://github.com/lmwilki/civ6-mcp ~/civ6-mcp
+   cd ~/civ6-mcp
+   uv sync
+   ```
+4. Tell CivStation where it lives:
+   ```bash
+   export CIV6_MCP_PATH="$HOME/civ6-mcp"
+
+   uv run civstation run \
+     --backend civ6-mcp \
+     --provider gemini --model gemini-3-flash \
+     --strategy "Science victory. Campus first. Four cities. Avoid wars." \
+     --turns 100 --status-ui --status-port 8765
+   ```
+
+| Aspect | `vlm` | `civ6-mcp` |
+|---|---|---|
+| Input | PIL screenshots | game-internal state via tool calls |
+| Routing | 14 primitives | none — planner picks tools directly |
+| Execution | pyautogui click / keypress | civ6-mcp tools (`set_research`, `unit_action`, `end_turn`, …) |
+| OS permissions | Screen Recording + Accessibility | TCP 127.0.0.1:4318 only |
+| Multiplayer | works | **not supported** (FireTuner is singleplayer-only) |
+| Achievements | unaffected | **disabled** |
+
+### Caveats
+
+- Singleplayer + Gathering Storm DLC required.
+- Window position / monitor layout is irrelevant for `civ6-mcp` — the agent
+  never reads pixels.
+- Close any other `FireTuner.exe`/`FireTuner.app` first; the protocol allows
+  only one connection at a time.
+- A handful of in-game flows (era dedication, ad-hoc event popups) aren't
+  exposed by upstream civ6-mcp yet; we'll continue to harden coverage.
 
 <a id="mcp-skill"></a>
 ## 🧩 MCP and Skill Extensibility

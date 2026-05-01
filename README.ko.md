@@ -41,6 +41,7 @@
 - [🧵 Runtime Separation](#runtime-separation)
 - [🏗️ Architecture](#architecture)
 - [🕹️ HitL 제어면](#hitl-control)
+- [🧠 Backend 선택 (VLM vs civ6-mcp)](#backend-selection)
 - [🧩 MCP와 Skill 확장성](#mcp-skill)
 - [📖 Documentation](#documentation)
 - [🛠️ Development](#development)
@@ -423,6 +424,69 @@ ws://127.0.0.1:8765/ws
 
 - [`minsing-jin/civ6_tacticall`](https://github.com/minsing-jin/civ6_tacticall.git)
 - 모바일 QR 컨트롤러 + relay + bridge
+
+<a id="backend-selection"></a>
+## 🧠 Backend 선택 (VLM vs civ6-mcp)
+
+CivStation은 두 개의 완전히 분리된 action backend 중 하나를 선택해서 실행할 수 있습니다.
+이건 fallback이 아니라 **기능적 분리**입니다 — `--backend` 플래그로 한쪽을 고르면 다른 한쪽 코드는 실행되지 않습니다.
+
+### `vlm` (기본값)
+
+기존 동작 그대로입니다.
+- 스크린샷을 찍고 VLM/computer-use로 화면을 분석
+- 14개 primitive로 라우팅 → click/drag/keypress
+- macOS Screen Recording / Accessibility 권한 필요
+
+```bash
+uv run civstation run --backend vlm --provider gemini --model gemini-3-flash --turns 100
+```
+
+### `civ6-mcp` (신규, 추가 모드)
+
+[lmwilki/civ6-mcp](https://github.com/lmwilki/civ6-mcp)의 FireTuner 기반 MCP 서버를 통해 게임 내부 API에 직접 명령을 보냅니다.
+
+**준비 사항**:
+
+1. Civilization VI (Steam) + Gathering Storm DLC.
+2. 게임의 FireTuner 활성화.
+   - macOS / Linux: `~/Library/Application Support/Sid Meier's Civilization VI/AppOptions.txt`(또는 OS별 위치)에서 `EnableTuner 1`.
+   - Windows: Steam Tools에서 "Sid Meier's Civilization VI SDK" 설치.
+   - 활성화하면 도전과제(achievements)는 비활성화됩니다.
+3. civ6-mcp 로컬 설치:
+   ```bash
+   git clone https://github.com/lmwilki/civ6-mcp ~/civ6-mcp
+   cd ~/civ6-mcp
+   uv sync
+   ```
+4. CivStation 실행 시 경로 알려주기:
+   ```bash
+   export CIV6_MCP_PATH="$HOME/civ6-mcp"
+
+   uv run civstation run \
+     --backend civ6-mcp \
+     --provider gemini --model gemini-3-flash \
+     --strategy "과학 승리. 캠퍼스 우선. 도시 4개. 전쟁 회피." \
+     --turns 100 --status-ui --status-port 8765
+   ```
+
+`civ6-mcp` 모드의 주요 차이:
+
+| 영역 | `vlm` | `civ6-mcp` |
+|---|---|---|
+| 입력 | 스크린샷 (PIL) | 게임 내부 상태 (텍스트 도구 호출 결과) |
+| 라우팅 | 14개 primitive 분류 | 없음 (planner가 도구 직접 선택) |
+| 실행 | pyautogui click/key | civ6-mcp 도구 호출 (`set_research`, `unit_action`, `end_turn` 등) |
+| 권한 | Screen Recording, Accessibility | FireTuner TCP 4318만 |
+| 멀티플레이 | 가능 (스크린만 보면 됨) | **불가** (FireTuner는 싱글플레이 전용) |
+| 도전과제 | 영향 없음 | **비활성화됨** |
+
+### 주의 사항
+
+- **싱글플레이 전용**, **Gathering Storm DLC 필수**.
+- `civ6-mcp` 모드에선 모니터/스크린/창 위치를 신경 쓸 필요가 없습니다 — 게임 창이 어디에 있어도 됩니다.
+- FireTuner는 한 번에 한 클라이언트만 받으므로 별도의 `FireTuner.exe`/`FireTuner.app`은 닫아 두세요.
+- 일부 영역(예: 시대 헌신, 일반 이벤트 팝업)은 civ6-mcp 도구 표면에 명시적 노출이 없을 수 있습니다. 이런 영역은 향후 별도로 보강할 예정입니다.
 
 <a id="mcp-skill"></a>
 ## 🧩 MCP와 Skill 확장성

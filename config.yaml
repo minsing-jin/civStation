@@ -18,6 +18,16 @@ prompt-language: eng
 debug: "all"   # comma-separated: context | turns | all
 router-img-max-long-edge: 1024
 
+# Action backend selection.
+#   vlm        — screenshots + computer-use (default; existing pipeline).
+#   civ6-mcp   — drive Civ6 directly through the upstream civ6-mcp MCP server
+#                (https://github.com/lmwilki/civ6-mcp). Mutually exclusive
+#                with the VLM click pipeline. Requires Steam Civ6 with the
+#                Gathering Storm DLC and FireTuner enabled.
+backend: vlm
+# civ6-mcp-path: "/Users/me/civ6-mcp"   # absolute path to your civ6-mcp checkout
+# civ6-mcp-launcher: uv                  # uv (default) | python
+
 # --- 3. Strategy & HITL ---
 strategy: "과학 승리에 집중하고 정찰을 강화해."
 hitl: true
