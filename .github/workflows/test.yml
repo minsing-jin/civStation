@@ -63,8 +63,7 @@ jobs:
         uv pip install --system ".[test]"
 
     - name: Run tests
-      env:
-        # Disable pytest-rerunfailures' localhost socket setup if the plugin
-        # ever shows up via transitive deps — it hangs in restricted sandboxes.
-        PYTEST_DISABLE_PLUGIN_AUTOLOAD: "0"
-      run: pytest --timeout=30 --timeout-method=thread -p no:rerunfailures
+      # Plugin autoload stays on so pytest-timeout / pytest-asyncio register;
+      # `-p no:rerunfailures` is enough to suppress the one plugin that hangs
+      # in restricted sandboxes.
+      run: pytest -p no:rerunfailures
