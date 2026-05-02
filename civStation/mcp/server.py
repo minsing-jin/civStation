@@ -8,13 +8,19 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 from PIL import Image
 
+from civStation.agent.modules.backend import BackendKind, parse_backend_kind
 from civStation.agent.modules.hitl.command_queue import Directive, DirectiveType
 from civStation.agent.modules.memory.short_term_memory import ShortTermMemory
 from civStation.agent.modules.strategy.strategy_schemas import StructuredStrategy
 from civStation.mcp.client_templates import render_client_template
 from civStation.mcp.codec import deserialize_value, serialize_value
 from civStation.mcp.layer_contracts import describe_layer_contracts
-from civStation.mcp.runtime import CaptureArtifact, LayerAdapterRegistry, SessionRuntimeConfig
+from civStation.mcp.runtime import (
+    CaptureArtifact,
+    LayerAdapterRegistry,
+    SessionRuntimeConfig,
+    adapter_overrides_for_backend,
+)
 from civStation.mcp.session import LayeredSession, SessionRegistry
 from civStation.utils.llm_provider.parser import AgentAction
 
@@ -36,9 +42,13 @@ class LayeredComputerUseMCP:
         stateless_http: bool = False,
         debug: bool = False,
         log_level: str = "INFO",
+        default_backend: str | BackendKind | None = None,
+        default_adapter_overrides: dict[str, str] | None = None,
     ) -> None:
         self.adapters = adapter_registry or LayerAdapterRegistry()
         self.sessions = sessions or SessionRegistry()
+        self.default_adapter_overrides = adapter_overrides_for_backend(default_backend)
+        self.default_adapter_overrides.update(default_adapter_overrides or {})
         self.server = FastMCP(
             server_name,
             host=host,
@@ -242,10 +252,12 @@ class LayeredComputerUseMCP:
                 if runtime
                 else SessionRuntimeConfig.from_project_defaults()
             )
+            effective_adapter_overrides = dict(self.default_adapter_overrides)
+            effective_adapter_overrides.update(adapter_overrides or {})
             session = self.sessions.create(
                 name=name,
                 runtime=runtime_config,
-                adapter_overrides=adapter_overrides,
+                adapter_overrides=effective_adapter_overrides,
                 metadata=metadata,
             )
             return {
@@ -795,13 +807,36 @@ def create_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--stateless-http", action="store_true")
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
+    parser.add_argument(
+        "--backend",
+        choices=["vlm", "civ6-mcp"],
+        default="vlm",
+        help="Select exactly one backend for default MCP sessions.",
+    )
+    parser.add_argument(
+        "--civ6-mcp-path",
+        help="Path to a local civ6-mcp checkout. Only used with --backend civ6-mcp.",
+    )
+    parser.add_argument(
+        "--civ6-mcp-launcher",
+        choices=["uv", "python"],
+        help="How to spawn civ6-mcp. Only used with --backend civ6-mcp.",
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = create_argument_parser()
     args = parser.parse_args(argv)
+    backend_kind = parse_backend_kind(args.backend)
+    adapter_registry = LayerAdapterRegistry()
+    if backend_kind is BackendKind.CIV6_MCP:
+        adapter_registry.enable_civ6_mcp(
+            install_path=args.civ6_mcp_path,
+            launcher=args.civ6_mcp_launcher,
+        )
     LayeredComputerUseMCP(
+        adapter_registry=adapter_registry,
         host=args.host,
         port=args.port,
         mount_path=args.mount_path,
@@ -810,6 +845,7 @@ def main(argv: list[str] | None = None) -> None:
         stateless_http=args.stateless_http,
         debug=args.debug,
         log_level=args.log_level,
+        default_backend=backend_kind,
     ).server.run(transport=args.transport)
 
 

@@ -84,6 +84,8 @@ uv run civstation run \
 4. Press `Start`
 
 That is the simplest possible path.
+It intentionally omits `--backend`; the default remains `--backend vlm`.
+Use `--backend civ6-mcp` only after completing the civ6-mcp setup below.
 
 If you just want the setup checklist first, run:
 
@@ -436,10 +438,20 @@ selected at startup with the `--backend` flag.
 
 Accepted values are `--backend vlm` and `--backend civ6-mcp`.
 If `--backend` is omitted, CivStation uses `vlm`.
+The startup contract is:
+
+```bash
+civstation run --backend {vlm,civ6-mcp}
+```
+
 At runtime, only the selected backend is initialized. Choosing `vlm` keeps the
 run entirely on the VLM/computer-use path; CivStation will not launch, call, or
 retry through `civ6-mcp` as a fallback if VLM observation, routing, or action
 execution fails.
+Choosing `civ6-mcp` disables the VLM stack instead of falling back to it. If a
+run tries to combine VLM components such as screenshot observation, primitive
+routing, or pyautogui execution with a civ6-mcp client, the runtime treats that
+as a configuration error and raises `BackendRuntimeConflictError`.
 
 ### `vlm` (default)
 
@@ -544,6 +556,7 @@ use `--civ6-mcp-launcher python`; CivStation will run `python -m civ_mcp`.
 - Keep Civ6 open on the loaded singleplayer game before pressing `Start`.
 - `civstation mcp` is CivStation's layered extension server; it is not the upstream `civ6-mcp` action backend.
 - `--provider` and `--model` still select the planner LLM, but no VLM router is initialized.
+- Do not pass civ6-mcp launch options to a `vlm` run, and do not expect VLM screenshot routing or pyautogui recovery inside a `civ6-mcp` run. The two backend component sets are mutually exclusive.
 - `--status-ui` remains useful for start/stop, phase display, and human control. If you rely on live screen streaming in that UI, host screen-capture permissions may still apply even though the `civ6-mcp` backend itself does not read pixels.
 - Use `--backend vlm` or omit `--backend` to return to the original screenshot/computer-use pipeline.
 

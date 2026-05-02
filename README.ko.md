@@ -429,10 +429,15 @@ ws://127.0.0.1:8765/ws
 ## 🧠 Backend 선택 (VLM vs civ6-mcp)
 
 CivStation은 두 개의 완전히 분리된 action backend 중 하나를 선택해서 실행할 수 있습니다.
+시작 시점에는 `vlm` 또는 `civ6-mcp` 중 **정확히 하나의 backend만** 선택됩니다.
 이건 fallback이 아니라 **기능적 분리**이며 런타임에서 **상호 배타적**입니다 — `--backend` 플래그로 한쪽을 고르면 다른 한쪽 코드는 실행되지 않습니다.
 
-CLI에서는 `civstation run --backend {vlm,civ6-mcp}` 형식으로 선택합니다.
-지원 값은 `vlm`과 `civ6-mcp` 두 가지이며, `--backend`를 생략하면 기존 VLM/computer-use 파이프라인인 `vlm`이 기본값으로 실행됩니다.
+> `vlm`과 `civ6-mcp`는 같은 agent shell(HITL, ContextManager, StrategyPlanner)을 공유하는 **형제 backend**입니다.
+> 둘 중 하나가 실패했을 때 다른 하나로 자동 전환되는 fallback 관계가 아니며, 한 실행 안에서 VLM screenshot/router/pyautogui 구성요소와 `civ6-mcp` MCP client/tool 호출을 섞어 쓰면 안 됩니다.
+> 이런 혼합은 잘못된 설정으로 간주되며 runtime guard가 거부합니다.
+
+CLI에서는 `civstation run --backend {vlm, civ6-mcp}` 형식으로 backend를 선택합니다.
+지원 값은 `vlm`과 `civ6-mcp` 두 가지뿐이며, `--backend`를 생략해도 혼합 모드가 되지 않고 기존 VLM/computer-use 파이프라인인 `vlm` 하나가 기본값으로 실행됩니다.
 
 ### `vlm` (기본값)
 
@@ -455,9 +460,10 @@ CivStation은 upstream 서버를 stdio JSON-RPC subprocess로 시작하고 Pytho
 **준비 사항**:
 
 1. Civilization VI (Steam)와 Gathering Storm DLC가 설치되어 있어야 합니다.
-2. 싱글플레이 게임을 로드하고 FireTuner를 활성화해야 합니다.
-3. 권장 launcher를 쓰려면 `uv`가 `PATH`에 있어야 합니다.
-4. `github.com/lmwilki/civ6-mcp` 로컬 checkout이 필요합니다.
+2. Civ6에서 FireTuner를 활성화하고 싱글플레이 게임을 로드해야 합니다.
+3. Civ6 옵션에서 `Auto End Turn`을 끄고, 안정성을 위해 windowed/borderless windowed 모드를 권장합니다.
+4. 권장 launcher를 쓰려면 `uv`가 `PATH`에 있어야 합니다.
+5. `github.com/lmwilki/civ6-mcp` 로컬 checkout이 필요합니다.
 
 **1. Civ6에서 FireTuner 활성화**
 
@@ -469,11 +475,16 @@ EnableTuner 1
 
 자주 쓰이는 위치:
 
-- macOS: `~/Library/Application Support/Sid Meier's Civilization VI/AppOptions.txt`
-- Linux/Proton: Civ6 prefix 또는 compatibility-data 디렉터리 안의 `AppOptions.txt`
-- Windows: Steam Tools에서 "Sid Meier's Civilization VI SDK"를 설치한 뒤 로컬 게임 설치에서 tuner 지원 활성화
+- macOS: `~/Library/Application Support/Firaxis Games/Sid Meier's Civilization VI/AppOptions.txt`
+- Linux native: `~/.local/share/aspyr-media/Sid Meier's Civilization VI/AppOptions.txt`
+- Windows: `%USERPROFILE%\Documents\My Games\Sid Meier's Civilization VI\AppOptions.txt`
+
+Windows에서는 Steam Tools에서 "Sid Meier's Civilization VI SDK"를 설치해야 FireTuner 실행 파일이 함께 제공됩니다.
+WSL에서 `civ6-mcp`를 실행할 때도 Windows 쪽 Civ6/FireTuner에 연결합니다.
+Linux는 native Civ6를 권장합니다. Proton/Wine 환경은 FireTuner TCP 포트가 노출되지 않아 upstream `civ6-mcp`가 연결하지 못할 수 있습니다.
 
 설정을 바꾼 뒤 Civ6를 재시작하고 Gathering Storm 싱글플레이 게임을 로드하세요.
+게임 옵션에서는 `Auto End Turn`을 끄세요. 자동 턴 종료가 켜져 있으면 MCP backend가 턴 사이 의사결정 지점을 잃을 수 있습니다.
 FireTuner가 활성화되면 Steam 도전과제는 비활성화됩니다.
 FireTuner 연결은 한 번에 한 클라이언트만 소유할 수 있으므로 CivStation을 실행하기 전에 별도의 `FireTuner.exe` 또는 `FireTuner.app` 세션은 닫아 두세요.
 
@@ -485,7 +496,15 @@ cd ~/civ6-mcp
 uv sync
 ```
 
-선택 사항으로 해당 checkout에서 smoke test를 실행할 수 있습니다:
+권장되는 시작 전 연결 테스트:
+
+```bash
+uv run python scripts/test_connection.py
+```
+
+이 테스트가 Civ6 게임 상태를 읽지 못하면 CivStation을 시작하지 말고 FireTuner 설정, 싱글플레이 로드 상태, 다른 FireTuner 클라이언트 점유 여부를 먼저 확인하세요.
+
+선택 사항으로 해당 checkout에서 MCP 서버 smoke test를 실행할 수 있습니다:
 
 ```bash
 uv run civ-mcp
@@ -496,10 +515,12 @@ uv run civ-mcp
 
 **3. `civ6-mcp` backend로 CivStation 실행**
 
-upstream checkout 경로를 환경 변수로 지정하거나:
+시작 전에 Civ6는 이미 로드된 Gathering Storm 싱글플레이 게임 화면에 있어야 하고, 위 연결 테스트가 통과해야 합니다.
+upstream checkout 경로와 launcher를 환경 변수로 지정하거나:
 
 ```bash
 export CIV6_MCP_PATH="$HOME/civ6-mcp"
+export CIV6_MCP_LAUNCHER=uv
 ```
 
 명령행에서 명시적으로 전달합니다:
@@ -533,6 +554,7 @@ upstream checkout의 virtual environment를 직접 활성화해서 쓰고 싶다
 - `Start`를 누르기 전에 Civ6를 로드된 싱글플레이 게임 화면으로 열어 두세요.
 - `civstation mcp`는 CivStation의 layered extension server입니다. upstream `civ6-mcp` action backend와는 다릅니다.
 - `--provider`와 `--model`은 여전히 planner LLM을 선택하지만, VLM router는 초기화되지 않습니다.
+- `civ6-mcp` 실행에서 VLM screenshot/router/computer-use 구성요소를 fallback으로 켜거나 함께 주입하지 마세요. 두 backend는 같은 실행에서 섞을 수 없습니다.
 - `--status-ui`는 start/stop, phase 표시, human control에 계속 유용합니다. 단, 해당 UI의 live screen streaming을 사용한다면 `civ6-mcp` backend 자체가 픽셀을 읽지 않더라도 호스트 screen-capture 권한이 필요할 수 있습니다.
 - 기존 스크린샷/computer-use 파이프라인으로 돌아가려면 `--backend vlm`을 사용하거나 `--backend`를 생략하세요.
 

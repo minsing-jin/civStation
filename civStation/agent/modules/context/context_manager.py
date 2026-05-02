@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import copy
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from threading import Lock
@@ -538,6 +539,7 @@ class ContextManager:
         situation_summary: str,
         threats: list[str] | None = None,
         opportunities: list[str] | None = None,
+        observation_fields: Mapping[str, object] | None = None,
     ) -> None:
         """
         Update high-level context with background game-state observations.
@@ -545,7 +547,9 @@ class ContextManager:
         Called by ContextUpdater to inject strategic observations extracted
         from screenshots into the high-level context layer.  Keeps only the
         latest ``_MAX_OBSERVATIONS`` notes and replaces threats/opportunities
-        wholesale so stale entries don't accumulate.
+        wholesale so stale entries don't accumulate. Backend-native observers
+        may also pass parsed fields via ``observation_fields`` for consumers
+        that need structured state without reparsing the note text.
         """
         _MAX_OBSERVATIONS = 3
 
@@ -559,6 +563,8 @@ class ContextManager:
             self.high_level_context.active_threats = threats
         if opportunities is not None:
             self.high_level_context.opportunities = opportunities
+        if observation_fields is not None:
+            self.high_level_context.latest_game_observation = dict(observation_fields)
 
         self._last_update = datetime.now()
         logger.debug("Game observation updated in high-level context")

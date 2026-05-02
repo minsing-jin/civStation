@@ -18,11 +18,13 @@ prompt-language: eng
 debug: "all"   # comma-separated: context | turns | all
 router-img-max-long-edge: 1024
 
-# Action backend selection. Choose exactly one backend for a run.
+# Action backend selection. Choose exactly one backend at startup with:
+#   civstation run --backend {vlm,civ6-mcp}
+# Omitting --backend keeps the default VLM/computer-use pipeline.
 #   vlm        - screenshots + computer-use (default; existing pipeline).
 #   civ6-mcp   - drive Civ6 directly through the upstream civ6-mcp MCP server
-#                (https://github.com/lmwilki/civ6-mcp). This is mutually
-#                exclusive with the VLM click pipeline; it is not a fallback.
+#                (https://github.com/lmwilki/civ6-mcp). This disables the VLM
+#                stack entirely; it is mutually exclusive, not a VLM fallback.
 backend: vlm
 
 # Required when backend: civ6-mcp.

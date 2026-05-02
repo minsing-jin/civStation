@@ -1,29 +1,62 @@
-__all__ = [
-    "LayerAdapterRegistry",
-    "LayeredComputerUseMCP",
-    "LayeredSession",
-    "SessionRegistry",
-    "SessionRuntimeConfig",
-]
+from __future__ import annotations
+
+from typing import Any
+
+_EXPORT_MODULES: dict[str, str] = {
+    "CIV6_MCP_ADAPTER_NAME": "civ6_mcp_adapters",
+    "CIV6_MCP_TOOL_CALL_ACTION": "civ6_mcp_adapters",
+    "CIV6_MCP_TOOL_PLAN_ACTION": "civ6_mcp_adapters",
+    "Civ6McpPlannerTransportPayload": "civ6_mcp_adapters",
+    "Civ6McpRouteResult": "civ6_mcp_adapters",
+    "LayerAdapterRegistry": "runtime",
+    "LayeredComputerUseMCP": "server",
+    "LayeredSession": "session",
+    "SessionRegistry": "session",
+    "SessionRuntimeConfig": "runtime",
+    "adapter_overrides_for_backend": "runtime",
+    "encode_civ6_mcp_planner_result": "civ6_mcp_adapters",
+    "make_civ6_mcp_executor_adapter": "civ6_mcp_adapters",
+    "make_civ6_mcp_observer_adapter": "civ6_mcp_adapters",
+    "make_civ6_mcp_planner_adapter": "civ6_mcp_adapters",
+    "make_civ6_mcp_router_adapter": "civ6_mcp_adapters",
+    "register_civ6_mcp_adapters": "civ6_mcp_adapters",
+}
+
+__all__ = sorted(_EXPORT_MODULES)
 
 
-def __getattr__(name: str):
-    if name in {"LayerAdapterRegistry", "SessionRuntimeConfig"}:
-        from civStation.mcp.runtime import LayerAdapterRegistry, SessionRuntimeConfig
+def __getattr__(name: str) -> Any:
+    module_name = _EXPORT_MODULES.get(name)
+    if module_name is None:
+        raise AttributeError(name)
+    if module_name == "runtime":
+        from civStation.mcp.runtime import LayerAdapterRegistry, SessionRuntimeConfig, adapter_overrides_for_backend
 
-        return {
+        value = {
             "LayerAdapterRegistry": LayerAdapterRegistry,
             "SessionRuntimeConfig": SessionRuntimeConfig,
+            "adapter_overrides_for_backend": adapter_overrides_for_backend,
         }[name]
-    if name in {"LayeredSession", "SessionRegistry"}:
+    elif module_name == "session":
         from civStation.mcp.session import LayeredSession, SessionRegistry
 
-        return {
+        value = {
             "LayeredSession": LayeredSession,
             "SessionRegistry": SessionRegistry,
         }[name]
-    if name == "LayeredComputerUseMCP":
+    elif module_name == "server":
         from civStation.mcp.server import LayeredComputerUseMCP
 
-        return LayeredComputerUseMCP
-    raise AttributeError(name)
+        value = LayeredComputerUseMCP
+    elif module_name == "civ6_mcp_adapters":
+        from civStation.mcp import civ6_mcp_adapters
+
+        value = getattr(civ6_mcp_adapters, name)
+    else:
+        raise AttributeError(name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted((*globals(), *__all__))

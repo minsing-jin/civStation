@@ -81,6 +81,16 @@ Civic Researching: FEUDALISM
     assert ctx.high_level_context.notes == [
         "Turn 42 | Era Medieval | Sci +33.2/t | Cul +11.0/t | Research EDUCATION | Civic FEUDALISM"
     ]
+    assert ctx.high_level_context.latest_game_observation == {
+        "current_turn": 42,
+        "game_era": "Medieval",
+        "science_per_turn": 33.25,
+        "culture_per_turn": 11.0,
+        "gold_per_turn": -2.5,
+        "faith_per_turn": 7.0,
+        "current_research": "EDUCATION",
+        "current_civic": "FEUDALISM",
+    }
     assert observer.last_observation is not None
     assert observer.last_observation.global_context_updates == {
         "current_turn": 42,
@@ -91,6 +101,121 @@ Civic Researching: FEUDALISM
         "faith_per_turn": 7.0,
         "current_research": "EDUCATION",
         "current_civic": "FEUDALISM",
+    }
+
+
+def test_observer_synchronizes_parsed_session_fields_into_global_context() -> None:
+    overview = """\
+Game Overview
+Turn: 51
+Era: Renaissance Era
+Civilization: Korea (Seondeok)
+Leader: Seondeok
+Game Speed: Standard
+Gold: 245 (+31.5/turn)
+Faith: 18 (+4.0/turn)
+Science: +72.0/turn
+Culture: +33.0/turn
+Total Population: 27
+Unit Count: 9
+Military Strength: 312
+Researching: BANKING
+Civic Researching: HUMANISM
+"""
+    client = FakeObservationClient({"get_game_overview": overview})
+    ctx = ContextManager.get_instance()
+    observer = Civ6McpObserver(client, ctx, observe_tools=("get_game_overview",))  # type: ignore[arg-type]
+
+    observer.observe()
+
+    assert ctx.global_context.current_turn == 51
+    assert ctx.global_context.game_era == "Renaissance"
+    assert ctx.global_context.civilization_name == "Korea"
+    assert ctx.global_context.leader_name == "Seondeok"
+    assert ctx.global_context.game_speed == "Standard"
+    assert ctx.global_context.gold == 245
+    assert ctx.global_context.gold_per_turn == pytest.approx(31.5)
+    assert ctx.global_context.faith == 18
+    assert ctx.global_context.faith_per_turn == pytest.approx(4.0)
+    assert ctx.global_context.total_population == 27
+    assert ctx.global_context.unit_count == 9
+    assert ctx.global_context.military_strength == 312
+    assert observer.last_observation is not None
+    assert observer.last_observation.global_context_updates == {
+        "current_turn": 51,
+        "game_era": "Renaissance",
+        "game_speed": "Standard",
+        "civilization_name": "Korea",
+        "leader_name": "Seondeok",
+        "gold": 245,
+        "gold_per_turn": 31.5,
+        "science_per_turn": 72.0,
+        "culture_per_turn": 33.0,
+        "faith": 18,
+        "faith_per_turn": 4.0,
+        "total_population": 27,
+        "military_strength": 312,
+        "unit_count": 9,
+        "current_research": "BANKING",
+        "current_civic": "HUMANISM",
+    }
+
+
+def test_observe_invokes_both_context_manager_update_methods_with_mapped_payloads() -> None:
+    overview = """\
+Game Overview
+Turn: 64
+Era: Industrial Era
+Civilization: Korea (Seondeok)
+Leader: Seondeok
+Game Speed: Online
+Gold: 518 (+44.5/turn)
+Faith: 91 (+12.0/turn)
+Science: +156.75/turn
+Culture: +88.25/turn
+Total Population: 41
+Unit Count: 13
+Military Strength: 620
+Researching: RADIO
+Civic Researching: IDEOLOGY
+"""
+    client = FakeObservationClient({"get_game_overview": overview})
+    ctx = RecordingContextManager()
+    observer = Civ6McpObserver(client, ctx, observe_tools=("get_game_overview",))  # type: ignore[arg-type]
+
+    observer.observe()
+
+    expected_fields = {
+        "current_turn": 64,
+        "game_era": "Industrial",
+        "game_speed": "Online",
+        "civilization_name": "Korea",
+        "leader_name": "Seondeok",
+        "gold": 518,
+        "gold_per_turn": 44.5,
+        "science_per_turn": 156.75,
+        "culture_per_turn": 88.25,
+        "faith": 91,
+        "faith_per_turn": 12.0,
+        "total_population": 41,
+        "military_strength": 620,
+        "unit_count": 13,
+        "current_research": "RADIO",
+        "current_civic": "IDEOLOGY",
+    }
+    expected_summary = "Turn 64 | Era Industrial | Sci +156.8/t | Cul +88.2/t | Research RADIO | Civic IDEOLOGY"
+    assert ctx.global_updates == [expected_fields]
+    assert ctx.game_observation_updates == [
+        {
+            "situation_summary": expected_summary,
+            "observation_fields": expected_fields,
+        }
+    ]
+    assert observer.last_observation is not None
+    assert observer.last_observation.global_context_updates == expected_fields
+    assert observer.last_observation.game_observation_updates == {
+        "situation_summary": expected_summary,
+        "observation_fields": expected_fields,
     }
 
 
@@ -140,6 +265,15 @@ Researching: POTTERY
         }
     ]
     assert ctx.game_observation_updates == [
-        {"situation_summary": "Turn 7 | Era Ancient | Sci +4.0/t | Cul +2.0/t | Research POTTERY"}
+        {
+            "situation_summary": "Turn 7 | Era Ancient | Sci +4.0/t | Cul +2.0/t | Research POTTERY",
+            "observation_fields": {
+                "current_turn": 7,
+                "game_era": "Ancient",
+                "science_per_turn": 4.0,
+                "culture_per_turn": 2.0,
+                "current_research": "POTTERY",
+            },
+        }
     ]
     assert "ContextManager update_global_context failed: global context write failed" in caplog.text

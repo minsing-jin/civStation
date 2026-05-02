@@ -10,15 +10,19 @@ turn loop can decide whether to retry, escalate, or stop.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
+from civStation.agent.modules.backend.civ6_mcp.action_mapping import (
+    Civ6McpActionMappingError,
+    map_civ6_mcp_action,
+    map_civ6_mcp_actions,
+)
 from civStation.agent.modules.backend.civ6_mcp.client import Civ6McpClientProtocol
 from civStation.agent.modules.backend.civ6_mcp.operations import (
     Civ6McpOperationDispatcher,
     Civ6McpRequestBuilder,
     classify_civ6_mcp_text,
-    coerce_civ6_mcp_requests,
 )
 from civStation.agent.modules.backend.civ6_mcp.results import (
     ToolCall,
@@ -27,6 +31,7 @@ from civStation.agent.modules.backend.civ6_mcp.results import (
 )
 
 _TERMINAL_CLASSIFICATIONS = frozenset({"game_over", "aborted", "hang"})
+StopRequested = Callable[[], bool]
 
 
 class Civ6McpExecutor:
@@ -51,6 +56,8 @@ class Civ6McpExecutor:
                 success=False,
                 error=str(exc),
                 classification="error",
+                status="fatal",
+                terminal=False,
             )
 
         try:
@@ -65,18 +72,27 @@ class Civ6McpExecutor:
                 success=False,
                 error=str(exc),
                 classification="error",
+                status="fatal",
+                terminal=False,
             )
 
         outcome = self._dispatcher.dispatch(request)
         return tool_call_result_from_dispatch(call, outcome)
 
-    def execute_many(self, calls: Iterable[Any]) -> list[ToolCallResult]:
+    def execute_many(
+        self,
+        calls: Iterable[Any],
+        *,
+        stop_requested: StopRequested | None = None,
+    ) -> list[ToolCallResult]:
         """Run a sequence of tool calls; stop early on terminal classifications."""
         results: list[ToolCallResult] = []
         for call in calls:
+            if stop_requested is not None and stop_requested():
+                break
             outcome = self.execute(call)
             results.append(outcome)
-            if outcome.classification in _TERMINAL_CLASSIFICATIONS:
+            if _is_terminal_outcome(outcome):
                 break
         return results
 
@@ -85,26 +101,16 @@ class Civ6McpExecutor:
         return classify_civ6_mcp_text(text)
 
 
+def _is_terminal_outcome(outcome: ToolCallResult) -> bool:
+    return outcome.terminal or outcome.classification in _TERMINAL_CLASSIFICATIONS
+
+
 def coerce_tool_call(planned_action: Any) -> ToolCall:
     """Normalize one backend planned action into an executor ``ToolCall``."""
-    if isinstance(planned_action, ToolCall):
-        return planned_action
-
-    to_tool_call = getattr(planned_action, "to_tool_call", None)
-    if callable(to_tool_call):
-        converted = to_tool_call()
-        if not isinstance(converted, ToolCall):
-            raise ValueError(f"planned action to_tool_call() must return ToolCall, got {type(converted).__name__}")
-        return converted
-
-    if isinstance(planned_action, Mapping):
-        return _tool_call_from_mapping(planned_action)
-
-    tool = getattr(planned_action, "tool", None)
-    if tool is not None:
-        return _tool_call_from_attrs(planned_action)
-
-    raise ValueError(f"Unsupported planned action shape: {type(planned_action).__name__}")
+    try:
+        return map_civ6_mcp_action(planned_action)
+    except Civ6McpActionMappingError as exc:
+        raise ValueError(str(exc)) from exc
 
 
 def coerce_tool_calls(payload: Any) -> list[ToolCall]:
@@ -114,44 +120,36 @@ def coerce_tool_calls(payload: Any) -> list[ToolCall]:
 
         {"tool_calls": [{"tool": "...", "arguments": {...}}, ...]}
 
-    or just the list itself for resilience against minor format drift.
+    or just the list itself for resilience against minor format drift. Each
+    entry may be a canonical tool call or a civ6-mcp free-form action type.
     """
-    return [
-        ToolCall(
-            tool=request.tool,
-            arguments=request.arguments,
-            reasoning=request.reasoning,
+    items = _tool_call_items_from_payload(payload)
+    try:
+        return map_civ6_mcp_actions(items)
+    except Civ6McpActionMappingError as exc:
+        raise ValueError(str(exc)) from exc
+
+
+def _tool_call_items_from_payload(payload: Any) -> list[Any]:
+    if isinstance(payload, dict) and "tool_calls" in payload:
+        items = payload["tool_calls"]
+    elif isinstance(payload, dict) and "actions" in payload:
+        raise ValueError(
+            "VLM/computer-use action-plan payload cannot run on the civ6-mcp backend; expected 'tool_calls'."
         )
-        for request in coerce_civ6_mcp_requests(payload)
-    ]
+    elif isinstance(payload, list):
+        items = payload
+    else:
+        raise ValueError(f"Unexpected planner payload shape: {type(payload).__name__}")
 
-
-def _tool_call_from_mapping(raw: Mapping[str, Any]) -> ToolCall:
-    tool = raw.get("tool") or raw.get("name")
-    if not isinstance(tool, str) or not tool:
-        raise ValueError(f"Tool call missing 'tool' name: {dict(raw)!r}")
-    arguments = raw.get("arguments") or {}
-    if not isinstance(arguments, dict):
-        raise ValueError("Tool call arguments must be an object.")
-    return ToolCall(
-        tool=tool,
-        arguments=dict(arguments),
-        reasoning=str(raw.get("reasoning") or ""),
-    )
-
-
-def _tool_call_from_attrs(raw: Any) -> ToolCall:
-    tool = getattr(raw, "tool", None)
-    if not isinstance(tool, str) or not tool:
-        raise ValueError(f"Tool call missing 'tool' name on {type(raw).__name__}.")
-    arguments = getattr(raw, "arguments", {}) or {}
-    if not isinstance(arguments, dict):
-        raise ValueError("Tool call arguments must be an object.")
-    return ToolCall(
-        tool=tool,
-        arguments=dict(arguments),
-        reasoning=str(getattr(raw, "reasoning", "") or ""),
-    )
+    if not isinstance(items, list):
+        raise ValueError("Planner payload 'tool_calls' must be a list.")
+    for item in items:
+        if not isinstance(item, dict):
+            raise ValueError(f"Tool call entry must be an object, got {type(item).__name__}")
+        if not any(item.get(key) for key in ("tool", "name", "type", "action_type", "action")):
+            raise ValueError(f"Tool call missing 'tool' name: {item!r}")
+    return list(items)
 
 
 def _invalid_tool_call(raw: Any) -> ToolCall:

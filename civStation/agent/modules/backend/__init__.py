@@ -15,6 +15,9 @@ from civStation.agent.modules.backend.selector import (
 )
 
 _CIV6_MCP_LAZY_EXPORTS = (
+    "CIV6_MCP_FREE_FORM_ACTION_TYPE_ALIASES",
+    "CIV6_MCP_FREE_FORM_ACTION_TYPE_REGISTRY",
+    "CIV6_MCP_FREE_FORM_ACTION_TYPE_TO_MCP_TOOL",
     "DEFAULT_CIV6_MCP_OBSERVE_TOOLS",
     "Civ6McpClient",
     "Civ6McpClientFactory",
@@ -24,6 +27,7 @@ _CIV6_MCP_LAZY_EXPORTS = (
     "Civ6McpHealth",
     "Civ6McpUnavailableError",
     "Civ6McpActionMappingError",
+    "Civ6McpFreeFormActionType",
     "Civ6McpExecutor",
     "MappedCiv6McpAction",
     "Civ6McpObserver",

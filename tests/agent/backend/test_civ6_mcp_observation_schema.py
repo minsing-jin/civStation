@@ -5,11 +5,14 @@ from __future__ import annotations
 from civStation.agent.modules.backend.civ6_mcp.observation_schema import (
     CIV6_MCP_CONTEXT_FIELD_MAPPINGS,
     CIV6_MCP_OBSERVATION_SECTION_MAPPINGS,
+    build_game_observation_fields,
     build_global_context_updates,
     build_situation_summary,
     normalize_observation_bundle,
     normalize_raw_mcp_game_state,
+    parse_observation_tool_response,
     section_texts_for_bundle,
+    tool_results_for_bundle,
 )
 from civStation.agent.modules.backend.civ6_mcp.state_parser import (
     GameOverviewSnapshot,
@@ -79,6 +82,45 @@ def test_context_field_mappings_target_existing_context_manager_fields() -> None
     assert ("overview.science_per_turn", "global_context", "science_per_turn") in mapped_targets
     assert ("overview.current_research", "global_context", "current_research") in mapped_targets
     assert ("overview.current_civic", "global_context", "current_civic") in mapped_targets
+    assert ("overview.civilization_name", "global_context", "civilization_name") in mapped_targets
+    assert ("overview.leader_name", "global_context", "leader_name") in mapped_targets
+    assert ("overview.game_speed", "global_context", "game_speed") in mapped_targets
+    assert ("overview.total_population", "global_context", "total_population") in mapped_targets
+    assert ("overview.unit_count", "global_context", "unit_count") in mapped_targets
+
+
+def test_normalize_observation_bundle_maps_session_fields_to_global_context() -> None:
+    bundle = StateBundle(
+        overview=parse_game_overview(
+            """\
+Game Overview
+Turn: 51
+Era: Renaissance Era
+Civilization: Korea (Seondeok)
+Game Speed: Standard
+Gold: 245 (+31.5/turn)
+Faith: 18 (+4.0/turn)
+Total Population: 27
+Unit Count: 9
+Military Strength: 312
+"""
+        )
+    )
+
+    assert normalize_observation_bundle(bundle).global_context_updates == {
+        "current_turn": 51,
+        "game_era": "Renaissance",
+        "game_speed": "Standard",
+        "civilization_name": "Korea",
+        "leader_name": "Seondeok",
+        "gold": 245,
+        "gold_per_turn": 31.5,
+        "faith": 18,
+        "faith_per_turn": 4.0,
+        "total_population": 27,
+        "military_strength": 312,
+        "unit_count": 9,
+    }
 
 
 def test_normalize_observation_bundle_builds_context_updates_and_sections() -> None:
@@ -107,7 +149,24 @@ def test_normalize_observation_bundle_builds_context_updates_and_sections() -> N
         "situation_summary": (
             "Turn 87 | Era Medieval | Sci +93.2/t | Cul +41.5/t | "
             "Research EDUCATION (3 turns) | Civic FEUDALISM (2 turns)"
-        )
+        ),
+        "observation_fields": {
+            "current_turn": 87,
+            "game_era": "Medieval",
+            "science_per_turn": 93.25,
+            "culture_per_turn": 41.5,
+            "gold_per_turn": 104.0,
+            "faith_per_turn": 7.5,
+            "current_research": "EDUCATION (3 turns)",
+            "current_civic": "FEUDALISM (2 turns)",
+        },
+    }
+    assert observation.tool_results == {
+        "get_game_overview": VALID_OVERVIEW,
+        "get_units": "Units:\n- Builder at (3, 4)",
+        "get_cities": "Cities:\n- Seoul: pop 7",
+        "get_victory_progress": "Victory Progress:\n- Science: 35%",
+        "get_governors": "Governors:\n- Pingala established in Seoul",
     }
     assert observation.raw_sections["OVERVIEW"] == VALID_OVERVIEW
     assert observation.raw_sections["UNITS"] == "Units:\n- Builder at (3, 4)"
@@ -145,6 +204,7 @@ def test_normalize_raw_mcp_game_state_builds_civstation_observation() -> None:
     assert observation.raw_sections["UNITS"] == "Units:\n- Tank at (7, 8)"
     assert observation.raw_sections["CITIES"] == "Cities:\n- Seoul: pop 12"
     assert observation.raw_sections["GET_TRADE_ROUTES"] == "Trade Routes:\n- Seoul -> Busan"
+    assert observation.tool_results["get_trade_routes"] == "Trade Routes:\n- Seoul -> Busan"
     assert "Turn 94" in observation.game_observation_updates["situation_summary"]
 
 
@@ -170,7 +230,17 @@ def test_normalize_raw_mcp_game_state_preserves_mixed_sdk_sections_and_diagnosti
     assert observation.game_observation_updates == {
         "situation_summary": (
             "Turn 112 | Era Information | Sci +455.5/t | Cul +231.2/t | Research SMART_MATERIALS | Civic GLOBALIZATION"
-        )
+        ),
+        "observation_fields": {
+            "current_turn": 112,
+            "game_era": "Information",
+            "science_per_turn": 455.5,
+            "culture_per_turn": 231.25,
+            "gold_per_turn": 1000.0,
+            "faith_per_turn": 22.0,
+            "current_research": "SMART_MATERIALS",
+            "current_civic": "GLOBALIZATION",
+        },
     }
     assert observation.raw_sections["UNITS"] == "Units:\n- Mech Infantry at (10, 11)"
     assert observation.raw_sections["CITIES"] == "Cities:\n- Seoul: pop 18"
@@ -220,6 +290,46 @@ def test_normalize_raw_mcp_game_state_converts_mcp_result_objects_to_planner_rea
     assert "Turn 115" in observation.game_observation_updates["situation_summary"]
 
 
+def test_parse_observation_tool_response_validates_one_successful_get_tool_payload() -> None:
+    parsed = parse_observation_tool_response(
+        "get_game_overview",
+        {
+            "structured_content": {
+                "turn": 116,
+                "era": "Future Era",
+                "yields": {"science": 610.5},
+                "current_research": "OFFWORLD_MISSION",
+            }
+        },
+    )
+
+    assert parsed.tool == "get_game_overview"
+    assert parsed.bundle.overview.current_turn == 116
+    assert parsed.normalized.global_context_updates == {
+        "current_turn": 116,
+        "game_era": "Future",
+        "science_per_turn": 610.5,
+        "current_research": "OFFWORLD_MISSION",
+    }
+    assert parsed.normalized.tool_results["get_game_overview"]
+
+
+def test_parse_observation_tool_response_rejects_non_get_and_empty_payloads() -> None:
+    try:
+        parse_observation_tool_response("set_research", "Writing")
+    except ValueError as exc:
+        assert "not a civ6-mcp observation tool" in str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("set_research should not be accepted as an observation tool")
+
+    try:
+        parse_observation_tool_response("get_units", "   ")
+    except ValueError as exc:
+        assert "empty response body" in str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("empty get_units payload should not validate")
+
+
 def test_normalize_observation_bundle_uses_canonical_context_field_names() -> None:
     bundle = StateBundle(overview=parse_game_overview(VALID_OVERVIEW))
 
@@ -248,8 +358,25 @@ def test_normalize_observation_bundle_defaults_when_state_is_empty() -> None:
     assert observation.backend == "civ6-mcp"
     assert observation.global_context_updates == {}
     assert observation.game_observation_updates == {}
+    assert observation.tool_results == {}
     assert observation.raw_sections == {}
     assert observation.planner_context == "(no civ6-mcp state available)"
+
+
+def test_tool_results_for_bundle_preserves_upstream_tool_names() -> None:
+    bundle = StateBundle(
+        overview=parse_game_overview(VALID_OVERVIEW),
+        cities_text="Cities:\n- Seoul",
+        extra={"get_dynamic_report": "Dynamic:\n- upstream-added get_* endpoint"},
+        missing_tools=("get_units",),
+        failed_tools={"get_diplomacy": "timeout"},
+    )
+
+    assert tool_results_for_bundle(bundle) == {
+        "get_game_overview": VALID_OVERVIEW,
+        "get_cities": "Cities:\n- Seoul",
+        "get_dynamic_report": "Dynamic:\n- upstream-added get_* endpoint",
+    }
 
 
 def test_global_context_updates_coerce_values_to_schema_types() -> None:
@@ -293,6 +420,7 @@ def test_global_context_updates_skip_unparsed_optional_fields() -> None:
 
     assert build_global_context_updates(bundle) == {"current_turn": 5}
     assert build_situation_summary(bundle) == "Turn 5"
+    assert build_game_observation_fields(bundle) == {"current_turn": 5}
 
 
 def test_section_texts_for_bundle_omits_empty_sections() -> None:

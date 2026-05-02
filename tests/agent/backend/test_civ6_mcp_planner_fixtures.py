@@ -165,3 +165,101 @@ def test_llm_tool_planner_uses_fixture_context_and_returns_civ6_mcp_tool_calls(
     assert "## OVERVIEW" in provider.captured_prompts[0]
     assert "Pending diplomacy" in provider.captured_prompts[0]
     assert "set_city_production(city: string, production: string)" in provider.captured_prompts[0]
+
+
+def test_planner_invocation_consumes_normalized_observation_payload_and_returns_ordered_tool_plan(
+    civ6_mcp_planner_observation_cases: dict[str, dict[str, object]],
+) -> None:
+    case = civ6_mcp_planner_observation_cases["representative_science_blockers"]
+    observation = normalize_raw_mcp_game_state(case["raw_state"])
+    planner_payload: dict[str, Any] = {
+        "tool_calls": [
+            {
+                "tool": "get_pending_diplomacy",
+                "arguments": {},
+                "reasoning": "Incoming diplomacy must be inspected first.",
+            },
+            {
+                "tool": "set_city_production",
+                "arguments": {"city": "Seoul", "production": "Campus"},
+                "reasoning": "Resolve production blocker.",
+            },
+            {
+                "tool": "end_turn",
+                "arguments": {
+                    "tactical": "Handled diplomacy and city production.",
+                    "strategic": "Campus supports the science plan.",
+                    "tooling": "Observation payload became an MCP tool plan.",
+                    "planning": "Re-check units next turn.",
+                    "hypothesis": "Science scaling improves after Campus investment.",
+                },
+            },
+        ]
+    }
+    provider = FakeProvider(json.dumps(planner_payload))
+    planner = Civ6McpToolPlanner(
+        provider=provider,
+        tool_catalog={
+            **_PLANNER_TOOL_CATALOG,
+            "get_pending_diplomacy": {"description": "Inspect diplomacy", "input_schema": {"properties": {}}},
+        },
+        allowed_tools=("get_pending_diplomacy", "set_city_production", "end_turn"),
+    )
+
+    result = planner.plan_from_observation(
+        observation=observation,
+        strategy=str(case["strategy"]),
+        recent_calls="(none)",
+    )
+
+    assert [call.tool for call in result.tool_calls] == [
+        "get_pending_diplomacy",
+        "set_city_production",
+        "end_turn",
+    ]
+    assert result.tool_calls[1].arguments == {"city": "Seoul", "production": "Campus"}
+    assert "## OVERVIEW" in provider.captured_prompts[0]
+    assert "## PRIORITIZED_MCP_INTENTS" in provider.captured_prompts[0]
+    assert "get_pending_diplomacy" in provider.captured_prompts[0]
+
+
+def test_planner_invocation_accepts_raw_observation_mapping(
+    civ6_mcp_planner_observation_cases: dict[str, dict[str, object]],
+) -> None:
+    case = civ6_mcp_planner_observation_cases["edge_blank_research_policy_promotion"]
+    planner_payload: dict[str, Any] = {
+        "tool_calls": [
+            {
+                "tool": "set_research",
+                "arguments": {"tech_or_civic": "WRITING", "category": "tech"},
+                "reasoning": "Research is blank in the observation payload.",
+            },
+            {
+                "tool": "end_turn",
+                "arguments": {
+                    "tactical": "Set missing research.",
+                    "strategic": "Writing unlocks science infrastructure.",
+                    "tooling": "Raw observation mapping was normalized for planning.",
+                    "planning": "Inspect policies next turn.",
+                    "hypothesis": "Research progress resumes after selecting Writing.",
+                },
+            },
+        ]
+    }
+    provider = FakeProvider(json.dumps(planner_payload))
+    planner = Civ6McpToolPlanner(
+        provider=provider,
+        tool_catalog=_PLANNER_TOOL_CATALOG,
+        allowed_tools=("set_research", "end_turn"),
+    )
+
+    result = planner.plan_from_observation(
+        observation=case["raw_state"],
+        strategy=str(case["strategy"]),
+        recent_calls="get_game_overview",
+    )
+
+    assert [call.tool for call in result.tool_calls] == ["set_research", "end_turn"]
+    assert "Turn 16" in provider.captured_prompts[0]
+    assert "Research:" in provider.captured_prompts[0]
+    assert "P070 get_tech_civics" in provider.captured_prompts[0]

@@ -12,13 +12,13 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from civStation.agent.modules.backend.civ6_mcp.executor import ToolCall
 from civStation.agent.modules.backend.civ6_mcp.operations import (
     END_TURN_REFLECTION_FIELDS,
     END_TURN_TOOL,
     SUPPORTED_CIV6_MCP_TOOLS,
     Civ6McpRequestBuilder,
 )
+from civStation.agent.modules.backend.civ6_mcp.results import ToolCall
 
 _DIRECT_TOOL_CALL_TYPES = frozenset(
     {
@@ -48,34 +48,111 @@ _METADATA_FIELDS = frozenset(
     }
 )
 
-PLANNED_ACTION_TYPE_TO_MCP_TOOL: dict[str, str] = {
-    "research": "set_research",
-    "choose_research": "set_research",
-    "set_research": "set_research",
-    "city_production": "set_city_production",
-    "choose_production": "set_city_production",
-    "set_city_production": "set_city_production",
-    "city_focus": "set_city_focus",
-    "set_city_focus": "set_city_focus",
-    "purchase": "purchase_item",
-    "purchase_item": "purchase_item",
-    "buy_item": "purchase_item",
-    "purchase_tile": "purchase_tile",
-    "buy_tile": "purchase_tile",
-    "government": "change_government",
-    "change_government": "change_government",
-    "policies": "set_policies",
-    "set_policies": "set_policies",
-    "unit_action": "unit_action",
-    "city_action": "city_action",
-    "skip_remaining_units": "skip_remaining_units",
-    "end_turn": END_TURN_TOOL,
-}
-PLANNED_ACTION_TYPE_TO_MCP_TOOL.update({tool: tool for tool in SUPPORTED_CIV6_MCP_TOOLS})
-
 
 class Civ6McpActionMappingError(ValueError):
     """Raised when a planned action cannot be mapped to a civ6-mcp tool call."""
+
+
+@dataclass(frozen=True)
+class Civ6McpFreeFormActionType:
+    """A free-form civ6-mcp action type and the upstream tool it dispatches."""
+
+    action_type: str
+    tool: str
+    aliases: tuple[str, ...] = ()
+
+    @property
+    def accepted_types(self) -> tuple[str, ...]:
+        """Return the canonical free-form type plus all accepted aliases."""
+        return (self.action_type, *self.aliases)
+
+
+_CORE_FREE_FORM_ACTION_TYPES: tuple[Civ6McpFreeFormActionType, ...] = (
+    Civ6McpFreeFormActionType(
+        action_type="research",
+        tool="set_research",
+        aliases=("choose_research", "set_research"),
+    ),
+    Civ6McpFreeFormActionType(
+        action_type="city_production",
+        tool="set_city_production",
+        aliases=("choose_production", "set_city_production"),
+    ),
+    Civ6McpFreeFormActionType(
+        action_type="city_focus",
+        tool="set_city_focus",
+        aliases=("set_city_focus",),
+    ),
+    Civ6McpFreeFormActionType(
+        action_type="purchase",
+        tool="purchase_item",
+        aliases=("purchase_item", "buy_item"),
+    ),
+    Civ6McpFreeFormActionType(
+        action_type="purchase_tile",
+        tool="purchase_tile",
+        aliases=("buy_tile",),
+    ),
+    Civ6McpFreeFormActionType(
+        action_type="government",
+        tool="change_government",
+        aliases=("change_government",),
+    ),
+    Civ6McpFreeFormActionType(
+        action_type="set_policies",
+        tool="set_policies",
+        aliases=("policies", "policy_cards"),
+    ),
+    Civ6McpFreeFormActionType(
+        action_type="end_turn",
+        tool=END_TURN_TOOL,
+        aliases=("finish_turn",),
+    ),
+)
+
+
+def _build_free_form_action_type_registry() -> dict[str, Civ6McpFreeFormActionType]:
+    registry = {entry.action_type: entry for entry in _CORE_FREE_FORM_ACTION_TYPES}
+    reserved_action_types = {
+        accepted_type for entry in _CORE_FREE_FORM_ACTION_TYPES for accepted_type in entry.accepted_types
+    }
+    for tool in sorted(SUPPORTED_CIV6_MCP_TOOLS):
+        if tool not in reserved_action_types:
+            registry[tool] = Civ6McpFreeFormActionType(action_type=tool, tool=tool)
+    return registry
+
+
+def _build_free_form_action_type_aliases(
+    registry: Mapping[str, Civ6McpFreeFormActionType],
+) -> dict[str, str]:
+    aliases: dict[str, str] = {}
+    for action_type, entry in registry.items():
+        for accepted_type in entry.accepted_types:
+            existing = aliases.setdefault(accepted_type, action_type)
+            if existing != action_type:
+                raise RuntimeError(
+                    f"Duplicate civ6-mcp free-form action type alias {accepted_type!r}: "
+                    f"{existing!r} and {action_type!r}"
+                )
+    return aliases
+
+
+CIV6_MCP_FREE_FORM_ACTION_TYPE_REGISTRY: dict[str, Civ6McpFreeFormActionType] = _build_free_form_action_type_registry()
+"""Canonical civ6-mcp free-form action types keyed by action type."""
+
+CIV6_MCP_FREE_FORM_ACTION_TYPE_ALIASES: dict[str, str] = _build_free_form_action_type_aliases(
+    CIV6_MCP_FREE_FORM_ACTION_TYPE_REGISTRY
+)
+"""Accepted civ6-mcp free-form action type aliases mapped to canonical types."""
+
+CIV6_MCP_FREE_FORM_ACTION_TYPE_TO_MCP_TOOL: dict[str, str] = {
+    accepted_type: CIV6_MCP_FREE_FORM_ACTION_TYPE_REGISTRY[canonical_type].tool
+    for accepted_type, canonical_type in CIV6_MCP_FREE_FORM_ACTION_TYPE_ALIASES.items()
+}
+"""Accepted civ6-mcp free-form action type aliases mapped to upstream tools."""
+
+PLANNED_ACTION_TYPE_TO_MCP_TOOL: dict[str, str] = dict(CIV6_MCP_FREE_FORM_ACTION_TYPE_TO_MCP_TOOL)
+"""Backward-compatible alias for the civ6-mcp planned action type map."""
 
 
 @dataclass(frozen=True)
@@ -144,6 +221,7 @@ def map_civ6_mcp_actions(planned_actions: Iterable[Any]) -> list[ToolCall]:
 
 
 def _validate_tool_call(call: ToolCall) -> MappedCiv6McpAction:
+    _raise_if_vlm_action_type(call.tool)
     request = Civ6McpRequestBuilder.build(
         call.tool,
         call.arguments,
@@ -158,10 +236,10 @@ def _validate_tool_call(call: ToolCall) -> MappedCiv6McpAction:
 
 def _map_mapping_action(raw: Mapping[str, Any]) -> MappedCiv6McpAction:
     action_type = _coerce_action_type(raw)
-    if action_type in _VLM_ACTION_TYPES:
-        raise Civ6McpActionMappingError(f"VLM/computer-use action {action_type!r} cannot run on the civ6-mcp backend.")
+    _raise_if_vlm_action_type(action_type)
 
     tool = _tool_for_mapping(raw, action_type)
+    _raise_if_vlm_action_type(tool)
     arguments = _arguments_for_tool(tool, raw)
     reasoning = _reasoning_for_mapping(raw)
     request = Civ6McpRequestBuilder.build(tool, arguments, reasoning=reasoning)
@@ -188,7 +266,7 @@ def _mapping_from_object(raw: Any) -> dict[str, Any] | None:
         if isinstance(dumped, Mapping):
             return dict(dumped)
 
-    if not any(hasattr(raw, field) for field in ("type", "action_type", "action")):
+    if not any(hasattr(raw, field) for field in ("type", "action_type", "action", "tool", "tool_name", "name")):
         return None
 
     try:
@@ -217,6 +295,11 @@ def _tool_for_mapping(raw: Mapping[str, Any], action_type: str) -> str:
             f"civ6-mcp planned action type {action_type!r} maps to {mapped_tool!r}, not {explicit_tool!r}."
         )
     return mapped_tool
+
+
+def _raise_if_vlm_action_type(action_type: str) -> None:
+    if action_type in _VLM_ACTION_TYPES:
+        raise Civ6McpActionMappingError(f"VLM/computer-use action {action_type!r} cannot run on the civ6-mcp backend.")
 
 
 def _arguments_for_tool(tool: str, raw: Mapping[str, Any]) -> dict[str, Any]:
@@ -282,7 +365,11 @@ def _reasoning_for_mapping(raw: Mapping[str, Any]) -> str:
 
 
 __all__ = [
+    "CIV6_MCP_FREE_FORM_ACTION_TYPE_ALIASES",
+    "CIV6_MCP_FREE_FORM_ACTION_TYPE_REGISTRY",
+    "CIV6_MCP_FREE_FORM_ACTION_TYPE_TO_MCP_TOOL",
     "Civ6McpActionMappingError",
+    "Civ6McpFreeFormActionType",
     "MappedCiv6McpAction",
     "PLANNED_ACTION_TYPE_TO_MCP_TOOL",
     "map_civ6_mcp_action",

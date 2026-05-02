@@ -20,6 +20,8 @@ import logging
 import os
 import shutil
 import threading
+from collections.abc import Coroutine
+from concurrent.futures import CancelledError as FutureCancelledError
 from concurrent.futures import Future
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass, field
@@ -57,6 +59,9 @@ class Civ6McpHealth:
 
 DEFAULT_HEALTH_REQUIRED_TOOLS = frozenset({"get_game_overview", "end_turn"})
 SUPPORTED_LAUNCHERS = frozenset({"uv", "python"})
+LOOP_THREAD_JOIN_TIMEOUT_SECONDS = 5.0
+MCP_CONTEXT_STOP_TIMEOUT_SECONDS = 10.0
+STARTUP_CANCEL_DRAIN_TIMEOUT_SECONDS = 1.0
 
 
 @runtime_checkable
@@ -66,6 +71,11 @@ class Civ6McpClientProtocol(Protocol):
     @property
     def tool_names(self) -> set[str]:
         """Names of tools exposed by the connected civ6-mcp server."""
+        ...
+
+    @property
+    def tool_catalog(self) -> dict[str, dict[str, Any]]:
+        """MCP tool metadata loaded during startup and later health refreshes."""
         ...
 
     def has_tool(self, name: str) -> bool:
@@ -78,6 +88,21 @@ class Civ6McpClientProtocol(Protocol):
 
     def health_check(self, required_tools: set[str] | frozenset[str] | None = None) -> Civ6McpHealth:
         """Return current MCP connection health after probing the session."""
+        ...
+
+    @property
+    def startup_health(self) -> Civ6McpHealth:
+        """Required-tool validation captured from the startup tool catalog."""
+        ...
+
+    @property
+    def has_required_tools(self) -> bool:
+        """Return whether startup catalog validation found every required tool."""
+        ...
+
+    @property
+    def missing_required_tools(self) -> frozenset[str]:
+        """Required civ6-mcp tool names absent from the startup catalog."""
         ...
 
     def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> str:
@@ -159,6 +184,23 @@ class Civ6McpConfig:
             )
         return launcher
 
+    def _missing_launcher_binary_error(self, launcher: str) -> Civ6McpUnavailableError:
+        if launcher == "uv":
+            return Civ6McpUnavailableError(
+                "Selected launcher is `uv` but the `uv` binary is not on PATH. "
+                "Install astral-sh/uv or pass --civ6-mcp-launcher python."
+            )
+        return Civ6McpUnavailableError(
+            "Selected launcher is `python` but the `python` binary is not on PATH. "
+            "Activate an environment that provides python or pass --civ6-mcp-launcher uv."
+        )
+
+    def _resolve_launcher_binary(self, launcher: str) -> str:
+        resolved = shutil.which(launcher)
+        if resolved is None:
+            raise self._missing_launcher_binary_error(launcher)
+        return resolved
+
     @classmethod
     def from_environment(
         cls,
@@ -219,11 +261,7 @@ class Civ6McpConfig:
                 f"civ6-mcp install path missing pyproject.toml: {install_path}. "
                 "Did you `git clone https://github.com/lmwilki/civ6-mcp` and `uv sync` there?"
             )
-        if launcher == "uv" and shutil.which("uv") is None:
-            raise Civ6McpUnavailableError(
-                "Selected launcher is `uv` but the `uv` binary is not on PATH. "
-                "Install astral-sh/uv or pass --civ6-mcp-launcher python."
-            )
+        self._resolve_launcher_binary(launcher)
 
     def server_command(self) -> list[str]:
         """Build the argv used to launch the civ6-mcp stdio server."""
@@ -267,12 +305,14 @@ class Civ6McpClient:
     def __init__(self, config: Civ6McpConfig) -> None:
         self.config = config
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._loop_ready: threading.Event | None = None
         self._loop_thread: threading.Thread | None = None
         self._session: Any | None = None  # mcp.ClientSession
         self._stdio_ctx: Any | None = None
         self._session_ctx: Any | None = None
         self._tool_names: set[str] = set()
         self._tool_schemas: dict[str, dict[str, Any]] = {}
+        self._startup_health: Civ6McpHealth | None = None
         self._started = False
         self._lock = threading.RLock()
 
@@ -283,42 +323,65 @@ class Civ6McpClient:
         with self._lock:
             if self._started:
                 return
-            self.config.validate()
+            try:
+                self.config.validate()
+            except Civ6McpUnavailableError as exc:
+                raise Civ6McpUnavailableError(f"Failed to start Civ6McpClient: {exc}") from exc
 
-            self._loop = asyncio.new_event_loop()
+            loop = asyncio.new_event_loop()
+            loop_ready = threading.Event()
+            self._loop = loop
+            self._loop_ready = loop_ready
             self._loop_thread = threading.Thread(
                 target=self._run_loop_forever,
+                args=(loop, loop_ready),
                 name="civ6-mcp-loop",
                 daemon=True,
             )
             self._loop_thread.start()
-
             try:
-                self._submit(self._async_start()).result(timeout=self.config.startup_timeout_seconds)
+                if not loop_ready.wait(timeout=self.config.startup_timeout_seconds):
+                    self._teardown_loop()
+                    raise Civ6McpError("Failed to start civ6-mcp event loop thread.")
+            except BaseException:
+                self._teardown_loop()
+                raise
+
+            startup_future = self._submit(self._async_start())
+            try:
+                startup_future.result(timeout=self.config.startup_timeout_seconds)
+            except FutureTimeoutError as exc:
+                self._cancel_startup_and_teardown(startup_future)
+                raise Civ6McpError(
+                    f"Timed out starting civ6-mcp server after {self.config.startup_timeout_seconds}s"
+                ) from exc
             except Exception as exc:
                 self._teardown_loop()
                 raise Civ6McpError(f"Failed to start civ6-mcp server: {exc}") from exc
+            except BaseException:
+                self._cancel_startup_and_teardown(startup_future)
+                raise
 
             self._started = True
+            self._startup_health = self._catalog_health(DEFAULT_HEALTH_REQUIRED_TOOLS)
             logger.info(
-                "civ6-mcp server ready (path=%s, tools=%d)",
+                "civ6-mcp server ready (path=%s, tools=%d, required_tools_ok=%s)",
                 self.config.install_path,
                 len(self._tool_names),
+                self._startup_health.ok,
             )
 
     def stop(self) -> None:
         """Tear down the MCP session and stop the event-loop thread."""
         with self._lock:
-            if not self._started:
-                self._teardown_loop()
-                return
             try:
-                self._submit(self._async_stop()).result(timeout=10.0)
+                if self._has_mcp_contexts():
+                    self._stop_mcp_contexts()
             except Exception as exc:  # noqa: BLE001
                 logger.warning("civ6-mcp stop encountered: %s", exc)
             finally:
-                self._teardown_loop()
                 self._started = False
+                self._teardown_loop()
 
     def __enter__(self) -> Civ6McpClient:
         self.start()
@@ -333,11 +396,35 @@ class Civ6McpClient:
     def tool_names(self) -> set[str]:
         return set(self._tool_names)
 
+    @property
+    def tool_catalog(self) -> dict[str, dict[str, Any]]:
+        return dict(self._tool_schemas)
+
     def has_tool(self, name: str) -> bool:
         return name in self._tool_names
 
     def tool_schemas(self) -> dict[str, dict[str, Any]]:
-        return dict(self._tool_schemas)
+        return self.tool_catalog
+
+    @property
+    def startup_health(self) -> Civ6McpHealth:
+        """Required-tool validation captured from the startup tool catalog."""
+        if self._startup_health is not None:
+            return self._startup_health
+        return self._catalog_health(
+            DEFAULT_HEALTH_REQUIRED_TOOLS,
+            message="civ6-mcp startup required-tool validation has not run.",
+        )
+
+    @property
+    def has_required_tools(self) -> bool:
+        """Return whether startup catalog validation found every required tool."""
+        return self.startup_health.ok
+
+    @property
+    def missing_required_tools(self) -> frozenset[str]:
+        """Required civ6-mcp tool names absent from the startup catalog."""
+        return self.startup_health.missing_required_tools
 
     def health_check(self, required_tools: set[str] | frozenset[str] | None = None) -> Civ6McpHealth:
         """Probe the MCP session and refresh the known tool catalog.
@@ -408,38 +495,77 @@ class Civ6McpClient:
 
     # ----- internal asyncio plumbing --------------------------------
 
-    def _run_loop_forever(self) -> None:
-        assert self._loop is not None
-        asyncio.set_event_loop(self._loop)
+    def _run_loop_forever(self, loop: asyncio.AbstractEventLoop, loop_ready: threading.Event) -> None:
+        asyncio.set_event_loop(loop)
+        loop.call_soon(loop_ready.set)
         try:
-            self._loop.run_forever()
+            loop.run_forever()
         finally:
             try:
-                pending = asyncio.all_tasks(self._loop)
+                pending = [task for task in asyncio.all_tasks(loop) if not task.done()]
                 for task in pending:
                     task.cancel()
-                self._loop.run_until_complete(asyncio.sleep(0))
+                if pending:
+                    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                loop.run_until_complete(loop.shutdown_asyncgens())
             except Exception:  # noqa: BLE001
                 pass
-            self._loop.close()
+            loop.close()
 
-    def _submit(self, coro) -> Future:
-        if self._loop is None:
+    def _submit(self, coro: Coroutine[Any, Any, Any]) -> Future[Any]:
+        if self._loop is None or not self._loop.is_running():
             raise Civ6McpError("Event loop is not running.")
         return asyncio.run_coroutine_threadsafe(coro, self._loop)
 
     def _teardown_loop(self) -> None:
-        if self._loop is not None and self._loop.is_running():
-            self._loop.call_soon_threadsafe(self._loop.stop)
-        if self._loop_thread is not None:
-            self._loop_thread.join(timeout=5.0)
+        loop = self._loop
+        loop_thread = self._loop_thread
+        if loop is not None and loop.is_running():
+            loop.call_soon_threadsafe(loop.stop)
+        if loop_thread is not None and loop_thread is not threading.current_thread():
+            loop_thread.join(timeout=LOOP_THREAD_JOIN_TIMEOUT_SECONDS)
+            if loop_thread.is_alive():
+                logger.warning(
+                    "civ6-mcp event loop thread did not exit within %.1fs",
+                    LOOP_THREAD_JOIN_TIMEOUT_SECONDS,
+                )
+        loop_thread_alive = loop_thread is not None and loop_thread.is_alive()
+        if loop is not None and not loop.is_closed() and not loop.is_running() and not loop_thread_alive:
+            loop.close()
         self._loop = None
+        self._loop_ready = None
         self._loop_thread = None
         self._session = None
         self._stdio_ctx = None
         self._session_ctx = None
         self._tool_names = set()
         self._tool_schemas = {}
+        self._startup_health = None
+
+    def _has_mcp_contexts(self) -> bool:
+        return self._session_ctx is not None or self._stdio_ctx is not None
+
+    def _stop_mcp_contexts(self) -> None:
+        if self._loop is not None and self._loop.is_running():
+            self._submit(self._async_stop()).result(timeout=MCP_CONTEXT_STOP_TIMEOUT_SECONDS)
+            return
+        asyncio.run(self._async_stop())
+
+    def _drain_cancelled_startup(self, startup_future: Future[Any]) -> None:
+        """Give a cancelled startup coroutine a brief chance to run cleanup."""
+        try:
+            startup_future.result(timeout=STARTUP_CANCEL_DRAIN_TIMEOUT_SECONDS)
+        except (FutureCancelledError, FutureTimeoutError):
+            pass
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("civ6-mcp startup cancellation cleanup returned: %s", exc)
+
+    def _cancel_startup_and_teardown(self, startup_future: Future[Any]) -> None:
+        startup_future.cancel()
+        try:
+            self._drain_cancelled_startup(startup_future)
+        finally:
+            self._teardown_loop()
 
     async def _async_start(self) -> None:
         from mcp import ClientSession, StdioServerParameters
@@ -473,7 +599,18 @@ class Civ6McpClient:
 
             self._session = await self._session_ctx.__aenter__()
             await self._session.initialize()
+            # Planner construction relies on the catalog being available as
+            # soon as start() returns; failure here is a startup failure.
             await self._refresh_tool_catalog()
+        except asyncio.CancelledError:
+            try:
+                await self._async_stop()
+            except Exception as stop_exc:  # noqa: BLE001
+                logger.debug("civ6-mcp cleanup after cancelled start encountered: %s", stop_exc)
+            self._session = None
+            self._session_ctx = None
+            self._stdio_ctx = None
+            raise
         except Exception:
             try:
                 await self._async_stop()
@@ -522,12 +659,39 @@ class Civ6McpClient:
         await self._refresh_tool_catalog()
 
         missing = required_tools.difference(self._tool_names)
-        ok = not missing
-        message = "healthy" if ok else f"Missing required civ6-mcp tools: {sorted(missing)}"
+        initialized = self._session is not None
+        session_active = self._started and initialized
+        ok = session_active and not missing
+        if ok:
+            message = "healthy"
+        elif not session_active:
+            message = "civ6-mcp MCP session is not active."
+        else:
+            message = f"Missing required civ6-mcp tools: {sorted(missing)}"
         return Civ6McpHealth(
             ok=ok,
             started=self._started,
-            initialized=True,
+            initialized=initialized,
+            tool_count=len(self._tool_names),
+            missing_required_tools=missing,
+            message=message,
+        )
+
+    def _catalog_health(
+        self,
+        required_tools: frozenset[str],
+        *,
+        message: str | None = None,
+    ) -> Civ6McpHealth:
+        missing = required_tools.difference(self._tool_names)
+        initialized = self._session is not None
+        ok = self._started and initialized and not missing
+        if message is None:
+            message = "healthy" if ok else f"Missing required civ6-mcp tools: {sorted(missing)}"
+        return Civ6McpHealth(
+            ok=ok,
+            started=self._started,
+            initialized=initialized,
             tool_count=len(self._tool_names),
             missing_required_tools=missing,
             message=message,

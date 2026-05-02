@@ -9,6 +9,36 @@ import pytest
 from civStation.agent import turn_runner
 from civStation.agent.modules.backend import BackendKind, parse_backend_kind
 
+_CONCRETE_VLM_PROVIDER_MODULES = {
+    "civStation.utils.llm_provider.anthropic_computer",
+    "civStation.utils.llm_provider.claude",
+    "civStation.utils.llm_provider.gemini",
+    "civStation.utils.llm_provider.gpt",
+    "civStation.utils.llm_provider.openai_computer",
+}
+
+
+def _unload_concrete_vlm_provider_modules(monkeypatch):
+    for module_name in list(sys.modules):
+        if module_name in _CONCRETE_VLM_PROVIDER_MODULES:
+            monkeypatch.delitem(sys.modules, module_name, raising=False)
+
+
+def _loaded_concrete_vlm_provider_modules() -> set[str]:
+    return _CONCRETE_VLM_PROVIDER_MODULES.intersection(sys.modules)
+
+
+def test_turn_runner_help_does_not_import_concrete_vlm_provider_modules(monkeypatch, tmp_path, capsys):
+    monkeypatch.chdir(tmp_path)
+    _unload_concrete_vlm_provider_modules(monkeypatch)
+
+    with pytest.raises(SystemExit) as exc_info:
+        turn_runner.parse_args(["--help"])
+
+    assert exc_info.value.code == 0
+    assert "Run Civilization VI AI Agent" in capsys.readouterr().out
+    assert _loaded_concrete_vlm_provider_modules() == set()
+
 
 def test_parse_args_defaults_to_vlm_backend(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
@@ -51,6 +81,29 @@ def test_parse_args_accepts_civ6_mcp_backend_options(monkeypatch, tmp_path):
     assert args.backend == "civ6-mcp"
     assert args.civ6_mcp_path == str(mcp_path)
     assert args.civ6_mcp_launcher == "python"
+
+
+def test_parse_args_civ6_mcp_options_do_not_import_backend_implementation(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(turn_runner, "get_available_providers", lambda: {"gemini": object()})
+    backend_module_prefix = "civStation.agent.modules.backend.civ6_mcp"
+    for module_name in list(sys.modules):
+        if module_name.startswith(backend_module_prefix):
+            monkeypatch.delitem(sys.modules, module_name, raising=False)
+
+    args = turn_runner.parse_args(
+        [
+            "--backend",
+            "civ6-mcp",
+            "--civ6-mcp-path",
+            str(tmp_path / "civ6-mcp"),
+            "--civ6-mcp-launcher",
+            "uv",
+        ]
+    )
+
+    assert args.backend == "civ6-mcp"
+    assert not any(module_name.startswith(backend_module_prefix) for module_name in sys.modules)
 
 
 def test_civ6_mcp_options_do_not_implicitly_select_civ6_mcp_backend(monkeypatch, tmp_path):
@@ -181,6 +234,13 @@ def _main_args(*, backend="vlm", **overrides):
     return SimpleNamespace(**values)
 
 
+def _fake_civ6_mcp_checkout(tmp_path: Path) -> Path:
+    path = tmp_path / "civ6-mcp"
+    path.mkdir()
+    (path / "pyproject.toml").write_text("[project]\nname = 'civ6-mcp'\n", encoding="utf-8")
+    return path
+
+
 def _patch_main_backend_harness(monkeypatch, args):
     session = _DummyRunLogSession()
     trajectory_session = _DummyScreenshotTrajectorySession()
@@ -234,18 +294,61 @@ def _patch_main_backend_harness(monkeypatch, args):
     )
 
 
-def test_runtime_guard_rejects_civ6_mcp_with_vlm_components():
-    with pytest.raises(turn_runner.BackendRuntimeConflictError, match="civ6-mcp backend cannot run"):
+def _guard_kwargs(**overrides):
+    values = {
+        "macro_turn_manager": None,
+        "context_updater": None,
+        "turn_detector": None,
+        "router_img_config": None,
+        "planner_img_config": None,
+        "context_img_config": None,
+        "turn_detector_img_config": None,
+        "civ6_mcp_client": None,
+    }
+    values.update(overrides)
+    return values
+
+
+def test_runtime_guard_allows_vlm_only_runtime_configuration() -> None:
+    turn_runner._guard_backend_runtime_state(
+        BackendKind.VLM,
+        **_guard_kwargs(
+            macro_turn_manager=object(),
+            context_updater=object(),
+            turn_detector=object(),
+            router_img_config=object(),
+            planner_img_config=object(),
+            context_img_config=object(),
+            turn_detector_img_config=object(),
+        ),
+    )
+
+
+def test_runtime_guard_allows_civ6_mcp_only_runtime_configuration() -> None:
+    turn_runner._guard_backend_runtime_state(
+        BackendKind.CIV6_MCP,
+        **_guard_kwargs(civ6_mcp_client=object()),
+    )
+
+
+@pytest.mark.parametrize(
+    "component_name",
+    [
+        "macro_turn_manager",
+        "context_updater",
+        "turn_detector",
+        "router_img_config",
+        "planner_img_config",
+        "context_img_config",
+        "turn_detector_img_config",
+        "future_observer_img_config",
+    ],
+)
+def test_runtime_guard_rejects_civ6_mcp_with_vlm_components(component_name):
+    with pytest.raises(turn_runner.BackendRuntimeConflictError, match=component_name):
         turn_runner._guard_backend_runtime_state(
             BackendKind.CIV6_MCP,
-            macro_turn_manager=object(),
-            context_updater=None,
-            turn_detector=None,
-            router_img_config=None,
-            planner_img_config=None,
-            context_img_config=None,
-            turn_detector_img_config=None,
-            civ6_mcp_client=None,
+            **_guard_kwargs(**{component_name: object()}),
         )
 
 
@@ -253,14 +356,7 @@ def test_runtime_guard_rejects_vlm_with_civ6_mcp_client():
     with pytest.raises(turn_runner.BackendRuntimeConflictError, match="VLM backend cannot run"):
         turn_runner._guard_backend_runtime_state(
             BackendKind.VLM,
-            macro_turn_manager=None,
-            context_updater=None,
-            turn_detector=None,
-            router_img_config=None,
-            planner_img_config=None,
-            context_img_config=None,
-            turn_detector_img_config=None,
-            civ6_mcp_client=object(),
+            **_guard_kwargs(civ6_mcp_client=object()),
         )
 
 
@@ -316,10 +412,11 @@ def test_main_explicit_vlm_backend_runs_vlm_only(monkeypatch):
     assert harness.context_updater.stopped is True
 
 
-def test_main_explicit_civ6_mcp_backend_runs_mcp_only(monkeypatch):
+def test_main_explicit_civ6_mcp_backend_runs_mcp_only(monkeypatch, tmp_path):
+    mcp_path = _fake_civ6_mcp_checkout(tmp_path)
     args = _main_args(
         backend="civ6-mcp",
-        civ6_mcp_path="/tmp/civ6-mcp",
+        civ6_mcp_path=str(mcp_path),
         civ6_mcp_launcher="python",
         strategy="science",
     )
@@ -340,20 +437,21 @@ def test_main_explicit_civ6_mcp_backend_runs_mcp_only(monkeypatch):
     assert harness.vlm_calls == []
     assert len(mcp_calls) == 1
     assert mcp_calls[0]["num_turns"] == 1
-    assert mcp_calls[0]["install_path"] == "/tmp/civ6-mcp"
+    assert mcp_calls[0]["install_path"] == str(mcp_path)
     assert mcp_calls[0]["launcher"] == "python"
     assert mcp_calls[0]["high_level_strategy"] == "science"
     assert harness.context_updater.started is False
     assert harness.context_updater.stopped is False
 
 
-def test_main_civ6_mcp_unavailable_does_not_fallback_to_vlm(monkeypatch):
+def test_main_civ6_mcp_unavailable_does_not_fallback_to_vlm(monkeypatch, tmp_path):
     class _Unavailable(RuntimeError):
         pass
 
+    mcp_path = _fake_civ6_mcp_checkout(tmp_path)
     args = _main_args(
         backend="civ6-mcp",
-        civ6_mcp_path="/missing/civ6-mcp",
+        civ6_mcp_path=str(mcp_path),
         civ6_mcp_launcher="python",
     )
     harness = _patch_main_backend_harness(monkeypatch, args)
@@ -380,6 +478,51 @@ def test_main_civ6_mcp_unavailable_does_not_fallback_to_vlm(monkeypatch):
     assert harness.context_updater.stopped is False
     assert harness.rich_logger.started == 1
     assert harness.rich_logger.stopped == 1
+    assert harness.session.closed is True
+    assert harness.trajectory_session.closed is True
+
+
+def test_main_validates_civ6_mcp_install_path_before_startup(monkeypatch, tmp_path):
+    missing_path = tmp_path / "missing-civ6-mcp"
+    args = _main_args(
+        backend="civ6-mcp",
+        civ6_mcp_path=str(missing_path),
+        civ6_mcp_launcher="python",
+    )
+    harness = _patch_main_backend_harness(monkeypatch, args)
+    setup_calls = []
+
+    monkeypatch.setattr(turn_runner, "setup_providers", lambda args: setup_calls.append(args))
+
+    turn_runner.main()
+
+    assert setup_calls == []
+    assert harness.vlm_calls == []
+    assert harness.rich_logger.started == 0
+    assert harness.rich_logger.stopped == 0
+    assert harness.session.closed is True
+    assert harness.trajectory_session.closed is True
+
+
+def test_main_validates_civ6_mcp_launcher_command_before_startup(monkeypatch, tmp_path):
+    mcp_path = _fake_civ6_mcp_checkout(tmp_path)
+    args = _main_args(
+        backend="civ6-mcp",
+        civ6_mcp_path=str(mcp_path),
+        civ6_mcp_launcher="python",
+    )
+    harness = _patch_main_backend_harness(monkeypatch, args)
+    setup_calls = []
+
+    monkeypatch.setattr(turn_runner.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(turn_runner, "setup_providers", lambda args: setup_calls.append(args))
+
+    turn_runner.main()
+
+    assert setup_calls == []
+    assert harness.vlm_calls == []
+    assert harness.rich_logger.started == 0
+    assert harness.rich_logger.stopped == 0
     assert harness.session.closed is True
     assert harness.trajectory_session.closed is True
 
@@ -527,12 +670,13 @@ def test_main_closes_run_log_session_after_one_turn(monkeypatch):
 
 
 @pytest.mark.parametrize(("turns", "expected_runner"), [(1, "one"), (3, "multi")])
-def test_main_routes_civ6_mcp_backend_to_mcp_turn_loop(monkeypatch, turns, expected_runner):
+def test_main_routes_civ6_mcp_backend_to_mcp_turn_loop(monkeypatch, tmp_path, turns, expected_runner):
     session = _DummyRunLogSession()
     trajectory_session = _DummyScreenshotTrajectorySession()
     context_updater = _DummyWorker()
     rich_logger = _DummyRichLoggerInstance()
     mcp_calls = []
+    mcp_path = _fake_civ6_mcp_checkout(tmp_path)
 
     class _DummyRichLogger:
         @classmethod
@@ -549,7 +693,7 @@ def test_main_routes_civ6_mcp_backend_to_mcp_turn_loop(monkeypatch, turns, expec
         turn_detector_provider=None,
         turn_detector_model=None,
         backend="civ6-mcp",
-        civ6_mcp_path="/tmp/civ6-mcp",
+        civ6_mcp_path=str(mcp_path),
         civ6_mcp_launcher="python",
         hitl=False,
         autonomous=False,
@@ -621,7 +765,7 @@ def test_main_routes_civ6_mcp_backend_to_mcp_turn_loop(monkeypatch, turns, expec
     assert expected_runner in {"one", "multi"}
     assert runner_kwargs["num_turns"] == turns
     assert runner_kwargs["high_level_strategy"] == "science"
-    assert runner_kwargs["install_path"] == "/tmp/civ6-mcp"
+    assert runner_kwargs["install_path"] == str(mcp_path)
     assert runner_kwargs["launcher"] == "python"
     assert runner_kwargs["delay_between_turns"] == 1.0
     assert context_updater.started is False

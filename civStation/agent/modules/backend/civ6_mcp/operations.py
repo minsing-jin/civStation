@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -10,8 +11,9 @@ from typing import Any
 from civStation.agent.modules.backend.civ6_mcp.client import Civ6McpClientProtocol, Civ6McpError
 from civStation.agent.modules.backend.civ6_mcp.response import (
     Civ6McpNormalizedResult,
-    normalize_mcp_response_error,
+    normalize_mcp_response_exception,
     normalize_mcp_response_text,
+    normalize_mcp_tool_result,
 )
 from civStation.agent.modules.backend.civ6_mcp.response import (
     classify_civ6_mcp_text as _classify_response_text,
@@ -113,6 +115,7 @@ END_TURN_REFLECTION_FIELDS: tuple[str, ...] = (
 SUPPORTED_CIV6_MCP_TOOLS: frozenset[str] = OBSERVATION_TOOLS | ACTION_TOOLS | frozenset({END_TURN_TOOL})
 
 _TERMINAL_CLASSIFICATIONS = frozenset({"game_over", "aborted", "hang"})
+StopRequested = Callable[[], bool]
 
 
 @dataclass(frozen=True)
@@ -134,6 +137,7 @@ class Civ6McpDispatchResult:
     text: str = ""
     error: str = ""
     classification: str = ""
+    status: str = ""
     response: Civ6McpNormalizedResult | None = None
 
 
@@ -144,7 +148,7 @@ class Civ6McpRequestBuilder:
     def observation(cls, tool: str, arguments: dict[str, Any] | None = None, *, reasoning: str = "") -> Civ6McpRequest:
         """Build an observation request, e.g. ``get_game_overview``."""
         request = cls.build(tool, arguments, operation=SupportedCiv6McpOperation.OBSERVE, reasoning=reasoning)
-        if request.tool not in OBSERVATION_TOOLS:
+        if not is_civ6_mcp_observation_tool(request.tool):
             raise ValueError(f"Tool {request.tool!r} is not a civ6-mcp observation operation.")
         return request
 
@@ -196,7 +200,7 @@ class Civ6McpRequestBuilder:
         """Build and validate a civ6-mcp tool request."""
         if not isinstance(tool, str) or not tool:
             raise ValueError("civ6-mcp request tool must be a non-empty string.")
-        if require_supported and tool not in SUPPORTED_CIV6_MCP_TOOLS:
+        if require_supported and tool not in SUPPORTED_CIV6_MCP_TOOLS and not _is_dynamic_observation_tool(tool):
             raise ValueError(f"Unsupported civ6-mcp tool: {tool!r}")
 
         normalized_arguments = _normalize_arguments(arguments)
@@ -231,6 +235,7 @@ class Civ6McpOperationDispatcher:
                 success=False,
                 error=str(exc),
                 classification="error",
+                status="fatal",
             )
 
         if not self._client.has_tool(request.tool):
@@ -239,17 +244,29 @@ class Civ6McpOperationDispatcher:
                 success=False,
                 error=f"Tool '{request.tool}' not exposed by civ6-mcp server.",
                 classification="error",
+                status="fatal",
             )
 
         try:
             response = self._call_tool_result(request)
         except Civ6McpError as exc:
-            response = normalize_mcp_response_error(request.tool, request.arguments, str(exc), raw=exc)
+            response = normalize_mcp_response_exception(request.tool, request.arguments, exc)
             return Civ6McpDispatchResult(
                 request=request,
                 success=False,
                 error=response.error,
                 classification=response.classification.value,
+                status=response.status.value,
+                response=response,
+            )
+        except Exception as exc:  # noqa: BLE001
+            response = normalize_mcp_response_exception(request.tool, request.arguments, exc)
+            return Civ6McpDispatchResult(
+                request=request,
+                success=False,
+                error=response.error,
+                classification=response.classification.value,
+                status=response.status.value,
                 response=response,
             )
 
@@ -259,6 +276,7 @@ class Civ6McpOperationDispatcher:
             text=response.text,
             error=response.error,
             classification=response.classification.value,
+            status=response.status.value,
             response=response,
         )
 
@@ -270,7 +288,7 @@ class Civ6McpOperationDispatcher:
                 return result
             if isinstance(result, str):
                 return normalize_mcp_response_text(request.tool, request.arguments, result)
-            return normalize_mcp_response_text(request.tool, request.arguments, str(result or ""))
+            return normalize_mcp_tool_result(request.tool, request.arguments, result)
 
         text = self._client.call_tool(request.tool, request.arguments)
         return normalize_mcp_response_text(request.tool, request.arguments, text)
@@ -280,10 +298,14 @@ class Civ6McpOperationDispatcher:
         requests: list[Civ6McpRequest],
         *,
         stop_on_terminal: bool = True,
+        stop_requested: StopRequested | None = None,
     ) -> list[Civ6McpDispatchResult]:
         """Dispatch requests in order and stop on terminal civ6-mcp responses."""
         results: list[Civ6McpDispatchResult] = []
         for request in requests:
+            if stop_requested is not None and stop_requested():
+                logger.info("civ6-mcp dispatcher stopping early before tool=%s: stop requested", request.tool)
+                break
             outcome = self.dispatch(request)
             results.append(outcome)
             if stop_on_terminal and outcome.classification in _TERMINAL_CLASSIFICATIONS:
@@ -300,14 +322,14 @@ def operation_for_tool(tool: str) -> SupportedCiv6McpOperation:
     """Infer the backend operation category for a supported civ6-mcp tool."""
     if tool == END_TURN_TOOL:
         return SupportedCiv6McpOperation.END_TURN
-    if tool in OBSERVATION_TOOLS:
+    if is_civ6_mcp_observation_tool(tool):
         return SupportedCiv6McpOperation.OBSERVE
     return SupportedCiv6McpOperation.ACT
 
 
 def validate_civ6_mcp_request(request: Civ6McpRequest) -> None:
     """Validate a request before dispatch."""
-    if request.tool not in SUPPORTED_CIV6_MCP_TOOLS:
+    if request.tool not in SUPPORTED_CIV6_MCP_TOOLS and not _is_dynamic_observation_tool(request.tool):
         raise ValueError(f"Unsupported civ6-mcp tool: {request.tool!r}")
     if not isinstance(request.arguments, dict):
         raise ValueError("civ6-mcp request arguments must be a dict.")
@@ -360,6 +382,11 @@ def classify_civ6_mcp_text(text: str) -> str:
     return _classify_response_text(text).value
 
 
+def is_civ6_mcp_observation_tool(tool: str) -> bool:
+    """Return whether a tool name represents a read-only civ6-mcp observation."""
+    return tool in OBSERVATION_TOOLS or _is_dynamic_observation_tool(tool)
+
+
 def _normalize_arguments(arguments: dict[str, Any] | None) -> dict[str, Any]:
     if arguments is None:
         return {}
@@ -384,6 +411,10 @@ def _validate_end_turn_arguments(arguments: dict[str, Any]) -> None:
         raise ValueError(f"end_turn requires non-empty reflection fields: {', '.join(missing)}")
 
 
+def _is_dynamic_observation_tool(tool: str) -> bool:
+    return isinstance(tool, str) and tool.startswith("get_")
+
+
 __all__ = [
     "ACTION_TOOLS",
     "END_TURN_REFLECTION_FIELDS",
@@ -397,6 +428,7 @@ __all__ = [
     "SupportedCiv6McpOperation",
     "classify_civ6_mcp_text",
     "coerce_civ6_mcp_requests",
+    "is_civ6_mcp_observation_tool",
     "operation_for_tool",
     "validate_civ6_mcp_request",
 ]

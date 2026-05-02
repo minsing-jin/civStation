@@ -36,6 +36,19 @@ class ToolCallResult:
     text: str = ""
     error: str = ""
     classification: str = ""  # "ok", "blocked", "soft_block", "game_over", "aborted", "hang", "error", "timeout"
+    status: str = ""  # "success", "blocked", "retryable", "fatal", "aborted", "hang", "game_over"
+    retryable: bool = False
+    terminal: bool = False
+    timed_out: bool = False
+    normalized_response: Civ6McpNormalizedResult | None = None
+    content_blocks: tuple[str, ...] = ()
+    structured_content: Any | None = None
+    raw_response: Any | None = None
+
+    @property
+    def response(self) -> Civ6McpNormalizedResult | None:
+        """Captured normalized MCP response for callers that prefer a short name."""
+        return self.normalized_response
 
 
 def executor_result_from_normalized_response(
@@ -43,12 +56,22 @@ def executor_result_from_normalized_response(
     response: Civ6McpNormalizedResult,
 ) -> ToolCallResult:
     """Convert a normalized civ6-mcp response into an executor result."""
+    classification = _classification_value(response.classification)
+    status = _classification_value(response.status)
     return ToolCallResult(
         call=call,
         success=response.success,
         text=response.text,
         error=response.error,
-        classification=_classification_value(response.classification),
+        classification=classification,
+        status=status,
+        retryable=_is_retryable_result(status, classification),
+        terminal=_is_terminal_result(status, classification),
+        timed_out=bool(response.timed_out or classification == "timeout"),
+        normalized_response=response,
+        content_blocks=response.content_blocks,
+        structured_content=response.structured_content,
+        raw_response=response.raw,
     )
 
 
@@ -88,18 +111,45 @@ def tool_call_result_from_dispatch(call: ToolCall, dispatch_result: Any) -> Tool
     if isinstance(response, Civ6McpNormalizedResult):
         return executor_result_from_normalized_response(call, response)
 
+    classification = str(getattr(dispatch_result, "classification", "") or "")
+    status = str(getattr(dispatch_result, "status", "") or "")
+    raw_response = getattr(dispatch_result, "raw_response", response)
     return ToolCallResult(
         call=call,
         success=bool(getattr(dispatch_result, "success", False)),
         text=str(getattr(dispatch_result, "text", "") or ""),
         error=str(getattr(dispatch_result, "error", "") or ""),
-        classification=str(getattr(dispatch_result, "classification", "") or ""),
+        classification=classification,
+        status=status,
+        retryable=_is_retryable_result(status, classification),
+        terminal=_is_terminal_result(status, classification),
+        timed_out=classification == "timeout",
+        content_blocks=_content_blocks_from_dispatch(dispatch_result),
+        structured_content=getattr(dispatch_result, "structured_content", None),
+        raw_response=raw_response,
     )
 
 
 def _classification_value(classification: Any) -> str:
     value = getattr(classification, "value", classification)
     return str(value or "")
+
+
+def _is_retryable_result(status: str, classification: str) -> bool:
+    return status == "retryable" or classification in {"soft_block", "timeout"}
+
+
+def _is_terminal_result(status: str, classification: str) -> bool:
+    return status in {"aborted", "hang", "game_over"} or classification in {"aborted", "hang", "game_over"}
+
+
+def _content_blocks_from_dispatch(dispatch_result: Any) -> tuple[str, ...]:
+    blocks = getattr(dispatch_result, "content_blocks", ())
+    if isinstance(blocks, tuple):
+        return tuple(str(block) for block in blocks)
+    if isinstance(blocks, list):
+        return tuple(str(block) for block in blocks)
+    return ()
 
 
 __all__ = [

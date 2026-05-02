@@ -86,6 +86,8 @@ def test_parse_valid_civ6_mcp_overview_payload_extracts_context_fields() -> None
     assert snap.raw_text == VALID_CIV6_MCP_OVERVIEW_PAYLOAD
     assert snap.current_turn == 87
     assert snap.game_era == "Medieval"
+    assert snap.civilization_name == "Korea"
+    assert snap.leader_name == "Seondeok"
     assert snap.science_per_turn == 93.25
     assert snap.culture_per_turn == 41.5
     assert snap.gold_per_turn == 104.0
@@ -270,6 +272,13 @@ def test_parse_structured_civ6_mcp_overview_payload() -> None:
     payload = {
         "turn": 91,
         "era": "Industrial Era",
+        "game_speed": "Online",
+        "civilization": {"name": "Korea", "leader": "Seondeok"},
+        "gold_balance": "245",
+        "faith_balance": 18,
+        "total_population": "27",
+        "unit_count": 9,
+        "military_strength": "312",
         "yields": {
             "science": 141.5,
             "culture": "88.25",
@@ -284,10 +293,18 @@ def test_parse_structured_civ6_mcp_overview_payload() -> None:
 
     assert snap.current_turn == 91
     assert snap.game_era == "Industrial"
+    assert snap.game_speed == "Online"
+    assert snap.civilization_name == "Korea"
+    assert snap.leader_name == "Seondeok"
+    assert snap.gold == 245
     assert snap.science_per_turn == 141.5
     assert snap.culture_per_turn == 88.25
     assert snap.gold_per_turn == -12.0
+    assert snap.faith == 18
     assert snap.faith_per_turn is None
+    assert snap.total_population == 27
+    assert snap.unit_count == 9
+    assert snap.military_strength == 312
     assert snap.current_research == "STEAM_POWER"
     assert snap.current_civic == "NATIONALISM"
     assert "STEAM_POWER" in snap.raw_text

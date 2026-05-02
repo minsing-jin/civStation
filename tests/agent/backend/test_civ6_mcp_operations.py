@@ -127,6 +127,27 @@ def test_dispatcher_classifies_terminal_text_and_stops_sequence() -> None:
     assert results[-1].classification == "game_over"
 
 
+def test_dispatcher_rechecks_stop_predicate_between_requests() -> None:
+    client = FakeCiv6McpClient(
+        {
+            "get_units": "ok",
+            "set_research": "should not run",
+        }
+    )
+    dispatcher = Civ6McpOperationDispatcher(client)  # type: ignore[arg-type]
+
+    results = dispatcher.dispatch_many(
+        [
+            Civ6McpRequestBuilder.observation("get_units"),
+            Civ6McpRequestBuilder.action("set_research", {"tech_or_civic": "WRITING"}),
+        ],
+        stop_requested=lambda: len(client.calls) >= 1,
+    )
+
+    assert [request.request.tool for request in results] == ["get_units"]
+    assert client.calls == [("get_units", {})]
+
+
 def test_dispatcher_surfaces_client_errors() -> None:
     client = FakeCiv6McpClient({"set_research": Civ6McpError("boom")})
     dispatcher = Civ6McpOperationDispatcher(client)  # type: ignore[arg-type]
@@ -134,3 +155,23 @@ def test_dispatcher_surfaces_client_errors() -> None:
     assert result.success is False
     assert result.classification == "error"
     assert "boom" in result.error
+
+
+def test_dispatcher_classifies_non_civ6_mcp_exceptions_without_leaking() -> None:
+    client = FakeCiv6McpClient({"end_turn": TimeoutError("tool call exceeded 30s")})
+    dispatcher = Civ6McpOperationDispatcher(client)  # type: ignore[arg-type]
+
+    result = dispatcher.dispatch(
+        Civ6McpRequestBuilder.end_turn(
+            tactical="a",
+            strategic="b",
+            tooling="c",
+            planning="d",
+            hypothesis="e",
+        )
+    )
+
+    assert result.success is False
+    assert result.classification == "timeout"
+    assert result.status == "retryable"
+    assert "tool call exceeded 30s" in result.error

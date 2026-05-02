@@ -44,6 +44,9 @@ class HighLevelContext:
     # Strategic notes
     notes: list[str] = field(default_factory=list)
 
+    # Latest structured backend observation fields, if available.
+    latest_game_observation: dict[str, object] = field(default_factory=dict)
+
     def set_strategy(self, strategy: StructuredStrategy) -> None:
         """Update the current strategy and timestamp."""
         self.current_strategy = strategy
@@ -135,4 +138,5 @@ class HighLevelContext:
             "victory_progress": self.victory_progress,
             "active_threats": self.active_threats,
             "opportunities": self.opportunities,
+            "latest_game_observation": self.latest_game_observation,
         }

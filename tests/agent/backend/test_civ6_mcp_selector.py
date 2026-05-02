@@ -27,6 +27,19 @@ def test_exact_civ6_mcp_selects_civ6_mcp() -> None:
 @pytest.mark.parametrize(
     "raw",
     [
+        "CIV6-MCP",
+        "Civ6-Mcp",
+        " civ6-mcp ",
+        "\tciv6-mcp\n",
+    ],
+)
+def test_normalized_civ6_mcp_variants_select_civ6_mcp(raw: str) -> None:
+    assert parse_backend_kind(raw) is BackendKind.CIV6_MCP
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
         "anthropic",
         "civ6",
         "civ-mcp",

@@ -13,6 +13,7 @@ from enum import Enum
 from typing import Any, Protocol, TypeAlias, runtime_checkable
 
 from civStation.agent.modules.backend.civ6_mcp.executor import ToolCall
+from civStation.agent.modules.backend.civ6_mcp.observation_schema import Civ6McpNormalizedObservation
 from civStation.agent.modules.backend.civ6_mcp.operations import (
     ACTION_TOOLS,
     END_TURN_TOOL,
@@ -178,6 +179,17 @@ class Civ6McpPlanner(Protocol):
         hitl_directive: str = "",
     ) -> PlannerResult:
         """Produce a parsed civ6-mcp tool-call plan."""
+        ...
+
+    def plan_from_observation(
+        self,
+        *,
+        observation: Civ6McpNormalizedObservation | object,
+        strategy: str,
+        recent_calls: str,
+        hitl_directive: str = "",
+    ) -> PlannerResult:
+        """Produce a parsed civ6-mcp tool-call plan from an observation payload."""
         ...
 
 

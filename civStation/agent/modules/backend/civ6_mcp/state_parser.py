@@ -28,10 +28,18 @@ class GameOverviewSnapshot:
     raw_text: str = ""
     current_turn: int | None = None
     game_era: str | None = None
+    game_speed: str | None = None
+    civilization_name: str | None = None
+    leader_name: str | None = None
+    gold: int | None = None
     science_per_turn: float | None = None
     culture_per_turn: float | None = None
     gold_per_turn: float | None = None
+    faith: int | None = None
     faith_per_turn: float | None = None
+    total_population: int | None = None
+    military_strength: int | None = None
+    unit_count: int | None = None
     current_research: str | None = None
     current_civic: str | None = None
     is_game_over: bool = False
@@ -43,6 +51,11 @@ _TURN_PATTERNS = (
     re.compile(r"(?i)\bturn\s*(\d{1,4})\b"),
 )
 _ERA_PATTERN = re.compile(r"(?im)^\s*Era[:\s]+([A-Za-z][A-Za-z _\-]+?)\s*(?:Era|$)")
+_GAME_SPEED_PATTERN = re.compile(r"(?im)^\s*Game\s*Speed[:\s]+([^\n]+?)\s*$")
+_CIVILIZATION_PATTERN = re.compile(
+    r"(?im)^\s*(?:Civilization|Civilisation|Player\s+Civilization|Civ)[:\s]+([^\n]+?)\s*$"
+)
+_LEADER_PATTERN = re.compile(r"(?im)^\s*(?:Leader|Player\s+Leader)[:\s]+([^\n]+?)\s*$")
 _RESEARCH_PATTERN = re.compile(r"(?im)^\s*Research(?:ing)?(?:[^\S\r\n]*:[^\S\r\n]*|[^\S\r\n]+)([^\n]+?)\s*$")
 _CIVIC_PATTERN = re.compile(
     r"(?im)^\s*Civic(?:[^\S\r\n]+Research(?:ing)?)?(?:[^\S\r\n]*:[^\S\r\n]*|[^\S\r\n]+)([^\n]+?)\s*$"
@@ -50,6 +63,12 @@ _CIVIC_PATTERN = re.compile(
 _YIELD_PATTERN = re.compile(
     r"(?im)^\s*(Science|Culture|Gold|Faith)[^\S\r\n]*:[^\S\r\n]*([+\-]?\d+(?:\.\d+)?)\s*/\s*turn\b"
 )
+_BALANCE_WITH_PER_TURN_PATTERN = re.compile(
+    r"(?im)^\s*(Gold|Faith)[^\S\r\n]*:[^\S\r\n]*(\d+)\s*\(\s*([+\-]?\d+(?:\.\d+)?)\s*/\s*turn\s*\)\s*$"
+)
+_TOTAL_POPULATION_PATTERN = re.compile(r"(?im)^\s*(?:Total\s+Population|Population)[:\s]+(\d+)\s*$")
+_MILITARY_STRENGTH_PATTERN = re.compile(r"(?im)^\s*Military\s+Strength[:\s]+(\d+)\s*$")
+_UNIT_COUNT_PATTERN = re.compile(r"(?im)^\s*(?:Unit\s+Count|Units?)[:\s]+(\d+)\s*$")
 _GAME_OVER_PATTERN = re.compile(r"\*\*\*\s*GAME OVER\s*[—-]?\s*([^\n*]*)", re.I)
 _RAW_TOOL_ALIASES = {
     "overview": "get_game_overview",
@@ -81,6 +100,23 @@ _OVERVIEW_PAYLOAD_KEYS = frozenset(
         "game_turn",
         "game_era",
         "era",
+        "game_speed",
+        "gameSpeed",
+        "speed",
+        "civilization_name",
+        "civilization",
+        "civilisation",
+        "civ",
+        "player_civilization",
+        "playerCivilization",
+        "leader_name",
+        "leader",
+        "player_leader",
+        "playerLeader",
+        "gold_balance",
+        "gold_amount",
+        "current_gold",
+        "treasury",
         "yields",
         "science_per_turn",
         "science",
@@ -91,9 +127,19 @@ _OVERVIEW_PAYLOAD_KEYS = frozenset(
         "gold_per_turn",
         "gold",
         "goldPerTurn",
+        "faith_balance",
+        "faith_amount",
+        "current_faith",
         "faith_per_turn",
         "faith",
         "faithPerTurn",
+        "total_population",
+        "population",
+        "totalPopulation",
+        "military_strength",
+        "militaryStrength",
+        "unit_count",
+        "unitCount",
         "current_research",
         "research",
         "researching",
@@ -137,6 +183,21 @@ def parse_game_overview(text: Any) -> GameOverviewSnapshot:
         if era_name and len(era_name) <= 32:
             snapshot.game_era = era_name
 
+    game_speed_match = _GAME_SPEED_PATTERN.search(text)
+    if game_speed_match:
+        snapshot.game_speed = _clean_short_text(game_speed_match.group(1))
+
+    civilization_match = _CIVILIZATION_PATTERN.search(text)
+    if civilization_match:
+        civilization_name, leader_name = _parse_civilization_and_leader(civilization_match.group(1))
+        snapshot.civilization_name = civilization_name
+        if leader_name and not snapshot.leader_name:
+            snapshot.leader_name = leader_name
+
+    leader_match = _LEADER_PATTERN.search(text)
+    if leader_match:
+        snapshot.leader_name = _clean_short_text(leader_match.group(1))
+
     research_match = _RESEARCH_PATTERN.search(text)
     if research_match:
         snapshot.current_research = research_match.group(1).strip()
@@ -159,6 +220,29 @@ def parse_game_overview(text: Any) -> GameOverviewSnapshot:
             snapshot.gold_per_turn = value
         elif kind_lower == "faith":
             snapshot.faith_per_turn = value
+
+    for kind, value_str, per_turn_str in _BALANCE_WITH_PER_TURN_PATTERN.findall(text):
+        amount = _coerce_int(value_str)
+        per_turn = _coerce_float(per_turn_str)
+        kind_lower = kind.lower()
+        if kind_lower == "gold":
+            snapshot.gold = amount
+            snapshot.gold_per_turn = per_turn
+        elif kind_lower == "faith":
+            snapshot.faith = amount
+            snapshot.faith_per_turn = per_turn
+
+    total_population_match = _TOTAL_POPULATION_PATTERN.search(text)
+    if total_population_match:
+        snapshot.total_population = _coerce_int(total_population_match.group(1))
+
+    military_strength_match = _MILITARY_STRENGTH_PATTERN.search(text)
+    if military_strength_match:
+        snapshot.military_strength = _coerce_int(military_strength_match.group(1))
+
+    unit_count_match = _UNIT_COUNT_PATTERN.search(text)
+    if unit_count_match:
+        snapshot.unit_count = _coerce_int(unit_count_match.group(1))
 
     over_match = _GAME_OVER_PATTERN.search(text)
     if over_match:
@@ -327,11 +411,39 @@ def _apply_structured_overview(snapshot: GameOverviewSnapshot, payload: dict[str
     if era is not None:
         snapshot.game_era = _normalize_era_name(str(era))
 
+    game_speed = _first_present(payload, "game_speed", "gameSpeed", "speed")
+    if game_speed is not None:
+        snapshot.game_speed = _clean_short_text(str(game_speed))
+
+    civilization = _first_present(
+        payload,
+        "civilization_name",
+        "civilization",
+        "civilisation",
+        "civ",
+        "player_civilization",
+        "playerCivilization",
+    )
+    if civilization is not None:
+        civilization_name, leader_name = _structured_civilization_fields(civilization)
+        snapshot.civilization_name = civilization_name
+        if leader_name and not snapshot.leader_name:
+            snapshot.leader_name = leader_name
+
+    leader = _first_present(payload, "leader_name", "leader", "player_leader", "playerLeader")
+    if leader is not None:
+        snapshot.leader_name = _clean_short_text(str(leader))
+
     yields = payload.get("yields") if isinstance(payload.get("yields"), dict) else {}
+    snapshot.gold = _first_int(payload, "gold_balance", "gold_amount", "current_gold", "treasury")
     snapshot.science_per_turn = _first_number(payload, yields, "science_per_turn", "science", "sciencePerTurn")
     snapshot.culture_per_turn = _first_number(payload, yields, "culture_per_turn", "culture", "culturePerTurn")
     snapshot.gold_per_turn = _first_number(payload, yields, "gold_per_turn", "gold", "goldPerTurn")
+    snapshot.faith = _first_int(payload, "faith_balance", "faith_amount", "current_faith")
     snapshot.faith_per_turn = _first_number(payload, yields, "faith_per_turn", "faith", "faithPerTurn")
+    snapshot.total_population = _first_int(payload, "total_population", "population", "totalPopulation")
+    snapshot.military_strength = _first_int(payload, "military_strength", "militaryStrength")
+    snapshot.unit_count = _first_int(payload, "unit_count", "unitCount")
 
     research = _first_present(payload, "current_research", "research", "researching")
     if research is not None and str(research).strip():
@@ -375,6 +487,14 @@ def _first_number(payload: dict[str, Any], yields: dict[str, Any], *keys: str) -
     return None
 
 
+def _first_int(payload: dict[str, Any], *keys: str) -> int | None:
+    for key in keys:
+        parsed = _coerce_int(_first_present(payload, key))
+        if parsed is not None:
+            return parsed
+    return None
+
+
 def _coerce_int(value: Any) -> int | None:
     number = _coerce_float(value)
     if number is None:
@@ -398,6 +518,32 @@ def _normalize_era_name(value: str) -> str | None:
         return None
     era = re.sub(r"\s+Era$", "", era, flags=re.IGNORECASE).strip()
     return era if len(era) <= 32 else None
+
+
+def _clean_short_text(value: str) -> str | None:
+    cleaned = value.strip()
+    return cleaned if cleaned and len(cleaned) <= 80 else None
+
+
+def _parse_civilization_and_leader(value: str) -> tuple[str | None, str | None]:
+    cleaned = value.strip()
+    if not cleaned:
+        return None, None
+    parenthetical = re.match(r"^(?P<civ>.+?)\s*\((?P<leader>[^()]+)\)\s*$", cleaned)
+    if parenthetical:
+        return _clean_short_text(parenthetical.group("civ")), _clean_short_text(parenthetical.group("leader"))
+    return _clean_short_text(cleaned), None
+
+
+def _structured_civilization_fields(value: Any) -> tuple[str | None, str | None]:
+    if isinstance(value, dict):
+        name = _first_present(value, "name", "civilization_name", "civilization", "civ")
+        leader = _first_present(value, "leader", "leader_name")
+        return (
+            _clean_short_text(str(name)) if name is not None else None,
+            _clean_short_text(str(leader)) if leader is not None else None,
+        )
+    return _parse_civilization_and_leader(str(value))
 
 
 @dataclass

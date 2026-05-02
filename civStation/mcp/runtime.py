@@ -7,6 +7,7 @@ from typing import Any
 
 import yaml
 
+from civStation.agent.modules.backend import BackendKind, parse_backend_kind
 from civStation.agent.modules.context.context_updater import ContextUpdater
 from civStation.agent.modules.strategy import StrategyPlanner
 from civStation.agent.modules.strategy.strategy_schemas import StructuredStrategy
@@ -76,6 +77,23 @@ ActionPlannerAdapter = Callable[[Any, Any, str], AgentAction | list[AgentAction]
 ContextObserverAdapter = Callable[[Any, Any], dict[str, Any]]
 StrategyRefinerAdapter = Callable[[Any, str], StructuredStrategy]
 ActionExecutorAdapter = Callable[[Any, AgentAction, CaptureArtifact], dict[str, Any]]
+
+CIV6_MCP_ADAPTER_NAME = "civ6_mcp"
+
+_CIV6_MCP_BACKEND_ADAPTER_OVERRIDES: dict[str, str] = {
+    "action_router": CIV6_MCP_ADAPTER_NAME,
+    "action_planner": CIV6_MCP_ADAPTER_NAME,
+    "context_observer": CIV6_MCP_ADAPTER_NAME,
+    "action_executor": CIV6_MCP_ADAPTER_NAME,
+}
+
+
+def adapter_overrides_for_backend(raw_backend: str | BackendKind | None) -> dict[str, str]:
+    """Return default MCP layer adapter overrides for a selected backend."""
+    backend_kind = raw_backend if isinstance(raw_backend, BackendKind) else parse_backend_kind(raw_backend)
+    if backend_kind is BackendKind.CIV6_MCP:
+        return dict(_CIV6_MCP_BACKEND_ADAPTER_OVERRIDES)
+    return {}
 
 
 class LayerAdapterRegistry:

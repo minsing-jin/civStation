@@ -6,15 +6,18 @@ These tests use a fake client so they run without FireTuner / Civ6 / `uv`.
 from __future__ import annotations
 
 import sys
+from collections.abc import Iterator
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from civStation.agent.models.schema import AgentPlan, ClickAction, KeyPressAction
 from civStation.agent.modules.backend.civ6_mcp.client import Civ6McpError
 from civStation.agent.modules.backend.civ6_mcp.executor import (
     Civ6McpExecutor,
     ToolCall,
+    ToolCallResult,
     coerce_tool_call,
     coerce_tool_calls,
 )
@@ -58,6 +61,46 @@ class StrictMcpOnlyClient:
         return self._response
 
 
+class FakeToolResult:
+    def __init__(
+        self,
+        text: str,
+        *,
+        is_error: bool = False,
+        structured_content: dict[str, Any] | None = None,
+    ) -> None:
+        self.content = [SimpleNamespace(text=text)]
+        self.isError = is_error
+        self.structuredContent = structured_content
+
+
+class SequencedTypedClient:
+    """Fake typed MCP client returning raw CallToolResult-like objects."""
+
+    def __init__(self, responses: dict[str, FakeToolResult]) -> None:
+        self._responses = responses
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    def has_tool(self, name: str) -> bool:
+        return name in self._responses
+
+    def call_tool_result(self, name: str, arguments: dict[str, Any] | None = None) -> FakeToolResult:
+        self.calls.append((name, dict(arguments or {})))
+        return self._responses[name]
+
+
+class RecordingExecutor(Civ6McpExecutor):
+    """Executor double for focused execute_many sequencing tests."""
+
+    def __init__(self, outcomes: list[ToolCallResult]) -> None:
+        self._outcomes = list(outcomes)
+        self.executed: list[Any] = []
+
+    def execute(self, planned_action: Any) -> ToolCallResult:
+        self.executed.append(planned_action)
+        return self._outcomes.pop(0)
+
+
 @pytest.fixture
 def fail_if_vlm_dispatch_is_used(monkeypatch: pytest.MonkeyPatch) -> None:
     """Fail a test if civ6-mcp executor reaches the VLM/computer-use path."""
@@ -95,14 +138,73 @@ def test_coerce_accepts_bare_list() -> None:
     assert calls[0].reasoning == "lit boost"
 
 
+def test_coerce_resolves_free_form_action_type_aliases() -> None:
+    payload = {
+        "tool_calls": [
+            {
+                "type": "choose_research",
+                "tech": "MATHEMATICS",
+                "reasoning": "Unlock better campuses.",
+            }
+        ]
+    }
+
+    calls = coerce_tool_calls(payload)
+
+    assert calls == [
+        ToolCall(
+            tool="set_research",
+            arguments={"tech_or_civic": "MATHEMATICS"},
+            reasoning="Unlock better campuses.",
+        )
+    ]
+
+
 def test_coerce_rejects_missing_tool_field() -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="missing 'tool' name"):
         coerce_tool_calls({"tool_calls": [{"arguments": {}}]})
 
 
 def test_coerce_rejects_non_dict_payload() -> None:
     with pytest.raises(ValueError):
         coerce_tool_calls(42)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "primitive_name": "open_city_panel",
+            "reasoning": "VLM generated a pixel action plan.",
+            "actions": [{"type": "click", "x": 500, "y": 600, "button": "left"}],
+        },
+        AgentPlan(
+            primitive_name="advance_turn_hotkey",
+            reasoning="VLM generated a keyboard action plan.",
+            actions=[KeyPressAction(keys=["enter"])],
+        ).model_dump(mode="json"),
+    ],
+)
+def test_coerce_rejects_vlm_action_plan_payloads(payload: dict[str, object]) -> None:
+    with pytest.raises(ValueError, match="VLM/computer-use action-plan payload cannot run"):
+        coerce_tool_calls(payload)
+
+
+def test_coerce_rejects_vlm_actions_envelope_even_when_action_mentions_tool_name() -> None:
+    payload = {
+        "primitive_name": "ambiguous_plan",
+        "reasoning": "This remains a VLM action envelope, not a civ6-mcp tool-call payload.",
+        "actions": [
+            {
+                **ClickAction(x=100, y=200).model_dump(mode="json"),
+                "tool": "set_research",
+                "arguments": {"tech_or_civic": "WRITING"},
+            }
+        ],
+    }
+
+    with pytest.raises(ValueError, match="VLM/computer-use action-plan payload cannot run"):
+        coerce_tool_calls(payload)
 
 
 def test_coerce_accepts_planner_action_object() -> None:
@@ -160,6 +262,30 @@ def test_executor_accepts_mapping_planned_action() -> None:
     assert result.call.reasoning == "unlock campuses"
 
 
+def test_executor_resolves_free_form_action_type_and_uses_only_mcp_client(
+    fail_if_vlm_dispatch_is_used: None,
+) -> None:
+    client = StrictMcpOnlyClient(response="Research set.", known={"set_research"})
+    executor = Civ6McpExecutor(client)  # type: ignore[arg-type]
+
+    result = executor.execute(
+        {
+            "type": "choose_research",
+            "tech": "MATHEMATICS",
+            "reasoning": "Unlock better campuses.",
+        }
+    )
+
+    assert result.success is True
+    assert result.classification == "ok"
+    assert result.call == ToolCall(
+        tool="set_research",
+        arguments={"tech_or_civic": "MATHEMATICS"},
+        reasoning="Unlock better campuses.",
+    )
+    assert client.calls == [("set_research", {"tech_or_civic": "MATHEMATICS"})]
+
+
 def test_executor_dispatch_success_uses_only_mcp_client(fail_if_vlm_dispatch_is_used: None) -> None:
     client = StrictMcpOnlyClient(response="Research set.", known={"set_research"})
     executor = Civ6McpExecutor(client)  # type: ignore[arg-type]
@@ -168,9 +294,44 @@ def test_executor_dispatch_success_uses_only_mcp_client(fail_if_vlm_dispatch_is_
 
     assert result.success is True
     assert result.classification == "ok"
+    assert result.status == "success"
+    assert result.terminal is False
     assert result.text == "Research set."
     assert result.error == ""
     assert client.calls == [("set_research", {"tech_or_civic": "WRITING"})]
+
+
+def test_executor_captures_per_call_typed_mcp_responses() -> None:
+    units_response = FakeToolResult(
+        "1 unit",
+        structured_content={"units": [{"id": 7, "type": "Warrior"}]},
+    )
+    failure_response = FakeToolResult("Error: must specify a known tech", is_error=True)
+    client = SequencedTypedClient(
+        {
+            "get_units": units_response,
+            "set_research": failure_response,
+        }
+    )
+    executor = Civ6McpExecutor(client)  # type: ignore[arg-type]
+
+    results = executor.execute_many(
+        [
+            ToolCall(tool="get_units"),
+            ToolCall(tool="set_research", arguments={"tech_or_civic": "UNKNOWN"}),
+        ]
+    )
+
+    assert [result.success for result in results] == [True, False]
+    assert [result.text for result in results] == ["1 unit", "Error: must specify a known tech"]
+    assert results[0].structured_content == {"units": [{"id": 7, "type": "Warrior"}]}
+    assert results[0].raw_response is units_response
+    assert results[1].error == "Error: must specify a known tech"
+    assert results[1].raw_response is failure_response
+    assert client.calls == [
+        ("get_units", {}),
+        ("set_research", {"tech_or_civic": "UNKNOWN"}),
+    ]
 
 
 def test_executor_unsupported_action_does_not_dispatch_to_mcp_or_vlm(
@@ -183,7 +344,23 @@ def test_executor_unsupported_action_does_not_dispatch_to_mcp_or_vlm(
 
     assert result.success is False
     assert result.classification == "error"
-    assert "missing 'tool' name" in result.error
+    assert "VLM/computer-use action" in result.error
+    assert client.calls == []
+
+
+@pytest.mark.parametrize("tool", ["click", "drag", "press"])
+def test_executor_vlm_tool_call_name_does_not_dispatch(
+    tool: str,
+    fail_if_vlm_dispatch_is_used: None,
+) -> None:
+    client = StrictMcpOnlyClient(response="should not be called", known={tool})
+    executor = Civ6McpExecutor(client)  # type: ignore[arg-type]
+
+    result = executor.execute(ToolCall(tool=tool, arguments={}))
+
+    assert result.success is False
+    assert result.classification == "error"
+    assert "VLM/computer-use action" in result.error
     assert client.calls == []
 
 
@@ -200,6 +377,8 @@ def test_executor_mcp_client_failure_does_not_fallback_to_vlm(
 
     assert result.success is False
     assert result.classification == "aborted"
+    assert result.status == "aborted"
+    assert result.terminal is True
     assert result.text == ""
     assert result.error == "RUN ABORTED: upstream civ6-mcp server exited."
     assert client.calls == [("set_research", {"tech_or_civic": "WRITING"})]
@@ -267,6 +446,8 @@ def test_executor_classifies_game_over() -> None:
         )
     )
     assert result.classification == "game_over"
+    assert result.status == "game_over"
+    assert result.terminal is True
     assert result.success is False  # game_over halts execution
 
 
@@ -289,6 +470,8 @@ def test_executor_classifies_blocked_end_turn() -> None:
         )
     )
     assert result.classification == "blocked"
+    assert result.status == "blocked"
+    assert result.terminal is False
 
 
 def test_executor_many_stops_on_terminal() -> None:
@@ -319,6 +502,103 @@ def test_executor_many_stops_on_terminal() -> None:
     tools_called = [name for name, _ in client.calls]
     assert "set_research" not in tools_called
     assert results[-1].classification == "game_over"
+
+
+@pytest.mark.parametrize("terminal_classification", ["game_over", "aborted", "hang"])
+def test_execute_many_halts_on_terminal_classification_without_discarding_prior_results(
+    terminal_classification: str,
+) -> None:
+    first = ToolCallResult(
+        call=ToolCall(tool="get_units"),
+        success=True,
+        text="Unit 1: Warrior",
+        classification="ok",
+        status="success",
+    )
+    terminal = ToolCallResult(
+        call=ToolCall(tool="end_turn", arguments={"tactical": "done"}),
+        success=False,
+        error=f"{terminal_classification} reached",
+        classification=terminal_classification,
+        status=terminal_classification,
+        terminal=False,
+    )
+    skipped = ToolCallResult(
+        call=ToolCall(tool="set_research", arguments={"tech_or_civic": "WRITING"}),
+        success=True,
+        text="should not be returned",
+        classification="ok",
+        status="success",
+    )
+    executor = RecordingExecutor([first, terminal, skipped])
+    calls = [
+        ToolCall(tool="get_units"),
+        ToolCall(tool="end_turn", arguments={"tactical": "done"}),
+        ToolCall(tool="set_research", arguments={"tech_or_civic": "WRITING"}),
+    ]
+
+    results = executor.execute_many(calls)
+
+    assert results == [first, terminal]
+    assert results[0].text == "Unit 1: Warrior"
+    assert results[1].classification == terminal_classification
+    assert executor.executed == calls[:2]
+
+
+def test_execute_many_does_not_consume_calls_after_terminal_classification() -> None:
+    first = ToolCallResult(
+        call=ToolCall(tool="get_units"),
+        success=True,
+        text="Unit 1: Warrior",
+        classification="ok",
+        status="success",
+    )
+    terminal = ToolCallResult(
+        call=ToolCall(tool="end_turn"),
+        success=False,
+        error="game over reached",
+        classification="game_over",
+        status="game_over",
+        terminal=False,
+    )
+    skipped = ToolCallResult(
+        call=ToolCall(tool="set_research", arguments={"tech_or_civic": "WRITING"}),
+        success=True,
+        text="should not be executed",
+        classification="ok",
+        status="success",
+    )
+    executor = RecordingExecutor([first, terminal, skipped])
+    calls = [ToolCall(tool="get_units"), ToolCall(tool="end_turn")]
+
+    def call_stream() -> Iterator[ToolCall]:
+        yield from calls
+        raise AssertionError("execute_many consumed a call after terminal classification")
+
+    results = executor.execute_many(call_stream())
+
+    assert results == [first, terminal]
+    assert executor.executed == calls
+
+
+def test_execute_many_rechecks_stop_predicate_between_calls() -> None:
+    client = FakeCiv6McpClient(
+        responses={
+            "get_units": "Units observed.",
+            "set_research": "should not be called",
+        },
+        known={"get_units", "set_research"},
+    )
+    executor = Civ6McpExecutor(client)  # type: ignore[arg-type]
+    calls = [
+        ToolCall(tool="get_units"),
+        ToolCall(tool="set_research", arguments={"tech_or_civic": "WRITING"}),
+    ]
+
+    results = executor.execute_many(calls, stop_requested=lambda: len(client.calls) >= 1)
+
+    assert [result.call.tool for result in results] == ["get_units"]
+    assert client.calls == [("get_units", {})]
 
 
 def test_executor_classifies_generic_error_prefix() -> None:

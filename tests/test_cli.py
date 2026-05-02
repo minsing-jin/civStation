@@ -1,12 +1,32 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from civStation import cli
+
+_CONCRETE_VLM_PROVIDER_MODULES = {
+    "civStation.utils.llm_provider.anthropic_computer",
+    "civStation.utils.llm_provider.claude",
+    "civStation.utils.llm_provider.gemini",
+    "civStation.utils.llm_provider.gpt",
+    "civStation.utils.llm_provider.openai_computer",
+}
+_CONCRETE_CIV6_MCP_BACKEND_MODULES = {
+    "civStation.agent.modules.backend.civ6_mcp",
+    "civStation.agent.modules.backend.civ6_mcp.action_mapping",
+    "civStation.agent.modules.backend.civ6_mcp.client",
+    "civStation.agent.modules.backend.civ6_mcp.executor",
+    "civStation.agent.modules.backend.civ6_mcp.observer",
+    "civStation.agent.modules.backend.civ6_mcp.operations",
+    "civStation.agent.modules.backend.civ6_mcp.planner",
+    "civStation.agent.modules.backend.civ6_mcp.turn_loop",
+}
 
 
 def test_root_cli_without_args_shows_onboarding(capsys: pytest.CaptureFixture[str]) -> None:
@@ -142,6 +162,20 @@ def test_run_command_prints_preflight_and_forwards_args(
     assert forwarded == [["--provider", "gemini", "--turns", "5"]]
 
 
+def test_run_command_forwards_backend_selection(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    forwarded: list[list[str] | None] = []
+
+    monkeypatch.setattr(cli, "_run_turn_runner", lambda argv=None: forwarded.append(argv))
+
+    assert cli.main(["run", "--backend", "civ6-mcp", "--turns", "5"]) == 0
+
+    capsys.readouterr()
+    assert forwarded == [["--backend", "civ6-mcp", "--turns", "5"]]
+
+
 def test_run_guide_only_shows_star_prompt_before_preflight_when_interactive(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
@@ -219,3 +253,67 @@ def test_help_mentions_mcp_install(capsys: pytest.CaptureFixture[str]) -> None:
 
     captured = capsys.readouterr()
     assert "civstation mcp-install" in captured.out
+
+
+def test_run_help_does_not_import_runner_or_concrete_vlm_provider_modules(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.delitem(sys.modules, "civStation.agent.turn_runner", raising=False)
+    for module_name in _CONCRETE_VLM_PROVIDER_MODULES:
+        monkeypatch.delitem(sys.modules, module_name, raising=False)
+    for module_name in _CONCRETE_CIV6_MCP_BACKEND_MODULES:
+        monkeypatch.delitem(sys.modules, module_name, raising=False)
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["run", "--help"])
+
+    assert exc_info.value.code == 0
+    help_output = capsys.readouterr().out
+    assert "Run the CivStation agent" in help_output
+    assert "--backend {vlm,civ6-mcp}" in help_output
+    assert "civStation.agent.turn_runner" not in sys.modules
+    assert _CONCRETE_VLM_PROVIDER_MODULES.isdisjoint(sys.modules)
+    assert _CONCRETE_CIV6_MCP_BACKEND_MODULES.isdisjoint(sys.modules)
+
+
+def test_civstation_run_help_succeeds_when_backend_dependencies_unavailable(tmp_path: Path) -> None:
+    sitecustomize = tmp_path / "sitecustomize.py"
+    sitecustomize.write_text(
+        """
+import importlib.abc
+
+
+class _UnavailableVlmProviderDependency(importlib.abc.MetaPathFinder):
+    _BLOCKED = ("anthropic", "google.genai", "mcp", "openai")
+
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname in self._BLOCKED or fullname.startswith(tuple(f"{name}." for name in self._BLOCKED)):
+            raise ModuleNotFoundError(f"Simulated unavailable VLM provider dependency: {fullname}")
+        return None
+
+
+import sys
+
+sys.meta_path.insert(0, _UnavailableVlmProviderDependency())
+""",
+        encoding="utf-8",
+    )
+    repo_root = Path(__file__).resolve().parents[1]
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join(
+        part for part in (str(tmp_path), str(repo_root), env.get("PYTHONPATH", "")) if part
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-m", "civStation", "run", "--help"],
+        cwd=repo_root,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Run the CivStation agent" in result.stdout
+    assert "--backend {vlm,civ6-mcp}" in result.stdout

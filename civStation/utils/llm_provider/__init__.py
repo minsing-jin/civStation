@@ -73,6 +73,11 @@ _PROVIDER_NAMES = {
 }
 
 
+_PROVIDER_DEFAULT_MODELS_BY_NAME = {
+    provider_name: _PROVIDER_DEFAULT_MODELS[class_name] for provider_name, class_name in _PROVIDER_NAMES.items()
+}
+
+
 def _load_dotenv_if_available() -> None:
     try:
         from dotenv import load_dotenv
@@ -87,13 +92,6 @@ def _load_provider_class(class_name: str):
     module_name = _PROVIDER_CLASS_PATHS[class_name]
     module = importlib.import_module(module_name)
     return getattr(module, class_name)
-
-
-def _get_provider_default_model(class_name: str) -> str:
-    try:
-        return _load_provider_class(class_name).DEFAULT_MODEL
-    except ImportError:
-        return _PROVIDER_DEFAULT_MODELS[class_name]
 
 
 def __getattr__(name: str):
@@ -152,6 +150,11 @@ def get_available_providers() -> dict[str, str]:
     """
     Get list of available providers and their default models.
 
+    This intentionally returns static registry metadata instead of importing
+    provider classes. CLI help and argument parsing should not pay concrete
+    VLM provider import costs; implementations load when create_provider() is
+    called for the selected backend.
+
     Returns:
         Dictionary mapping provider names to default model identifiers
 
@@ -160,12 +163,4 @@ def get_available_providers() -> dict[str, str]:
         >>> print(providers)
         {'claude': 'claude-4-5-sonnet-20241022', 'gemini': 'gemini-3.0-flash-preview', ...}
     """
-    return {
-        "claude": _get_provider_default_model("ClaudeVLMProvider"),
-        "gemini": _get_provider_default_model("GeminiVLMProvider"),
-        "gpt": _get_provider_default_model("GPTVLMProvider"),
-        "openai": _get_provider_default_model("GPTVLMProvider"),
-        "openai-computer": _get_provider_default_model("OpenAIComputerVLMProvider"),
-        "anthropic-computer": _get_provider_default_model("AnthropicComputerVLMProvider"),
-        "mock": "mock-vlm",
-    }
+    return {**_PROVIDER_DEFAULT_MODELS_BY_NAME, "mock": "mock-vlm"}

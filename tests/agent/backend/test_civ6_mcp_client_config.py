@@ -162,6 +162,17 @@ def test_missing_uv_binary_error_suggests_python_launcher(monkeypatch, tmp_path:
     assert "--civ6-mcp-launcher python" in message
 
 
+def test_missing_python_binary_error_suggests_uv_launcher(monkeypatch, tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'civ6-mcp'\n")
+    monkeypatch.setattr("shutil.which", lambda _name: None)
+
+    message = _validation_error_message(Civ6McpConfig(install_path=tmp_path, launcher="python"))
+
+    assert "python" in message
+    assert "PATH" in message
+    assert "--civ6-mcp-launcher uv" in message
+
+
 def test_validate_passes_when_pyproject_exists(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text("[project]\nname = 'civ6-mcp'\n")
     config = Civ6McpConfig(install_path=tmp_path, launcher="python")

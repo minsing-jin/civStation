@@ -12,14 +12,22 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Mapping
+from typing import Any
 
 from civStation.agent.modules.backend.civ6_mcp.executor import coerce_tool_calls
+from civStation.agent.modules.backend.civ6_mcp.observation_schema import (
+    Civ6McpNormalizedObservation,
+    normalize_raw_mcp_game_state,
+)
+from civStation.agent.modules.backend.civ6_mcp.operations import END_TURN_REFLECTION_FIELDS, END_TURN_TOOL
 from civStation.agent.modules.backend.civ6_mcp.planner_types import Civ6McpPlannerProvider, PlannerResult
 from civStation.agent.modules.backend.civ6_mcp.prompts import (
     build_planner_system_prompt,
     build_planner_user_prompt,
 )
-from civStation.utils.llm_provider.parser import strip_markdown
+from civStation.agent.modules.backend.civ6_mcp.results import ToolCall
+from civStation.agent.modules.backend.civ6_mcp.turn_planning import build_prioritized_turn_plan
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +101,40 @@ _DEFAULT_PLANNER_TOOL_ALLOWLIST: tuple[str, ...] = (
 )
 
 
+class MissingEndTurnPlannerOutputError(RuntimeError):
+    """Raised when parsed civ6-mcp planner output never emitted ``end_turn``."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        raw_response: str = "",
+        parsed_payload: dict[str, Any] | None = None,
+        tool_calls: list[ToolCall] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.raw_response = raw_response
+        self.parsed_payload = parsed_payload
+        self.tool_calls = list(tool_calls or [])
+
+
+class _MissingEndTurnPlanError(ValueError):
+    """Internal retryable validation error that preserves parsed planner output."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        raw_response: str,
+        parsed_payload: dict[str, Any],
+        tool_calls: list[ToolCall],
+    ) -> None:
+        super().__init__(message)
+        self.raw_response = raw_response
+        self.parsed_payload = parsed_payload
+        self.tool_calls = list(tool_calls)
+
+
 class Civ6McpToolPlanner:
     """Asks an LLM to produce a tool-call plan for one turn.
 
@@ -153,7 +195,7 @@ class Civ6McpToolPlanner:
         recent_calls: str,
         hitl_directive: str = "",
     ) -> PlannerResult:
-        """Produce a PlannerResult or raise if every retry yields invalid JSON."""
+        """Produce a PlannerResult or raise if retries keep yielding invalid plans."""
         system_prompt = build_planner_system_prompt(tool_catalog=self.render_tool_catalog())
         user_prompt = build_planner_user_prompt(
             strategy=strategy,
@@ -167,9 +209,12 @@ class Civ6McpToolPlanner:
             full_prompt = f"{system_prompt}\n\n{user_prompt}"
             if attempt > 0:
                 full_prompt += (
-                    "\n\nThe previous response was invalid JSON or missing the "
-                    "expected schema. Re-emit ONLY a valid JSON object as specified."
+                    "\n\nThe previous response was invalid JSON, missing the "
+                    "expected schema, or violated backend turn-planning rules."
                 )
+                if last_error is not None:
+                    full_prompt += f" Planner validation error: {last_error}."
+                full_prompt += " Re-emit ONLY a valid JSON object as specified."
             try:
                 content_parts = [self._provider._build_text_content(full_prompt)]
                 response = self._provider._send_to_api(
@@ -178,15 +223,20 @@ class Civ6McpToolPlanner:
                     max_tokens=4096,
                 )
                 raw = response.content
-                cleaned = strip_markdown(raw)
-                payload = json.loads(cleaned)
+                payload = _load_strict_planner_payload(raw)
                 tool_calls = coerce_tool_calls(payload)
                 if not tool_calls:
                     raise ValueError("planner emitted zero tool calls")
+                payload, tool_calls = _repair_or_reject_final_end_turn(
+                    payload,
+                    tool_calls,
+                    raw_response=raw,
+                )
+                _validate_successful_plan_reflections(tool_calls)
                 return PlannerResult(
                     tool_calls=tool_calls,
                     raw_response=raw,
-                    parsed_payload=payload if isinstance(payload, dict) else {"tool_calls": payload},
+                    parsed_payload=payload,
                 )
             except (json.JSONDecodeError, ValueError, KeyError) as exc:
                 last_error = exc
@@ -197,10 +247,138 @@ class Civ6McpToolPlanner:
                     exc,
                 )
 
+        if isinstance(last_error, _MissingEndTurnPlanError):
+            raise MissingEndTurnPlannerOutputError(
+                f"civ6-mcp planner exhausted retries: {last_error}",
+                raw_response=last_error.raw_response,
+                parsed_payload=last_error.parsed_payload,
+                tool_calls=last_error.tool_calls,
+            ) from last_error
+
         raise RuntimeError(f"civ6-mcp planner exhausted retries: {last_error}")
+
+    def plan_from_observation(
+        self,
+        *,
+        observation: Civ6McpNormalizedObservation | object,
+        strategy: str,
+        recent_calls: str,
+        hitl_directive: str = "",
+    ) -> PlannerResult:
+        """Produce an ordered MCP tool-call plan from a normalized observation payload."""
+        normalized_observation = _normalize_planner_observation(observation)
+
+        turn_plan = build_prioritized_turn_plan(normalized_observation, strategy=strategy)
+        state_context = (
+            f"{normalized_observation.planner_context}\n\n## PRIORITIZED_MCP_INTENTS\n{turn_plan.render_for_prompt()}"
+        )
+        observation_hints = _render_observation_payload_hints(normalized_observation)
+        if observation_hints:
+            state_context = f"{state_context}\n\n## OBSERVATION_PAYLOAD_HINTS\n{observation_hints}"
+        return self.plan(
+            strategy=strategy,
+            state_context=state_context,
+            recent_calls=recent_calls,
+            hitl_directive=hitl_directive,
+        )
+
+
+def _load_strict_planner_payload(raw: str) -> dict[str, Any]:
+    """Load the planner response as strict JSON with the required top-level shape."""
+    payload = json.loads(raw)
+    if not isinstance(payload, dict):
+        raise ValueError("Planner output must be a top-level JSON object with a 'tool_calls' array.")
+    if "tool_calls" not in payload:
+        if "actions" in payload:
+            raise ValueError(
+                "VLM/computer-use action-plan payload cannot run on the civ6-mcp backend; expected 'tool_calls'."
+            )
+        raise ValueError("Planner output must include a 'tool_calls' array.")
+    if not isinstance(payload["tool_calls"], list):
+        raise ValueError("Planner output 'tool_calls' must be a list.")
+    return payload
+
+
+def _repair_or_reject_final_end_turn(
+    payload: dict[str, Any],
+    tool_calls: list[ToolCall],
+    *,
+    raw_response: str,
+) -> tuple[dict[str, Any], list[ToolCall]]:
+    """Ensure the executable planner sequence ends with ``end_turn``.
+
+    A call after ``end_turn`` cannot safely run in the same turn. When the
+    model emitted a valid ``end_turn`` and then drifted into extra calls, keep
+    the closed-turn prefix. If there is no ``end_turn`` at all, reject the plan
+    so retry prompting can request a proper turn close.
+    """
+    if tool_calls[-1].tool == END_TURN_TOOL:
+        return payload, tool_calls
+
+    end_turn_index = next((index for index, call in enumerate(tool_calls) if call.tool == END_TURN_TOOL), None)
+    if end_turn_index is None:
+        raise _MissingEndTurnPlanError(
+            "final tool call must be end_turn",
+            raw_response=raw_response,
+            parsed_payload=payload,
+            tool_calls=tool_calls,
+        )
+
+    repaired_payload = dict(payload)
+    repaired_payload["tool_calls"] = list(payload["tool_calls"][: end_turn_index + 1])
+    logger.warning(
+        "civ6-mcp planner emitted %d trailing call(s) after end_turn; dropping them.",
+        len(tool_calls) - end_turn_index - 1,
+    )
+    return repaired_payload, tool_calls[: end_turn_index + 1]
+
+
+def _validate_successful_plan_reflections(tool_calls: list[ToolCall]) -> None:
+    """Validate the successful planner sequence has complete end-turn reflections."""
+    if not tool_calls or tool_calls[-1].tool != END_TURN_TOOL:
+        raise ValueError("final tool call must be end_turn")
+
+    arguments = tool_calls[-1].arguments
+    non_string = [
+        field for field in END_TURN_REFLECTION_FIELDS if field in arguments and not isinstance(arguments[field], str)
+    ]
+    if non_string:
+        raise ValueError(f"end_turn reflection fields must be strings: {', '.join(non_string)}")
+
+    missing = [field for field in END_TURN_REFLECTION_FIELDS if not str(arguments.get(field) or "").strip()]
+    if missing:
+        raise ValueError(f"end_turn requires non-empty reflection fields: {', '.join(missing)}")
+
+
+def _normalize_planner_observation(observation: object) -> Civ6McpNormalizedObservation:
+    """Normalize planner input while rejecting explicit non-civ6 backend payloads."""
+    if isinstance(observation, Civ6McpNormalizedObservation):
+        normalized = observation
+    else:
+        if isinstance(observation, Mapping) and observation.get("backend") not in (None, "civ6-mcp"):
+            raise ValueError(f"civ6-mcp planner cannot consume backend {observation.get('backend')!r} observations.")
+        normalized = normalize_raw_mcp_game_state(observation)
+
+    if normalized.backend != "civ6-mcp":
+        raise ValueError(f"civ6-mcp planner cannot consume backend {normalized.backend!r} observations.")
+    return normalized
+
+
+def _render_observation_payload_hints(observation: Civ6McpNormalizedObservation) -> str:
+    """Render non-executable state-gap hints preserved from the observation payload."""
+    overview = observation.raw_sections.get("OVERVIEW", "").lower()
+    if "research:" not in overview or "civic:" not in overview:
+        return ""
+    if not any(pattern in overview for pattern in ("research:\ncivic:", "research: \ncivic:", "research:\r\ncivic:")):
+        return ""
+    return (
+        "P070 get_tech_civics - Overview indicates blank research and civic choices. "
+        "| source=OVERVIEW | trigger=blank research/civic labels"
+    )
 
 
 __all__ = [
     "Civ6McpToolPlanner",
+    "MissingEndTurnPlannerOutputError",
     "PlannerResult",
 ]

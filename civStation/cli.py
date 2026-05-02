@@ -375,7 +375,17 @@ def _handle_run(argv: list[str]) -> int:
     )
     parser.add_argument("--guide-only", action="store_true", help="Print the preflight guide and exit.")
     parser.add_argument("--skip-guide", action="store_true", help="Skip the preflight guide before launching.")
+    parser.add_argument(
+        "--backend",
+        choices=["vlm", "civ6-mcp"],
+        help=(
+            "Select exactly one runtime backend. 'vlm' keeps the default screenshot/computer-use pipeline; "
+            "'civ6-mcp' uses the upstream civ6-mcp MCP server."
+        ),
+    )
     known, passthrough = parser.parse_known_args(argv)
+    if known.backend is not None:
+        passthrough = ["--backend", known.backend, *passthrough]
 
     if not known.skip_guide:
         _maybe_prompt_for_star()

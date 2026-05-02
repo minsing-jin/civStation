@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 from pathlib import Path
+from typing import Any
 
 try:
     import configargparse  # pip install configargparse
@@ -36,10 +38,10 @@ except ImportError:  # pragma: no cover - exercised only in lean CLI/help enviro
     configargparse = _FallbackConfigArgParse()
 
 from civStation.agent.modules.backend import BackendKind, parse_backend_kind
-from civStation.agent.modules.context import ContextManager
-from civStation.agent.modules.hitl import CommandQueue, QueueListener
+from civStation.agent.modules.context.context_manager import ContextManager
+from civStation.agent.modules.hitl.command_queue import CommandQueue
+from civStation.agent.modules.hitl.queue_listener import QueueListener
 from civStation.utils.debug import DebugOptions
-from civStation.utils.llm_provider import create_provider, get_available_providers
 from civStation.utils.run_log_cache import start_run_log_session
 from civStation.utils.screenshot_trajectory import start_screenshot_trajectory_session
 
@@ -53,6 +55,20 @@ for _noisy in ("httpx", "httpcore", "urllib3", "asyncio", "websockets"):
     logging.getLogger(_noisy).setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
+
+
+def create_provider(*args: Any, **kwargs: Any) -> Any:
+    """Lazy proxy so CLI help/imports do not load concrete VLM providers."""
+    from civStation.utils.llm_provider import create_provider as _create_provider
+
+    return _create_provider(*args, **kwargs)
+
+
+def get_available_providers() -> dict[str, str]:
+    """Lazy proxy for provider names/defaults used by argument parsing."""
+    from civStation.utils.llm_provider import get_available_providers as _get_available_providers
+
+    return _get_available_providers()
 
 
 def run_one_turn(**kwargs):
@@ -71,6 +87,22 @@ def run_multi_turn(**kwargs):
 
 class BackendRuntimeConflictError(RuntimeError):
     """Raised when mutually exclusive backend runtime components are mixed."""
+
+
+class Civ6McpStartupConfigError(RuntimeError):
+    """Raised when civ6-mcp startup configuration is invalid before backend startup."""
+
+
+def _missing_civ6_mcp_launcher_binary_error(launcher: str) -> Civ6McpStartupConfigError:
+    if launcher == "uv":
+        return Civ6McpStartupConfigError(
+            "Selected launcher is `uv` but the `uv` binary is not on PATH. "
+            "Install astral-sh/uv or pass --civ6-mcp-launcher python."
+        )
+    return Civ6McpStartupConfigError(
+        "Selected launcher is `python` but the `python` binary is not on PATH. "
+        "Activate an environment that provides python or pass --civ6-mcp-launcher uv."
+    )
 
 
 class _ConsoleLogSilencer:
@@ -97,8 +129,21 @@ class _ConsoleLogSilencer:
             handler.setLevel(level)
 
 
-def _present_component_names(**components: object) -> list[str]:
-    return sorted(name for name, value in components.items() if value is not None)
+_VLM_RUNTIME_COMPONENT_NAMES = frozenset(
+    {
+        "macro_turn_manager",
+        "context_updater",
+        "turn_detector",
+    }
+)
+
+
+def _present_vlm_runtime_conflicts(**components: object) -> list[str]:
+    return sorted(
+        name
+        for name, value in components.items()
+        if value is not None and (name in _VLM_RUNTIME_COMPONENT_NAMES or name.endswith("_img_config"))
+    )
 
 
 def _guard_backend_runtime_state(
@@ -112,10 +157,11 @@ def _guard_backend_runtime_state(
     context_img_config: object | None,
     turn_detector_img_config: object | None,
     civ6_mcp_client: object | None,
+    **additional_runtime_components: object | None,
 ) -> None:
     """Fail fast if VLM/computer-use and civ6-mcp runtime state is mixed."""
     if backend_kind is BackendKind.CIV6_MCP:
-        vlm_components = _present_component_names(
+        vlm_components = _present_vlm_runtime_conflicts(
             macro_turn_manager=macro_turn_manager,
             context_updater=context_updater,
             turn_detector=turn_detector,
@@ -123,6 +169,7 @@ def _guard_backend_runtime_state(
             planner_img_config=planner_img_config,
             context_img_config=context_img_config,
             turn_detector_img_config=turn_detector_img_config,
+            **additional_runtime_components,
         )
         if vlm_components:
             joined = ", ".join(vlm_components)
@@ -133,6 +180,57 @@ def _guard_backend_runtime_state(
 
     if civ6_mcp_client is not None:
         raise BackendRuntimeConflictError("VLM backend cannot run with a civ6-mcp client initialized")
+
+
+def _validate_civ6_mcp_startup_config(args: object) -> None:
+    """Validate civ6-mcp checkout configuration before starting shared runtime components."""
+    configured_path = getattr(args, "civ6_mcp_path", None)
+    configured_launcher = getattr(args, "civ6_mcp_launcher", None)
+    raw_path = (
+        configured_path if configured_path is not None else os.environ.get("CIV6_MCP_PATH") or Path.home() / "civ6-mcp"
+    )
+    raw_launcher = (
+        configured_launcher if configured_launcher is not None else os.environ.get("CIV6_MCP_LAUNCHER") or "uv"
+    )
+
+    if isinstance(raw_path, str) and not raw_path.strip():
+        raise Civ6McpStartupConfigError(
+            "civ6-mcp config missing required field: install_path. "
+            "Set --civ6-mcp-path or the CIV6_MCP_PATH env var to a local "
+            "github.com/lmwilki/civ6-mcp checkout."
+        )
+    if not isinstance(raw_launcher, str) or not raw_launcher.strip():
+        raise Civ6McpStartupConfigError(
+            "civ6-mcp config field launcher must be a non-empty string. "
+            "Use --civ6-mcp-launcher uv|python or set CIV6_MCP_LAUNCHER."
+        )
+    launcher = raw_launcher.strip()
+    if launcher not in {"uv", "python"}:
+        raise Civ6McpStartupConfigError(
+            f"Unsupported launcher for civ6-mcp: {launcher!r}. Supported launchers: python, uv. "
+            "Set --civ6-mcp-launcher or CIV6_MCP_LAUNCHER to one of those values."
+        )
+
+    try:
+        install_path = Path(raw_path).expanduser().resolve()
+    except TypeError as exc:
+        raise Civ6McpStartupConfigError(
+            f"civ6-mcp config field install_path must be a path-like value, got {type(raw_path).__name__}. "
+            "Pass --civ6-mcp-path or set CIV6_MCP_PATH to your civ6-mcp checkout."
+        ) from exc
+
+    if not install_path.is_dir():
+        raise Civ6McpStartupConfigError(
+            f"civ6-mcp install path does not exist: {install_path}. "
+            "Set --civ6-mcp-path or the CIV6_MCP_PATH env var to your civ6-mcp checkout."
+        )
+    if not (install_path / "pyproject.toml").is_file():
+        raise Civ6McpStartupConfigError(
+            f"civ6-mcp install path missing pyproject.toml: {install_path}. "
+            "Did you `git clone https://github.com/lmwilki/civ6-mcp` and `uv sync` there?"
+        )
+    if shutil.which(launcher) is None:
+        raise _missing_civ6_mcp_launcher_binary_error(launcher)
 
 
 def parse_args(argv: list[str] | None = None) -> configargparse.Namespace:
@@ -457,6 +555,15 @@ def _main(argv: list[str] | None, console_log_silencer: _ConsoleLogSilencer):
 
     backend_kind = parse_backend_kind(getattr(args, "backend", None))
     is_civ6_mcp_backend = backend_kind is BackendKind.CIV6_MCP
+
+    if is_civ6_mcp_backend:
+        try:
+            _validate_civ6_mcp_startup_config(args)
+        except Civ6McpStartupConfigError as e:
+            logger.error("civ6-mcp backend unavailable: %s", e)
+            close_run_log_session()
+            close_trajectory_session()
+            return
 
     # 2. Setup Components
     try:
