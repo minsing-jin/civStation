@@ -21,12 +21,15 @@ class BackendNotConfiguredError(RuntimeError):
 
 
 def parse_backend_kind(raw: str | None) -> BackendKind:
-    """Parse a CLI/yaml string into a BackendKind, defaulting to VLM."""
+    """Parse a CLI/yaml string into a BackendKind, defaulting to VLM.
+
+    The VLM/computer-use backend is intentionally conservative: only the
+    explicit civ6-mcp selection enters the MCP backend. Every other value
+    resolves to VLM so older configs and omitted flags keep existing behavior.
+    """
     if not raw:
         return BackendKind.VLM
-    value = raw.strip().lower().replace("_", "-")
-    if value in {"vlm", "computer-use", "cu"}:
-        return BackendKind.VLM
-    if value in {"civ6-mcp", "civ-mcp", "mcp", "civmcp"}:
+    value = raw.strip().lower()
+    if value == "civ6-mcp":
         return BackendKind.CIV6_MCP
-    raise ValueError(f"Unknown backend '{raw}'. Choose from: vlm, civ6-mcp.")
+    return BackendKind.VLM

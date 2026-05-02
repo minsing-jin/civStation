@@ -35,6 +35,7 @@ def test_capture_screen_pil_records_trajectory_when_session_is_active(tmp_path, 
         "civStation.utils.screen.pyautogui.screenshot",
         lambda: Image.new("RGB", (100, 50), "white"),
     )
+    monkeypatch.setattr("civStation.utils.screen._capture_primary_display_pil", lambda: None)
     monkeypatch.setattr("civStation.utils.screen._detect_game_window", lambda: None)
 
     session = start_screenshot_trajectory_session(base_dir=tmp_path, max_images=20)
@@ -47,3 +48,29 @@ def test_capture_screen_pil_records_trajectory_when_session_is_active(tmp_path, 
     assert image.size == (100, 50)
     assert (width, height, x_offset, y_offset) == (100, 50, 0, 0)
     assert len(list(session.path.glob("*.png"))) == 1
+
+
+def test_capture_screen_pil_crops_detected_game_window_within_primary_display(monkeypatch):
+    monkeypatch.setattr(
+        "civStation.utils.screen._capture_primary_display_pil",
+        lambda: (Image.new("RGB", (400, 200), "white"), 200, 100, 10, 20),
+    )
+    monkeypatch.setattr("civStation.utils.screen._detect_game_window", lambda: (60, 50, 80, 30))
+
+    image, width, height, x_offset, y_offset = capture_screen_pil()
+
+    assert image.size == (160, 60)
+    assert (width, height, x_offset, y_offset) == (80, 30, 60, 50)
+
+
+def test_capture_screen_pil_ignores_game_window_outside_primary_display(monkeypatch):
+    monkeypatch.setattr(
+        "civStation.utils.screen._capture_primary_display_pil",
+        lambda: (Image.new("RGB", (400, 200), "white"), 200, 100, 0, 0),
+    )
+    monkeypatch.setattr("civStation.utils.screen._detect_game_window", lambda: (240, 20, 80, 30))
+
+    image, width, height, x_offset, y_offset = capture_screen_pil()
+
+    assert image.size == (400, 200)
+    assert (width, height, x_offset, y_offset) == (200, 100, 0, 0)

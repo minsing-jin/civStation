@@ -10,62 +10,56 @@ turn loop can decide whether to retry, escalate, or stop.
 
 from __future__ import annotations
 
-import logging
-import re
-from dataclasses import dataclass, field
+from collections.abc import Iterable, Mapping
 from typing import Any
 
-from civStation.agent.modules.backend.civ6_mcp.client import Civ6McpClient, Civ6McpError
+from civStation.agent.modules.backend.civ6_mcp.client import Civ6McpClientProtocol
+from civStation.agent.modules.backend.civ6_mcp.operations import (
+    Civ6McpOperationDispatcher,
+    Civ6McpRequestBuilder,
+    classify_civ6_mcp_text,
+    coerce_civ6_mcp_requests,
+)
+from civStation.agent.modules.backend.civ6_mcp.results import (
+    ToolCall,
+    ToolCallResult,
+    tool_call_result_from_dispatch,
+)
 
-logger = logging.getLogger(__name__)
-
-
-_END_TURN_BLOCKED = re.compile(r"^Cannot end turn:", re.IGNORECASE)
-_END_TURN_SOFT = re.compile(r"^End turn requested .* still ", re.IGNORECASE)
-_GAME_OVER = re.compile(r"^\*\*\*\s*GAME OVER", re.I)
-_RUN_ABORTED = re.compile(r"^RUN ABORTED", re.I)
-_HANG_FAILED = re.compile(r"^HANG RECOVERY FAILED", re.I)
-_GENERIC_ERROR = re.compile(r"^Error:", re.IGNORECASE)
-
-
-@dataclass
-class ToolCall:
-    """A single planner-issued civ6-mcp tool invocation."""
-
-    tool: str
-    arguments: dict[str, Any] = field(default_factory=dict)
-    reasoning: str = ""
-
-
-@dataclass
-class ToolCallResult:
-    """Outcome of executing one ToolCall."""
-
-    call: ToolCall
-    success: bool = False
-    text: str = ""
-    error: str = ""
-    classification: str = ""  # "ok", "blocked", "soft_block", "game_over", "aborted", "hang", "error"
+_TERMINAL_CLASSIFICATIONS = frozenset({"game_over", "aborted", "hang"})
 
 
 class Civ6McpExecutor:
     """Synchronous executor that runs ToolCalls against a civ6-mcp client."""
 
-    def __init__(self, client: Civ6McpClient) -> None:
-        self._client = client
+    def __init__(self, client: Civ6McpClientProtocol) -> None:
+        self._dispatcher = Civ6McpOperationDispatcher(client)
 
-    def execute(self, call: ToolCall) -> ToolCallResult:
-        """Run a single tool call and classify its outcome."""
-        if not self._client.has_tool(call.tool):
+    def execute(self, planned_action: Any) -> ToolCallResult:
+        """Run one planned civ6-mcp action and classify its outcome.
+
+        The public executor surface is intentionally structural: turn-loop code
+        can pass a ``ToolCall``, a planner action with ``to_tool_call()``, or a
+        planner JSON mapping. This keeps executor.py independent from
+        planner_types.py while still accepting the backend action interface.
+        """
+        try:
+            call = coerce_tool_call(planned_action)
+        except ValueError as exc:
             return ToolCallResult(
-                call=call,
+                call=_invalid_tool_call(planned_action),
                 success=False,
-                error=f"Tool '{call.tool}' not exposed by civ6-mcp server.",
+                error=str(exc),
                 classification="error",
             )
+
         try:
-            text = self._client.call_tool(call.tool, call.arguments)
-        except Civ6McpError as exc:
+            request = Civ6McpRequestBuilder.build(
+                call.tool,
+                call.arguments,
+                reasoning=call.reasoning,
+            )
+        except ValueError as exc:
             return ToolCallResult(
                 call=call,
                 success=False,
@@ -73,48 +67,44 @@ class Civ6McpExecutor:
                 classification="error",
             )
 
-        classification = self._classify(text)
-        success = classification in {"ok", "soft_block"}
-        return ToolCallResult(
-            call=call,
-            success=success,
-            text=text,
-            error="" if success else text,
-            classification=classification,
-        )
+        outcome = self._dispatcher.dispatch(request)
+        return tool_call_result_from_dispatch(call, outcome)
 
-    def execute_many(self, calls: list[ToolCall]) -> list[ToolCallResult]:
+    def execute_many(self, calls: Iterable[Any]) -> list[ToolCallResult]:
         """Run a sequence of tool calls; stop early on terminal classifications."""
         results: list[ToolCallResult] = []
         for call in calls:
             outcome = self.execute(call)
             results.append(outcome)
-            if outcome.classification in {"game_over", "aborted", "hang"}:
-                logger.warning(
-                    "civ6-mcp executor stopping early: classification=%s tool=%s",
-                    outcome.classification,
-                    call.tool,
-                )
+            if outcome.classification in _TERMINAL_CLASSIFICATIONS:
                 break
         return results
 
     @staticmethod
     def _classify(text: str) -> str:
-        if not text:
-            return "ok"
-        if _GAME_OVER.search(text):
-            return "game_over"
-        if _RUN_ABORTED.search(text):
-            return "aborted"
-        if _HANG_FAILED.search(text):
-            return "hang"
-        if _END_TURN_BLOCKED.search(text):
-            return "blocked"
-        if _END_TURN_SOFT.search(text):
-            return "soft_block"
-        if _GENERIC_ERROR.search(text):
-            return "error"
-        return "ok"
+        return classify_civ6_mcp_text(text)
+
+
+def coerce_tool_call(planned_action: Any) -> ToolCall:
+    """Normalize one backend planned action into an executor ``ToolCall``."""
+    if isinstance(planned_action, ToolCall):
+        return planned_action
+
+    to_tool_call = getattr(planned_action, "to_tool_call", None)
+    if callable(to_tool_call):
+        converted = to_tool_call()
+        if not isinstance(converted, ToolCall):
+            raise ValueError(f"planned action to_tool_call() must return ToolCall, got {type(converted).__name__}")
+        return converted
+
+    if isinstance(planned_action, Mapping):
+        return _tool_call_from_mapping(planned_action)
+
+    tool = getattr(planned_action, "tool", None)
+    if tool is not None:
+        return _tool_call_from_attrs(planned_action)
+
+    raise ValueError(f"Unsupported planned action shape: {type(planned_action).__name__}")
 
 
 def coerce_tool_calls(payload: Any) -> list[ToolCall]:
@@ -126,26 +116,47 @@ def coerce_tool_calls(payload: Any) -> list[ToolCall]:
 
     or just the list itself for resilience against minor format drift.
     """
-    if isinstance(payload, dict) and "tool_calls" in payload:
-        items = payload["tool_calls"]
-    elif isinstance(payload, list):
-        items = payload
-    else:
-        raise ValueError(f"Unexpected planner payload shape: {type(payload).__name__}")
+    return [
+        ToolCall(
+            tool=request.tool,
+            arguments=request.arguments,
+            reasoning=request.reasoning,
+        )
+        for request in coerce_civ6_mcp_requests(payload)
+    ]
 
-    if not isinstance(items, list):
-        raise ValueError("Planner payload 'tool_calls' must be a list.")
 
-    calls: list[ToolCall] = []
-    for raw in items:
-        if not isinstance(raw, dict):
-            raise ValueError(f"Tool call entry must be an object, got {type(raw).__name__}")
-        name = raw.get("tool") or raw.get("name")
-        if not isinstance(name, str) or not name:
-            raise ValueError(f"Tool call missing 'tool' name: {raw!r}")
-        args = raw.get("arguments") or {}
-        if not isinstance(args, dict):
-            raise ValueError(f"Tool call arguments must be an object: {raw!r}")
-        reasoning = str(raw.get("reasoning") or "")
-        calls.append(ToolCall(tool=name, arguments=args, reasoning=reasoning))
-    return calls
+def _tool_call_from_mapping(raw: Mapping[str, Any]) -> ToolCall:
+    tool = raw.get("tool") or raw.get("name")
+    if not isinstance(tool, str) or not tool:
+        raise ValueError(f"Tool call missing 'tool' name: {dict(raw)!r}")
+    arguments = raw.get("arguments") or {}
+    if not isinstance(arguments, dict):
+        raise ValueError("Tool call arguments must be an object.")
+    return ToolCall(
+        tool=tool,
+        arguments=dict(arguments),
+        reasoning=str(raw.get("reasoning") or ""),
+    )
+
+
+def _tool_call_from_attrs(raw: Any) -> ToolCall:
+    tool = getattr(raw, "tool", None)
+    if not isinstance(tool, str) or not tool:
+        raise ValueError(f"Tool call missing 'tool' name on {type(raw).__name__}.")
+    arguments = getattr(raw, "arguments", {}) or {}
+    if not isinstance(arguments, dict):
+        raise ValueError("Tool call arguments must be an object.")
+    return ToolCall(
+        tool=tool,
+        arguments=dict(arguments),
+        reasoning=str(getattr(raw, "reasoning", "") or ""),
+    )
+
+
+def _invalid_tool_call(raw: Any) -> ToolCall:
+    if isinstance(raw, Mapping):
+        tool = raw.get("tool") or raw.get("name") or "<invalid>"
+        return ToolCall(tool=str(tool))
+    tool = getattr(raw, "tool", None)
+    return ToolCall(tool=str(tool or "<invalid>"))

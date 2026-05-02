@@ -434,6 +434,13 @@ CivStation can be driven by one of two completely separate action backends.
 This is **not** a fallback chain — it's a clean, mutually-exclusive split
 selected at startup with the `--backend` flag.
 
+Accepted values are `--backend vlm` and `--backend civ6-mcp`.
+If `--backend` is omitted, CivStation uses `vlm`.
+At runtime, only the selected backend is initialized. Choosing `vlm` keeps the
+run entirely on the VLM/computer-use path; CivStation will not launch, call, or
+retry through `civ6-mcp` as a fallback if VLM observation, routing, or action
+execution fails.
+
 ### `vlm` (default)
 
 The original pipeline, unchanged.
@@ -451,36 +458,101 @@ Drive Civ6 directly through the upstream
 [lmwilki/civ6-mcp](https://github.com/lmwilki/civ6-mcp) MCP server, which
 talks to the game over the FireTuner protocol.
 
+This mode does not use screenshots, pixel routing, or pyautogui actions.
+CivStation starts the upstream server as a stdio JSON-RPC subprocess and talks
+to it through the Python `mcp` SDK.
+
 **Prerequisites**:
 
-1. Civilization VI (Steam) + the Gathering Storm DLC.
-2. FireTuner enabled.
-   - macOS / Linux: edit `AppOptions.txt` so `EnableTuner 1`.
-   - Windows: install the "Sid Meier's Civilization VI SDK" via Steam Tools.
-   - This disables Steam achievements while active.
-3. Local clone of civ6-mcp:
-   ```bash
-   git clone https://github.com/lmwilki/civ6-mcp ~/civ6-mcp
-   cd ~/civ6-mcp
-   uv sync
-   ```
-4. Tell CivStation where it lives:
-   ```bash
-   export CIV6_MCP_PATH="$HOME/civ6-mcp"
+1. Civilization VI (Steam) with the Gathering Storm DLC installed.
+2. A singleplayer game loaded and FireTuner enabled.
+3. `uv` available on `PATH` for the recommended launcher.
+4. A local checkout of `github.com/lmwilki/civ6-mcp`.
 
-   uv run civstation run \
-     --backend civ6-mcp \
-     --provider gemini --model gemini-3-flash \
-     --strategy "Science victory. Campus first. Four cities. Avoid wars." \
-     --turns 100 --status-ui --status-port 8765
-   ```
+**1. Enable FireTuner for Civ6**
+
+Edit Civilization VI's `AppOptions.txt` and set:
+
+```text
+EnableTuner 1
+```
+
+Common locations:
+
+- macOS: `~/Library/Application Support/Sid Meier's Civilization VI/AppOptions.txt`
+- Linux/Proton: the Civ6 prefix or compatibility-data directory containing `AppOptions.txt`
+- Windows: install "Sid Meier's Civilization VI SDK" from Steam Tools, then enable tuner support for the local game install
+
+Restart Civ6 after changing this setting, then load a singleplayer Gathering
+Storm game. FireTuner disables Steam achievements while active. Close any
+separate `FireTuner.exe` or `FireTuner.app` session before launching CivStation
+because only one client can own the FireTuner connection.
+
+**2. Install the upstream `civ6-mcp` server**
+
+```bash
+git clone https://github.com/lmwilki/civ6-mcp ~/civ6-mcp
+cd ~/civ6-mcp
+uv sync
+```
+
+Optional smoke test from that checkout:
+
+```bash
+uv run civ-mcp
+```
+
+The command should start the stdio MCP server and then wait for JSON-RPC input.
+Stop it with `Ctrl+C`; CivStation will launch it automatically during a real run.
+
+**3. Run CivStation with the `civ6-mcp` backend**
+
+Either export the upstream checkout path:
+
+```bash
+export CIV6_MCP_PATH="$HOME/civ6-mcp"
+```
+
+or pass it explicitly:
+
+```bash
+uv run civstation run \
+  --backend civ6-mcp \
+  --civ6-mcp-path "$HOME/civ6-mcp" \
+  --civ6-mcp-launcher uv \
+  --provider gemini \
+  --model gemini-3-flash \
+  --strategy "Science victory. Campus first. Four cities. Avoid wars." \
+  --turns 100 \
+  --status-ui \
+  --wait-for-start \
+  --status-port 8765
+```
+
+`--civ6-mcp-path` defaults to `$CIV6_MCP_PATH` and then `~/civ6-mcp`.
+`--civ6-mcp-launcher uv` runs:
+
+```bash
+uv run --directory <civ6-mcp-path> civ-mcp
+```
+
+If you prefer to activate the upstream checkout's virtual environment yourself,
+use `--civ6-mcp-launcher python`; CivStation will run `python -m civ_mcp`.
+
+**Usage notes**:
+
+- Keep Civ6 open on the loaded singleplayer game before pressing `Start`.
+- `civstation mcp` is CivStation's layered extension server; it is not the upstream `civ6-mcp` action backend.
+- `--provider` and `--model` still select the planner LLM, but no VLM router is initialized.
+- `--status-ui` remains useful for start/stop, phase display, and human control. If you rely on live screen streaming in that UI, host screen-capture permissions may still apply even though the `civ6-mcp` backend itself does not read pixels.
+- Use `--backend vlm` or omit `--backend` to return to the original screenshot/computer-use pipeline.
 
 | Aspect | `vlm` | `civ6-mcp` |
 |---|---|---|
 | Input | PIL screenshots | game-internal state via tool calls |
-| Routing | 14 primitives | none — planner picks tools directly |
-| Execution | pyautogui click / keypress | civ6-mcp tools (`set_research`, `unit_action`, `end_turn`, …) |
-| OS permissions | Screen Recording + Accessibility | TCP 127.0.0.1:4318 only |
+| Routing | 14 primitives | none; planner picks tools directly |
+| Execution | pyautogui click / keypress | civ6-mcp tools (`set_research`, `unit_action`, `end_turn`, etc.) |
+| Backend permissions | Screen Recording + Accessibility | FireTuner localhost connection |
 | Multiplayer | works | **not supported** (FireTuner is singleplayer-only) |
 | Achievements | unaffected | **disabled** |
 

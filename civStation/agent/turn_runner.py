@@ -9,11 +9,35 @@ import logging
 import os
 from pathlib import Path
 
-import configargparse  # pip install configargparse
+try:
+    import configargparse  # pip install configargparse
+except ImportError:  # pragma: no cover - exercised only in lean CLI/help environments
+    import argparse
 
+    class _FallbackArgumentParser(argparse.ArgumentParser):
+        def __init__(
+            self,
+            *args,
+            default_config_files: list[str] | None = None,  # noqa: ARG002
+            config_file_parser_class: object | None = None,  # noqa: ARG002
+            **kwargs,
+        ) -> None:
+            super().__init__(*args, **kwargs)
+
+        def add_argument(self, *args, is_config_file: bool = False, **kwargs):  # noqa: ANN002, ANN003, ARG002
+            return super().add_argument(*args, **kwargs)
+
+    class _FallbackConfigArgParse:
+        ArgumentParser = _FallbackArgumentParser
+        Namespace = argparse.Namespace
+        RawDescriptionHelpFormatter = argparse.RawDescriptionHelpFormatter
+        YAMLConfigFileParser = object
+
+    configargparse = _FallbackConfigArgParse()
+
+from civStation.agent.modules.backend import BackendKind, parse_backend_kind
 from civStation.agent.modules.context import ContextManager
 from civStation.agent.modules.hitl import CommandQueue, QueueListener
-from civStation.agent.turn_executor import run_multi_turn, run_one_turn
 from civStation.utils.debug import DebugOptions
 from civStation.utils.llm_provider import create_provider, get_available_providers
 from civStation.utils.run_log_cache import start_run_log_session
@@ -29,6 +53,24 @@ for _noisy in ("httpx", "httpcore", "urllib3", "asyncio", "websockets"):
     logging.getLogger(_noisy).setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
+
+
+def run_one_turn(**kwargs):
+    """Lazy proxy so CLI help/imports do not require screen-capture dependencies."""
+    from civStation.agent.turn_executor import run_one_turn as _run_one_turn
+
+    return _run_one_turn(**kwargs)
+
+
+def run_multi_turn(**kwargs):
+    """Lazy proxy so CLI help/imports do not require screen-capture dependencies."""
+    from civStation.agent.turn_executor import run_multi_turn as _run_multi_turn
+
+    return _run_multi_turn(**kwargs)
+
+
+class BackendRuntimeConflictError(RuntimeError):
+    """Raised when mutually exclusive backend runtime components are mixed."""
 
 
 class _ConsoleLogSilencer:
@@ -53,6 +95,44 @@ class _ConsoleLogSilencer:
         while self._original_levels:
             handler, level = self._original_levels.pop()
             handler.setLevel(level)
+
+
+def _present_component_names(**components: object) -> list[str]:
+    return sorted(name for name, value in components.items() if value is not None)
+
+
+def _guard_backend_runtime_state(
+    backend_kind: BackendKind,
+    *,
+    macro_turn_manager: object | None,
+    context_updater: object | None,
+    turn_detector: object | None,
+    router_img_config: object | None,
+    planner_img_config: object | None,
+    context_img_config: object | None,
+    turn_detector_img_config: object | None,
+    civ6_mcp_client: object | None,
+) -> None:
+    """Fail fast if VLM/computer-use and civ6-mcp runtime state is mixed."""
+    if backend_kind is BackendKind.CIV6_MCP:
+        vlm_components = _present_component_names(
+            macro_turn_manager=macro_turn_manager,
+            context_updater=context_updater,
+            turn_detector=turn_detector,
+            router_img_config=router_img_config,
+            planner_img_config=planner_img_config,
+            context_img_config=context_img_config,
+            turn_detector_img_config=turn_detector_img_config,
+        )
+        if vlm_components:
+            joined = ", ".join(vlm_components)
+            raise BackendRuntimeConflictError(
+                f"civ6-mcp backend cannot run with VLM/computer-use components initialized: {joined}"
+            )
+        return
+
+    if civ6_mcp_client is not None:
+        raise BackendRuntimeConflictError("VLM backend cannot run with a civ6-mcp client initialized")
 
 
 def parse_args(argv: list[str] | None = None) -> configargparse.Namespace:
@@ -206,7 +286,7 @@ def setup_providers(args) -> tuple[object, object]:
     legacy callers that read both slots keep working; both slots point to
     the same instance in that case.
     """
-    backend_kind = getattr(args, "backend", None) or "vlm"
+    backend_kind = parse_backend_kind(getattr(args, "backend", None))
 
     planner_p_name = args.planner_provider or args.provider
     planner_model = args.planner_model or args.model
@@ -214,7 +294,7 @@ def setup_providers(args) -> tuple[object, object]:
     if not planner_p_name:
         raise ValueError("Provider not specified. Check config.yaml or use --provider CLI arg.")
 
-    if backend_kind == "civ6-mcp":
+    if backend_kind is BackendKind.CIV6_MCP:
         planner = create_provider(provider_name=planner_p_name, model=planner_model)
         logger.info(f"civ6-mcp backend: planner-only provider ({planner.get_provider_name()} / {planner.model})")
         return planner, planner
@@ -375,6 +455,9 @@ def _main(argv: list[str] | None, console_log_silencer: _ConsoleLogSilencer):
             trajectory_session.close()
             trajectory_session = None
 
+    backend_kind = parse_backend_kind(getattr(args, "backend", None))
+    is_civ6_mcp_backend = backend_kind is BackendKind.CIV6_MCP
+
     # 2. Setup Components
     try:
         router_provider, planner_provider = setup_providers(args)
@@ -403,13 +486,18 @@ def _main(argv: list[str] | None, console_log_silencer: _ConsoleLogSilencer):
         close_trajectory_session()
         return
 
-    # 2b. Image Pipeline Configs
-    from civStation.utils.image_pipeline import config_from_args as img_config_from_args
+    # 2b. Image Pipeline Configs (VLM/computer-use backend only)
+    router_img_config = None
+    planner_img_config = None
+    context_img_config = None
+    turn_detector_img_config = None
+    if not is_civ6_mcp_backend:
+        from civStation.utils.image_pipeline import config_from_args as img_config_from_args
 
-    router_img_config = img_config_from_args(args, "router")
-    planner_img_config = img_config_from_args(args, "planner")
-    context_img_config = img_config_from_args(args, "context")
-    turn_detector_img_config = img_config_from_args(args, "turn_detector")
+        router_img_config = img_config_from_args(args, "router")
+        planner_img_config = img_config_from_args(args, "planner")
+        context_img_config = img_config_from_args(args, "context")
+        turn_detector_img_config = img_config_from_args(args, "turn_detector")
 
     # 3. Command Queue + Queue Listener (Phase 1)
     command_queue = CommandQueue()
@@ -423,24 +511,26 @@ def _main(argv: list[str] | None, console_log_silencer: _ConsoleLogSilencer):
 
     # 4. Macro-Turn Manager (Phase 2)
     macro_turn_manager = None
-    try:
-        from civStation.agent.modules.context.macro_turn_manager import MacroTurnManager
+    if not is_civ6_mcp_backend:
+        try:
+            from civStation.agent.modules.context.macro_turn_manager import MacroTurnManager
 
-        macro_turn_manager = MacroTurnManager(ctx, planner_provider)
-        logger.info("MacroTurnManager initialized")
-    except Exception as e:
-        logger.warning(f"MacroTurnManager init failed: {e}")
+            macro_turn_manager = MacroTurnManager(ctx, planner_provider)
+            logger.info("MacroTurnManager initialized")
+        except Exception as e:
+            logger.warning(f"MacroTurnManager init failed: {e}")
 
     # 4b. Context Updater (background game-state analysis)
     context_updater = None
-    try:
-        from civStation.agent.modules.context.context_updater import ContextUpdater
+    if not is_civ6_mcp_backend:
+        try:
+            from civStation.agent.modules.context.context_updater import ContextUpdater
 
-        context_updater = ContextUpdater(ctx, router_provider, img_config=context_img_config)
-        context_updater.start()
-        logger.info("ContextUpdater background worker started")
-    except Exception as e:
-        logger.warning(f"ContextUpdater init failed: {e}")
+            context_updater = ContextUpdater(ctx, router_provider, img_config=context_img_config)
+            context_updater.start()
+            logger.info("ContextUpdater background worker started")
+        except Exception as e:
+            logger.warning(f"ContextUpdater init failed: {e}")
 
     # 4d. Turn Detector (background turn-number detection)
     # Calibration is lazy — happens automatically on first submit()
@@ -448,7 +538,7 @@ def _main(argv: list[str] | None, console_log_silencer: _ConsoleLogSilencer):
     turn_detector = None
     td_provider_name = getattr(args, "turn_detector_provider", None) or args.router_provider or args.provider
     td_model = getattr(args, "turn_detector_model", None) or args.router_model or args.model
-    if td_provider_name:
+    if td_provider_name and not is_civ6_mcp_backend:
         try:
             from civStation.agent.modules.context.turn_detector import TurnDetector
 
@@ -648,48 +738,45 @@ def _main(argv: list[str] | None, console_log_silencer: _ConsoleLogSilencer):
     rl = RichLogger.get()
     rl.start_live()
 
-    backend_kind = getattr(args, "backend", None) or "vlm"
-
     civ6_mcp_client = None
-    logger.info(f"Starting execution for {args.turns} turn(s) (backend={backend_kind})...")
+    logger.info(f"Starting execution for {args.turns} turn(s) (backend={backend_kind.value})...")
     try:
-        if backend_kind == "civ6-mcp":
+        _guard_backend_runtime_state(
+            backend_kind,
+            macro_turn_manager=macro_turn_manager,
+            context_updater=context_updater,
+            turn_detector=turn_detector,
+            router_img_config=router_img_config,
+            planner_img_config=planner_img_config,
+            context_img_config=context_img_config,
+            turn_detector_img_config=turn_detector_img_config,
+            civ6_mcp_client=civ6_mcp_client,
+        )
+        if backend_kind is BackendKind.CIV6_MCP:
             from civStation.agent.modules.backend.civ6_mcp.turn_loop import (
+                Civ6McpError,
                 Civ6McpUnavailableError,
-                build_civ6_mcp_client,
-                run_multi_turn_civ6_mcp,
-                run_one_turn_civ6_mcp,
+                run_civ6_mcp_turn_loop,
             )
 
             try:
-                civ6_mcp_client = build_civ6_mcp_client(
+                run_civ6_mcp_turn_loop(
+                    num_turns=args.turns,
                     install_path=getattr(args, "civ6_mcp_path", None),
                     launcher=getattr(args, "civ6_mcp_launcher", None),
+                    planner_provider=planner_provider,
+                    context_manager=ctx,
+                    strategy_planner=strategy_planner,
+                    strategy_updater=strategy_updater,
+                    high_level_strategy=args.strategy,
+                    delay_between_turns=args.delay_turn,
+                    command_queue=command_queue,
+                    agent_gate=agent_gate,
+                    state_bridge=state_bridge,
                 )
-            except Civ6McpUnavailableError as exc:
+            except (Civ6McpUnavailableError, Civ6McpError) as exc:
                 logger.error("civ6-mcp backend unavailable: %s", exc)
                 return
-
-            mcp_kwargs = {
-                "civ6_mcp_client": civ6_mcp_client,
-                "planner_provider": planner_provider,
-                "context_manager": ctx,
-                "strategy_planner": strategy_planner,
-                "strategy_updater": strategy_updater,
-                "high_level_strategy": args.strategy,
-                "command_queue": command_queue,
-                "agent_gate": agent_gate,
-                "state_bridge": state_bridge,
-            }
-
-            if args.turns == 1:
-                run_one_turn_civ6_mcp(**mcp_kwargs, turn_index=0)
-            else:
-                run_multi_turn_civ6_mcp(
-                    num_turns=args.turns,
-                    delay_between_turns=args.delay_turn,
-                    **mcp_kwargs,
-                )
         else:
             runner_kwargs = {
                 "router_provider": router_provider,

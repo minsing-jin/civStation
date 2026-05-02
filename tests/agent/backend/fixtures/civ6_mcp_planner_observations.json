@@ -1,0 +1,65 @@
+{
+  "representative_science_blockers": {
+    "strategy": "Pursue a science victory with early campus investment.",
+    "raw_state": {
+      "get_game_overview": "Game Overview\nTurn 88\nEra: Medieval Era\nCivilization: Korea (Seondeok)\nScience: +93.25 / turn\nCulture: +41.5 / turn\nGold: +104 / turn\nFaith: +7.5 / turn\nResearch: EDUCATION (3 turns)\nCivic: FEUDALISM (2 turns)",
+      "get_units": "Units:\n- Archer needs orders\n- Builder can move",
+      "get_cities": "Cities:\n- Seoul: Choose production",
+      "get_notifications": "Notifications:\n- Choose production\n- Unit needs orders",
+      "get_pending_diplomacy": "Pending diplomacy:\n- Caesar demands tribute",
+      "get_pending_trades": "Pending trades:\n- Cleopatra offers open borders"
+    },
+    "expected_action_tools": [
+      "get_pending_diplomacy",
+      "get_pending_trades",
+      "get_city_production",
+      "get_units",
+      "get_district_advisor",
+      "get_victory_progress",
+      "end_turn"
+    ]
+  },
+  "edge_blank_research_policy_promotion": {
+    "strategy": "Stabilize the opening while keeping flexible policies.",
+    "raw_state": {
+      "get_game_overview": "Game Overview\nTurn 16\nEra: Ancient Era\nCivilization: Korea (Seondeok)\nScience: +12 / turn\nCulture: +5 / turn\nGold: +3 / turn\nFaith: +0 / turn\nResearch:\nCivic:",
+      "get_notifications": "Notifications:\n- Choose research\n- Government policy slot available\n- Promote unit"
+    },
+    "expected_action_tools": [
+      "get_tech_civics",
+      "get_unit_promotions",
+      "get_policies",
+      "end_turn"
+    ]
+  },
+  "edge_diagnostics_retry_missing_overview": {
+    "strategy": "Pursue culture victory while recovering incomplete observations.",
+    "raw_state": {
+      "get_notifications": "Notifications:\n- No active notifications",
+      "missing_tools": [
+        "get_victory_progress"
+      ],
+      "failed_tools": {
+        "get_diplomacy": "timeout"
+      },
+      "malformed_tools": {
+        "get_pending_trades": "empty response body"
+      }
+    },
+    "expected_action_tools": [
+      "get_game_overview",
+      "get_victory_progress",
+      "get_diplomacy",
+      "get_pending_trades",
+      "end_turn"
+    ]
+  },
+  "edge_game_over": {
+    "strategy": "Any strategy should be ignored after terminal state.",
+    "raw_state": {
+      "get_game_overview": "*** GAME OVER - VICTORY! Science victory achieved at turn 240 ***",
+      "get_notifications": "Notifications:\n- Choose production"
+    },
+    "expected_action_tools": []
+  }
+}

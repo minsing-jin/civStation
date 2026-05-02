@@ -21,9 +21,16 @@ import os
 import shutil
 import threading
 from concurrent.futures import Future
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
+
+from civStation.agent.modules.backend.civ6_mcp.response import (
+    Civ6McpNormalizedResult,
+    normalize_mcp_response_timeout,
+    normalize_mcp_tool_result,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +41,56 @@ class Civ6McpError(RuntimeError):
 
 class Civ6McpUnavailableError(Civ6McpError):
     """Raised when the civ6-mcp install or `uv`/`python` runtime is missing."""
+
+
+@dataclass(frozen=True)
+class Civ6McpHealth:
+    """Snapshot of the stdio MCP connection health."""
+
+    ok: bool
+    started: bool
+    initialized: bool
+    tool_count: int
+    missing_required_tools: frozenset[str] = field(default_factory=frozenset)
+    message: str = ""
+
+
+DEFAULT_HEALTH_REQUIRED_TOOLS = frozenset({"get_game_overview", "end_turn"})
+SUPPORTED_LAUNCHERS = frozenset({"uv", "python"})
+
+
+@runtime_checkable
+class Civ6McpClientProtocol(Protocol):
+    """Public client surface consumed by civ6-mcp backend components."""
+
+    @property
+    def tool_names(self) -> set[str]:
+        """Names of tools exposed by the connected civ6-mcp server."""
+        ...
+
+    def has_tool(self, name: str) -> bool:
+        """Return whether the connected civ6-mcp server exposes ``name``."""
+        ...
+
+    def tool_schemas(self) -> dict[str, dict[str, Any]]:
+        """Return MCP tool metadata keyed by tool name."""
+        ...
+
+    def health_check(self, required_tools: set[str] | frozenset[str] | None = None) -> Civ6McpHealth:
+        """Return current MCP connection health after probing the session."""
+        ...
+
+    def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> str:
+        """Invoke a civ6-mcp tool and return its textual response."""
+        ...
+
+    def call_tool_result(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+    ) -> Civ6McpNormalizedResult:
+        """Invoke a civ6-mcp tool and return a normalized typed response."""
+        ...
 
 
 @dataclass
@@ -58,6 +115,49 @@ class Civ6McpConfig:
     startup_timeout_seconds: float = 30.0
     call_timeout_seconds: float = 120.0
     """`end_turn` can run 30–90s during late-game AI processing — set generous."""
+
+    def _required_config_value(self, field_name: str) -> Any:
+        value = getattr(self, field_name)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            if field_name == "install_path":
+                raise Civ6McpUnavailableError(
+                    "civ6-mcp config missing required field: install_path. "
+                    "Set --civ6-mcp-path or the CIV6_MCP_PATH env var to a local "
+                    "github.com/lmwilki/civ6-mcp checkout."
+                )
+            if field_name == "launcher":
+                raise Civ6McpUnavailableError(
+                    "civ6-mcp config missing required field: launcher. "
+                    "Set --civ6-mcp-launcher or the CIV6_MCP_LAUNCHER env var to either 'uv' or 'python'."
+                )
+            raise Civ6McpUnavailableError(f"civ6-mcp config missing required field: {field_name}")
+        return value
+
+    def _resolved_install_path(self) -> Path:
+        raw_path = self._required_config_value("install_path")
+        try:
+            return Path(raw_path).expanduser().resolve()
+        except TypeError as exc:
+            raise Civ6McpUnavailableError(
+                f"civ6-mcp config field install_path must be a path-like value, got {type(raw_path).__name__}. "
+                "Pass --civ6-mcp-path or set CIV6_MCP_PATH to your civ6-mcp checkout."
+            ) from exc
+
+    def _unsupported_launcher_error(self, launcher: str) -> Civ6McpUnavailableError:
+        supported = ", ".join(sorted(SUPPORTED_LAUNCHERS))
+        return Civ6McpUnavailableError(
+            f"Unsupported launcher for civ6-mcp: {launcher!r}. "
+            f"Supported launchers: {supported}. "
+            "Set --civ6-mcp-launcher or CIV6_MCP_LAUNCHER to one of those values."
+        )
+
+    def _validate_launcher_type(self, launcher: Any) -> str:
+        if not isinstance(launcher, str):
+            raise Civ6McpUnavailableError(
+                f"civ6-mcp config field launcher must be a string, got {type(launcher).__name__}. "
+                "Use --civ6-mcp-launcher uv|python or set CIV6_MCP_LAUNCHER."
+            )
+        return launcher
 
     @classmethod
     def from_environment(
@@ -102,19 +202,24 @@ class Civ6McpConfig:
 
     def validate(self) -> None:
         """Check the install path looks usable; raise Civ6McpUnavailableError otherwise."""
-        if not self.install_path.is_dir():
+        install_path = self._resolved_install_path()
+        launcher = self._required_config_value("launcher")
+        launcher = self._validate_launcher_type(launcher)
+        if launcher not in SUPPORTED_LAUNCHERS:
+            raise self._unsupported_launcher_error(launcher)
+        if not install_path.is_dir():
             raise Civ6McpUnavailableError(
-                f"civ6-mcp install path does not exist: {self.install_path}. "
+                f"civ6-mcp install path does not exist: {install_path}. "
                 "Set --civ6-mcp-path or the CIV6_MCP_PATH env var to your "
                 "civ6-mcp checkout."
             )
-        pyproject = self.install_path / "pyproject.toml"
+        pyproject = install_path / "pyproject.toml"
         if not pyproject.is_file():
             raise Civ6McpUnavailableError(
-                f"civ6-mcp install path missing pyproject.toml: {self.install_path}. "
+                f"civ6-mcp install path missing pyproject.toml: {install_path}. "
                 "Did you `git clone https://github.com/lmwilki/civ6-mcp` and `uv sync` there?"
             )
-        if self.launcher == "uv" and shutil.which("uv") is None:
+        if launcher == "uv" and shutil.which("uv") is None:
             raise Civ6McpUnavailableError(
                 "Selected launcher is `uv` but the `uv` binary is not on PATH. "
                 "Install astral-sh/uv or pass --civ6-mcp-launcher python."
@@ -122,23 +227,26 @@ class Civ6McpConfig:
 
     def server_command(self) -> list[str]:
         """Build the argv used to launch the civ6-mcp stdio server."""
-        if self.launcher == "uv":
+        launcher = self._required_config_value("launcher")
+        launcher = self._validate_launcher_type(launcher)
+        install_path = self._resolved_install_path()
+        if launcher == "uv":
             return [
                 "uv",
                 "run",
                 "--directory",
-                str(self.install_path),
+                str(install_path),
                 "civ-mcp",
                 *self.extra_args,
             ]
-        if self.launcher == "python":
+        if launcher == "python":
             return [
                 "python",
                 "-m",
                 "civ_mcp",
                 *self.extra_args,
             ]
-        raise Civ6McpUnavailableError(f"Unsupported launcher: {self.launcher!r}")
+        raise self._unsupported_launcher_error(launcher)
 
 
 class Civ6McpClient:
@@ -231,6 +339,33 @@ class Civ6McpClient:
     def tool_schemas(self) -> dict[str, dict[str, Any]]:
         return dict(self._tool_schemas)
 
+    def health_check(self, required_tools: set[str] | frozenset[str] | None = None) -> Civ6McpHealth:
+        """Probe the MCP session and refresh the known tool catalog.
+
+        The check is intentionally explicit. VLM callers never reach this
+        method, and civ6-mcp startup failures remain civ6-mcp failures rather
+        than falling back to computer-use.
+        """
+        required = frozenset(required_tools) if required_tools is not None else DEFAULT_HEALTH_REQUIRED_TOOLS
+        if not self._started or self._session is None:
+            missing = required.difference(self._tool_names)
+            return Civ6McpHealth(
+                ok=False,
+                started=self._started,
+                initialized=self._session is not None,
+                tool_count=len(self._tool_names),
+                missing_required_tools=missing,
+                message="civ6-mcp client is not started or the MCP session is not initialized.",
+            )
+
+        future = self._submit(self._async_health_check(required))
+        try:
+            return future.result(timeout=self.config.startup_timeout_seconds)
+        except FutureTimeoutError as exc:
+            raise Civ6McpError(f"civ6-mcp health check timed out after {self.config.startup_timeout_seconds}s") from exc
+        except Exception as exc:
+            raise Civ6McpError(f"civ6-mcp health check failed: {exc}") from exc
+
     def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> str:
         """Invoke a server tool and return the textual result.
 
@@ -239,13 +374,37 @@ class Civ6McpClient:
         JSON-RPC `isError: true`. Both are surfaced; callers should pattern-
         match the prefixes documented in civ6-mcp/AGENTS.md.
         """
+        result = self.call_tool_result(name, arguments)
+        if result.timed_out:
+            raise Civ6McpError(result.error)
+        if result.is_error:
+            raise Civ6McpError(f"civ6-mcp tool '{name}' returned isError: {result.error or '<empty>'}")
+        return result.text
+
+    def call_tool_result(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+    ) -> Civ6McpNormalizedResult:
+        """Invoke a server tool and return a typed normalized result."""
         if not self._started:
             raise Civ6McpError("Civ6McpClient.start() must be called before call_tool().")
-        future = self._submit(self._async_call_tool(name, arguments or {}))
+        request_arguments = arguments or {}
+        future = self._submit(self._async_call_tool(name, request_arguments))
         try:
             return future.result(timeout=self.config.call_timeout_seconds)
-        except TimeoutError as exc:
-            raise Civ6McpError(f"civ6-mcp tool '{name}' timed out after {self.config.call_timeout_seconds}s") from exc
+        except FutureTimeoutError:
+            future.cancel()
+            logger.warning(
+                "civ6-mcp tool timed out: tool=%s timeout=%ss",
+                name,
+                self.config.call_timeout_seconds,
+            )
+            return normalize_mcp_response_timeout(
+                name,
+                request_arguments,
+                timeout_seconds=self.config.call_timeout_seconds,
+            )
 
     # ----- internal asyncio plumbing --------------------------------
 
@@ -288,31 +447,46 @@ class Civ6McpClient:
 
         env: dict[str, str] = {**os.environ}
         env.update(self.config.env_overrides)
+        server_command = self.config.server_command()
 
         params = StdioServerParameters(
-            command=self.config.server_command()[0],
-            args=self.config.server_command()[1:],
+            command=server_command[0],
+            args=server_command[1:],
             env=env,
         )
 
-        self._stdio_ctx = stdio_client(params)
-        read_stream, write_stream = await self._stdio_ctx.__aenter__()
-
-        # Some mcp SDK versions accept client_info; fall back gracefully if not.
         try:
-            from mcp.types import Implementation  # type: ignore
+            self._stdio_ctx = stdio_client(params)
+            read_stream, write_stream = await self._stdio_ctx.__aenter__()
 
-            client_info = Implementation(
-                name=self.config.client_name,
-                version=self.config.client_version,
-            )
-            self._session_ctx = ClientSession(read_stream, write_stream, client_info=client_info)
-        except Exception:  # noqa: BLE001
-            self._session_ctx = ClientSession(read_stream, write_stream)
+            # Some mcp SDK versions accept client_info; fall back gracefully if not.
+            try:
+                from mcp.types import Implementation  # type: ignore
 
-        self._session = await self._session_ctx.__aenter__()
-        await self._session.initialize()
+                client_info = Implementation(
+                    name=self.config.client_name,
+                    version=self.config.client_version,
+                )
+                self._session_ctx = ClientSession(read_stream, write_stream, client_info=client_info)
+            except Exception:  # noqa: BLE001
+                self._session_ctx = ClientSession(read_stream, write_stream)
 
+            self._session = await self._session_ctx.__aenter__()
+            await self._session.initialize()
+            await self._refresh_tool_catalog()
+        except Exception:
+            try:
+                await self._async_stop()
+            except Exception as stop_exc:  # noqa: BLE001
+                logger.debug("civ6-mcp cleanup after failed start encountered: %s", stop_exc)
+            self._session = None
+            self._session_ctx = None
+            self._stdio_ctx = None
+            raise
+
+    async def _refresh_tool_catalog(self) -> None:
+        if self._session is None:
+            raise Civ6McpError("MCP session not initialized.")
         tools_response = await self._session.list_tools()
         self._tool_names = set()
         self._tool_schemas = {}
@@ -330,6 +504,35 @@ class Civ6McpClient:
                 "input_schema": schema or {},
             }
 
+    async def _async_health_check(self, required_tools: frozenset[str]) -> Civ6McpHealth:
+        if self._session is None:
+            missing = required_tools.difference(self._tool_names)
+            return Civ6McpHealth(
+                ok=False,
+                started=self._started,
+                initialized=False,
+                tool_count=len(self._tool_names),
+                missing_required_tools=missing,
+                message="MCP session not initialized.",
+            )
+
+        ping = getattr(self._session, "ping", None)
+        if callable(ping):
+            await ping()
+        await self._refresh_tool_catalog()
+
+        missing = required_tools.difference(self._tool_names)
+        ok = not missing
+        message = "healthy" if ok else f"Missing required civ6-mcp tools: {sorted(missing)}"
+        return Civ6McpHealth(
+            ok=ok,
+            started=self._started,
+            initialized=True,
+            tool_count=len(self._tool_names),
+            missing_required_tools=missing,
+            message=message,
+        )
+
     async def _async_stop(self) -> None:
         try:
             if self._session_ctx is not None:
@@ -338,23 +541,21 @@ class Civ6McpClient:
             if self._stdio_ctx is not None:
                 await self._stdio_ctx.__aexit__(None, None, None)
 
-    async def _async_call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+    async def _async_call_tool(self, name: str, arguments: dict[str, Any]) -> Civ6McpNormalizedResult:
         if self._session is None:
             raise Civ6McpError("MCP session not initialized.")
         if name not in self._tool_names:
             raise Civ6McpError(f"Unknown civ6-mcp tool '{name}'. Available: {sorted(self._tool_names)[:8]}...")
         result = await self._session.call_tool(name, arguments)
+        return normalize_mcp_tool_result(name, arguments, result)
 
-        is_error = getattr(result, "isError", False)
-        text_parts: list[str] = []
-        for block in getattr(result, "content", []) or []:
-            text = getattr(block, "text", None)
-            if isinstance(text, str):
-                text_parts.append(text)
-            elif isinstance(block, dict) and "text" in block:
-                text_parts.append(str(block["text"]))
-        body = "\n".join(text_parts).strip()
 
-        if is_error:
-            raise Civ6McpError(f"civ6-mcp tool '{name}' returned isError: {body or '<empty>'}")
-        return body
+__all__ = [
+    "Civ6McpClient",
+    "Civ6McpClientProtocol",
+    "Civ6McpConfig",
+    "Civ6McpError",
+    "Civ6McpHealth",
+    "Civ6McpNormalizedResult",
+    "Civ6McpUnavailableError",
+]

@@ -12,12 +12,9 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
 
-from civStation.agent.modules.backend.civ6_mcp.executor import (
-    ToolCall,
-    coerce_tool_calls,
-)
+from civStation.agent.modules.backend.civ6_mcp.executor import coerce_tool_calls
+from civStation.agent.modules.backend.civ6_mcp.planner_types import Civ6McpPlannerProvider, PlannerResult
 from civStation.agent.modules.backend.civ6_mcp.prompts import (
     build_planner_system_prompt,
     build_planner_user_prompt,
@@ -96,13 +93,6 @@ _DEFAULT_PLANNER_TOOL_ALLOWLIST: tuple[str, ...] = (
 )
 
 
-@dataclass
-class PlannerResult:
-    tool_calls: list[ToolCall]
-    raw_response: str = ""
-    parsed_payload: dict | None = None
-
-
 class Civ6McpToolPlanner:
     """Asks an LLM to produce a tool-call plan for one turn.
 
@@ -113,7 +103,7 @@ class Civ6McpToolPlanner:
 
     def __init__(
         self,
-        provider,
+        provider: Civ6McpPlannerProvider,
         *,
         tool_catalog: dict[str, dict],
         allowed_tools: tuple[str, ...] | None = None,
@@ -208,3 +198,9 @@ class Civ6McpToolPlanner:
                 )
 
         raise RuntimeError(f"civ6-mcp planner exhausted retries: {last_error}")
+
+
+__all__ = [
+    "Civ6McpToolPlanner",
+    "PlannerResult",
+]

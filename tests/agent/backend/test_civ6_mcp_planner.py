@@ -106,6 +106,45 @@ def test_planner_happy_path() -> None:
     assert "Pursue science victory" in provider.captured_prompts[0]
 
 
+@pytest.mark.parametrize(
+    ("payload", "expected_tools"),
+    [
+        (_valid_plan_payload(), ["get_game_overview", "set_research", "end_turn"]),
+        (_valid_plan_payload()["tool_calls"], ["get_game_overview", "set_research", "end_turn"]),
+        (
+            {
+                "tool_calls": [
+                    {"name": "get_game_overview", "arguments": None, "reasoning": "scan"},
+                    {
+                        "tool": "end_turn",
+                        "arguments": {
+                            "tactical": "Observed only.",
+                            "strategic": "Hold position.",
+                            "tooling": "Planner used name alias.",
+                            "planning": "Reassess next turn.",
+                            "hypothesis": "No action needed.",
+                        },
+                    },
+                ]
+            },
+            ["get_game_overview", "end_turn"],
+        ),
+    ],
+)
+def test_planner_accepts_supported_json_output_shapes(payload: object, expected_tools: list[str]) -> None:
+    provider = FakeProvider([json.dumps(payload)])
+    planner = Civ6McpToolPlanner(
+        provider=provider,
+        tool_catalog=_TOOL_CATALOG,
+        allowed_tools=("get_game_overview", "set_research", "end_turn"),
+    )
+
+    result = planner.plan(strategy="x", state_context="y", recent_calls="z")
+
+    assert [call.tool for call in result.tool_calls] == expected_tools
+    assert result.raw_response == json.dumps(payload)
+
+
 def test_planner_renders_tool_catalog_with_required_marker() -> None:
     provider = FakeProvider([json.dumps(_valid_plan_payload())])
     planner = Civ6McpToolPlanner(
@@ -128,6 +167,46 @@ def test_planner_retries_on_invalid_json_then_succeeds() -> None:
     planner = Civ6McpToolPlanner(provider=provider, tool_catalog=_TOOL_CATALOG, max_retries=2)
     result = planner.plan(strategy="x", state_context="y", recent_calls="z")
     assert len(result.tool_calls) == 3
+
+
+@pytest.mark.parametrize(
+    ("payload", "error_match"),
+    [
+        ({"tool_calls": {"tool": "get_game_overview"}}, "tool_calls.*list"),
+        ({"tool_calls": ["get_game_overview"]}, "Tool call entry must be an object"),
+        ({"tool_calls": [{"arguments": {}}]}, "missing 'tool' name"),
+        ({"tool_calls": [{"tool": "not_real", "arguments": {}}]}, "Unsupported civ6-mcp tool"),
+        ({"tool_calls": [{"tool": "get_game_overview", "arguments": ["bad"]}]}, "arguments must be an object"),
+        (
+            {
+                "tool_calls": [
+                    {
+                        "tool": "end_turn",
+                        "arguments": {
+                            "tactical": "Queued research.",
+                            "strategic": "",
+                            "tooling": "Tools succeeded.",
+                            "planning": "Check cities next.",
+                            "hypothesis": "Writing unlocks libraries.",
+                        },
+                    }
+                ]
+            },
+            "end_turn requires non-empty reflection fields",
+        ),
+    ],
+)
+def test_planner_retries_malformed_json_payloads_then_reports_schema_error(
+    payload: object,
+    error_match: str,
+) -> None:
+    provider = FakeProvider([json.dumps(payload)])
+    planner = Civ6McpToolPlanner(provider=provider, tool_catalog=_TOOL_CATALOG, max_retries=0)
+
+    with pytest.raises(RuntimeError, match=error_match):
+        planner.plan(strategy="x", state_context="y", recent_calls="z")
+
+    assert len(provider.captured_prompts) == 1
 
 
 def test_planner_raises_after_exhausting_retries() -> None:

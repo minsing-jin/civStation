@@ -99,14 +99,72 @@ def _detect_game_window() -> tuple[int, int, int, int] | None:
     return None
 
 
+def _capture_primary_display_pil() -> tuple[Image.Image, int, int, int, int] | None:
+    """Capture the primary display only on macOS.
+
+    Returns:
+        Tuple of (pil_image, logical_width, logical_height, x_offset, y_offset)
+        or None when the primary-display capture path is unavailable.
+    """
+    try:
+        import mss
+        import Quartz
+    except ImportError:
+        return None
+
+    try:
+        display_id = Quartz.CGMainDisplayID()
+        bounds = Quartz.CGDisplayBounds(display_id)
+        logical_x = int(bounds.origin.x)
+        logical_y = int(bounds.origin.y)
+        logical_w = int(bounds.size.width)
+        logical_h = int(bounds.size.height)
+    except Exception as exc:  # pragma: no cover - depends on macOS Quartz runtime
+        logger.debug("Primary display bounds unavailable: %s", exc)
+        return None
+
+    try:
+        with mss.mss() as sct:
+            if len(sct.monitors) < 2:
+                return None
+            raw = sct.grab(sct.monitors[1])
+    except Exception as exc:  # pragma: no cover - depends on desktop capture runtime
+        logger.debug("Primary display capture unavailable: %s", exc)
+        return None
+
+    image = Image.frombytes("RGB", raw.size, raw.rgb)
+    return image, logical_w, logical_h, logical_x, logical_y
+
+
+def _region_contains_window(
+    region_x: int,
+    region_y: int,
+    region_w: int,
+    region_h: int,
+    window_x: int,
+    window_y: int,
+    window_w: int,
+    window_h: int,
+) -> bool:
+    """Whether a detected window sits fully inside the captured region."""
+    return (
+        window_x >= region_x
+        and window_y >= region_y
+        and window_x + window_w <= region_x + region_w
+        and window_y + window_h <= region_y + region_h
+    )
+
+
 def capture_screen_pil(crop_to_game: bool = True):
     """
-    Capture current screen as PIL image, optionally cropped to the game window.
+    Capture the current gameplay surface as PIL image.
 
-    When crop_to_game is True and the game window is detected, the screenshot
-    is cropped to just the game area. Normalized coordinates from the VLM
-    will then map to the game window, and execute_action() uses the returned
-    offsets to convert back to absolute screen coordinates.
+    On macOS, the capture path prefers the primary display only so live gameplay
+    stays pinned to the main monitor. When crop_to_game is True and the game
+    window is detected inside the captured region, the screenshot is cropped to
+    just the game area. Normalized coordinates from the VLM then map to the
+    game window, and execute_action() uses the returned offsets to convert back
+    to absolute screen coordinates.
 
     Returns:
         Tuple of (pil_image, region_w, region_h, x_offset, y_offset)
@@ -116,31 +174,48 @@ def capture_screen_pil(crop_to_game: bool = True):
         - x_offset: Logical X offset of the region on screen
         - y_offset: Logical Y offset of the region on screen
     """
-    # PyAutoGUI size returns logical resolution (not physical/retina)
-    screen_w, screen_h = pyautogui.size()
-
-    # Capture screenshot (returns PIL Image)
-    screenshot = pyautogui.screenshot()
-
-    x_offset, y_offset = 0, 0
-    region_w, region_h = screen_w, screen_h
+    primary_capture = _capture_primary_display_pil()
+    if primary_capture is None:
+        # PyAutoGUI size returns logical resolution (not physical/retina)
+        screen_w, screen_h = pyautogui.size()
+        screenshot = pyautogui.screenshot()
+        x_offset, y_offset = 0, 0
+        region_w, region_h = screen_w, screen_h
+    else:
+        screenshot, region_w, region_h, x_offset, y_offset = primary_capture
 
     if crop_to_game:
         bounds = _detect_game_window()
         if bounds:
             gx, gy, gw, gh = bounds
-            # Retina scale factor: screenshot pixels vs logical pixels
-            scale = screenshot.size[0] / screen_w
-            crop_box = (
-                int(gx * scale),
-                int(gy * scale),
-                int((gx + gw) * scale),
-                int((gy + gh) * scale),
-            )
-            screenshot = screenshot.crop(crop_box)
-            x_offset, y_offset = gx, gy
-            region_w, region_h = gw, gh
-            logger.debug(f"Cropped to game window: {gw}x{gh} at ({gx},{gy})")
+            if _region_contains_window(x_offset, y_offset, region_w, region_h, gx, gy, gw, gh):
+                local_x = gx - x_offset
+                local_y = gy - y_offset
+                scale_x = screenshot.size[0] / region_w
+                scale_y = screenshot.size[1] / region_h
+                crop_box = (
+                    int(local_x * scale_x),
+                    int(local_y * scale_y),
+                    int((local_x + gw) * scale_x),
+                    int((local_y + gh) * scale_y),
+                )
+                screenshot = screenshot.crop(crop_box)
+                x_offset, y_offset = gx, gy
+                region_w, region_h = gw, gh
+                logger.debug(f"Cropped to game window: {gw}x{gh} at ({gx},{gy})")
+            else:
+                logger.debug(
+                    "Detected game window outside captured region; keeping region capture "
+                    "(region=%sx%s@%s,%s window=%sx%s@%s,%s)",
+                    region_w,
+                    region_h,
+                    x_offset,
+                    y_offset,
+                    gw,
+                    gh,
+                    gx,
+                    gy,
+                )
 
     try:
         record_screenshot_trajectory(screenshot, label="capture")
