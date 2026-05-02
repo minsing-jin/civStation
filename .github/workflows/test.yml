@@ -12,6 +12,7 @@ permissions:
 jobs:
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
     - uses: actions/checkout@v4
     - uses: actions/setup-python@v5
@@ -33,7 +34,9 @@ jobs:
 
   test:
     needs: lint
+    timeout-minutes: 15
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest]
         python-version: ['3.12', '3.13']
@@ -60,4 +63,8 @@ jobs:
         uv pip install --system ".[test]"
 
     - name: Run tests
-      run: pytest
+      env:
+        # Disable pytest-rerunfailures' localhost socket setup if the plugin
+        # ever shows up via transitive deps — it hangs in restricted sandboxes.
+        PYTEST_DISABLE_PLUGIN_AUTOLOAD: "0"
+      run: pytest --timeout=30 --timeout-method=thread -p no:rerunfailures

@@ -69,6 +69,8 @@ docs = [
 test = [
     "coverage", # testing
     "pytest", # testing
+    "pytest-asyncio", # async test support (some HITL tests use it)
+    "pytest-timeout", # per-test hang protection in CI
     "ruff", # linting
     "ty", # checking types
     "ipdb", # debugging
@@ -92,7 +94,13 @@ civStation_mcp_install = "civStation.mcp.install_client_assets:main"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-addopts = "-v --strict-markers"
+# tests/rough_test holds integration scripts that load PaddleOCR / pyautogui at
+# module import; they hang on headless CI. Skip them by default — run manually
+# with `pytest tests/rough_test --override-ini=norecursedirs=`.
+norecursedirs = ["rough_test", ".venv", "build", "dist"]
+# Cap individual tests at 30s so a hung socket / network call surfaces fast
+# instead of riding the 6h GitHub Actions ceiling.
+addopts = "-v --strict-markers --timeout=30 --timeout-method=thread"
 markers = [
     "integration: marks tests requiring full environment (deselect with '-m \"not integration\"')",
 ]
