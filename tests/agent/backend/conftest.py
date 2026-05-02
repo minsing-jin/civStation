@@ -55,3 +55,10 @@ def civ6_mcp_planner_observation_cases() -> dict[str, dict[str, object]]:
     """Representative planner observation cases shared by civ6-mcp tests."""
     fixture_path = Path(__file__).with_name("fixtures") / "civ6_mcp_planner_observations.json"
     return json.loads(fixture_path.read_text(encoding="utf-8"))
+
+
+@pytest.fixture(scope="session")
+def civ6_mcp_parser_regression_cases() -> dict[str, dict[str, object]]:
+    """Representative parser inputs with expected structured bundle output."""
+    fixture_path = Path(__file__).with_name("fixtures") / "civ6_mcp_parser_regressions.json"
+    return json.loads(fixture_path.read_text(encoding="utf-8"))

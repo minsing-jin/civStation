@@ -1,3 +1,5 @@
+"""Lazy public exports for layered MCP server and civ6-mcp adapters."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -26,6 +28,7 @@ __all__ = sorted(_EXPORT_MODULES)
 
 
 def __getattr__(name: str) -> Any:
+    """Resolve MCP package exports without importing optional backend modules eagerly."""
     module_name = _EXPORT_MODULES.get(name)
     if module_name is None:
         raise AttributeError(name)
@@ -59,4 +62,5 @@ def __getattr__(name: str) -> Any:
 
 
 def __dir__() -> list[str]:
+    """List lazy public MCP exports alongside loaded module globals."""
     return sorted((*globals(), *__all__))

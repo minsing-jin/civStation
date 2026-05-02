@@ -12,6 +12,14 @@ It outputs a JSON list of tool calls to execute this turn, ending with
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
+from civStation.agent.modules.backend.civ6_mcp.operations import (
+    END_TURN_REFLECTION_FIELDS,
+    END_TURN_TOOL,
+)
+from civStation.agent.modules.backend.civ6_mcp.planner_types import DEFAULT_PLANNER_TOOL_ALLOWLIST
+
 PLANNER_SYSTEM_PROMPT_EN = """\
 You are the Civilization VI tool-call planner for the civStation agent.
 
@@ -44,19 +52,7 @@ Available tools (subset; full schema is provided separately):
 Output schema:
 {{
   "tool_calls": [
-    {{"tool": "get_units", "arguments": {{}}, "reasoning": "..."}},
-    {{"tool": "set_research", "arguments": {{"tech_or_civic": "WRITING"}}}},
-    ...
-    {{
-      "tool": "end_turn",
-      "arguments": {{
-        "tactical": "...",
-        "strategic": "...",
-        "tooling": "...",
-        "planning": "...",
-        "hypothesis": "..."
-      }}
-    }}
+{tool_call_examples}
   ]
 }}
 """
@@ -87,6 +83,7 @@ def build_planner_user_prompt(
     recent_calls: str,
     hitl_directive: str,
 ) -> str:
+    """Build the per-turn planner prompt from strategy, state, history, and HITL input."""
     return PLANNER_USER_PROMPT_EN.format(
         strategy=strategy or "(no strategy provided)",
         state_context=state_context or "(no state available)",
@@ -95,5 +92,44 @@ def build_planner_user_prompt(
     )
 
 
-def build_planner_system_prompt(*, tool_catalog: str) -> str:
-    return PLANNER_SYSTEM_PROMPT_EN.format(tool_catalog=tool_catalog or "(no tools loaded)")
+def build_planner_system_prompt(
+    *,
+    tool_catalog: str,
+    allowed_tools: Iterable[str] | None = None,
+) -> str:
+    """Build the planner system prompt with the supplied tool catalog and examples."""
+    planner_tools = tuple(allowed_tools or DEFAULT_PLANNER_TOOL_ALLOWLIST)
+    return PLANNER_SYSTEM_PROMPT_EN.format(
+        tool_catalog=tool_catalog or "(no tools loaded)",
+        tool_call_examples=_render_tool_call_examples(planner_tools),
+    )
+
+
+def _render_tool_call_examples(allowed_tools: Iterable[str] | None) -> str:
+    """Render schema examples from the planner allow-list instead of fixed tool names."""
+    ordered_tools = tuple(dict.fromkeys(tool for tool in allowed_tools or () if isinstance(tool, str) and tool))
+    observation_tool = next((tool for tool in ordered_tools if tool.startswith(("get_", "list_"))), None)
+    action_tool = next(
+        (tool for tool in ordered_tools if tool != END_TURN_TOOL and not tool.startswith(("get_", "list_"))),
+        None,
+    )
+
+    examples: list[str] = []
+    if observation_tool:
+        examples.append(f'    {{"tool": "{observation_tool}", "arguments": {{}}, "reasoning": "..."}},')
+    if action_tool:
+        examples.append(f'    {{"tool": "{action_tool}", "arguments": {{"...": "..."}}}},')
+    if observation_tool or action_tool:
+        examples.append("    ...")
+
+    reflections = "\n".join(f'        "{field}": "...",' for field in END_TURN_REFLECTION_FIELDS)
+    reflections = reflections.rstrip(",")
+    examples.append(
+        f'''    {{
+      "tool": "{END_TURN_TOOL}",
+      "arguments": {{
+{reflections}
+      }}
+    }}'''
+    )
+    return "\n".join(examples)

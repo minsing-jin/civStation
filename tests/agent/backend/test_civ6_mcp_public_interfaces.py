@@ -22,6 +22,7 @@ from civStation.agent.modules.backend.civ6_mcp.observer import (
     Civ6McpObserver,
     build_civ6_mcp_observer,
 )
+from civStation.agent.modules.backend.civ6_mcp.planner import DEFAULT_PLANNER_TOOL_ALLOWLIST
 from civStation.agent.modules.backend.civ6_mcp.response import Civ6McpNormalizedResult, normalize_mcp_response_text
 from civStation.agent.modules.backend.civ6_mcp.turn_loop import run_civ6_mcp_turn_loop
 
@@ -70,6 +71,7 @@ class FakeClient:
 def test_civ6_mcp_package_exports_public_interfaces() -> None:
     expected = {
         "DEFAULT_CIV6_MCP_OBSERVE_TOOLS",
+        "DEFAULT_PLANNER_TOOL_ALLOWLIST",
         "CIV6_MCP_FREE_FORM_ACTION_TYPE_ALIASES",
         "CIV6_MCP_FREE_FORM_ACTION_TYPE_REGISTRY",
         "CIV6_MCP_FREE_FORM_ACTION_TYPE_TO_MCP_TOOL",
@@ -146,6 +148,12 @@ def test_civ6_mcp_package_exports_public_interfaces() -> None:
     assert expected.issubset(set(civ6_mcp.__all__))
     for name in expected:
         assert hasattr(civ6_mcp, name)
+
+
+def test_civ6_mcp_allowlist_public_api_resolves_to_planner_export() -> None:
+    assert "DEFAULT_PLANNER_TOOL_ALLOWLIST" in dir(civ6_mcp)
+    assert civ6_mcp.DEFAULT_PLANNER_TOOL_ALLOWLIST is DEFAULT_PLANNER_TOOL_ALLOWLIST
+    assert civ6_mcp.DEFAULT_PLANNER_TOOL_ALLOWLIST[-1] == "end_turn"
 
 
 def test_civ6_mcp_client_protocol_documents_minimal_surface() -> None:

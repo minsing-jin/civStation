@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 from asyncio import CancelledError as AsyncCancelledError
 from collections.abc import Callable, Mapping
@@ -13,9 +12,15 @@ from enum import Enum
 from re import Pattern
 from typing import Any
 
+from civStation.agent.modules.backend.civ6_mcp._payload import (
+    dump_model,
+    extract_text_blocks,
+    payload_value,
+)
+
 
 class Civ6McpClassificationStatus(str, Enum):
-    """Canonical civ6-mcp outcome statuses used for runtime decisions."""
+    """Canonical status taxonomy for normalized civ6-mcp outcomes."""
 
     SUCCESS = "success"
     BLOCKED = "blocked"
@@ -27,7 +32,7 @@ class Civ6McpClassificationStatus(str, Enum):
 
 
 class Civ6McpResponseClassification(str, Enum):
-    """Legacy normalized response classes preserved for existing callers."""
+    """Backward-compatible response classes exposed to existing callers."""
 
     OK = "ok"
     SOFT_BLOCK = "soft_block"
@@ -45,9 +50,9 @@ _END_TURN_BLOCKED = re.compile(r"^\s*Cannot end turn\b", _LINE_FLAGS)
 _END_TURN_SOFT = re.compile(r"^\s*End turn requested\b.*\bstill\b", _LINE_FLAGS)
 _GAME_OVER = re.compile(r"^\s*(?:\*{3}\s*)?GAME OVER\b", _LINE_FLAGS)
 _RUN_ABORTED = re.compile(r"^\s*RUN ABORTED\b", _LINE_FLAGS)
-_HANG_FAILED = re.compile(r"^\s*HANG RECOVERY FAILED\b", _LINE_FLAGS)
+_HANG_FAILED = re.compile(r"^\s*(?:HANG:|HANG RECOVERY FAILED\b)", _LINE_FLAGS)
 _GENERIC_ERROR = re.compile(
-    r"^\s*(?:Error:|Tool failed:|Traceback\b|(?!(?:[A-Za-z_][\w.]*\.)?TimeoutError:)"
+    r"^\s*(?:Error:|Tool failed:|Traceback\b|(?:ERR:)?NO_ENEMY\b|(?!(?:[A-Za-z_][\w.]*\.)?TimeoutError:)"
     r"[A-Za-z_][\w.]*Error:|[A-Za-z_][\w.]*Exception:)",
     _LINE_FLAGS,
 )
@@ -61,7 +66,7 @@ _SUCCESS_DEFAULT = re.compile(r".*", re.DOTALL)
 
 @dataclass(frozen=True)
 class Civ6McpClassificationRule:
-    """One ordered response-text rule in the civ6-mcp status classifier."""
+    """Ordered text-pattern rule for the canonical civ6-mcp classifier."""
 
     status: Civ6McpClassificationStatus
     pattern: Pattern[str]
@@ -71,7 +76,7 @@ class Civ6McpClassificationRule:
 
 @dataclass(frozen=True)
 class Civ6McpExceptionClassificationRule:
-    """One ordered exception rule in the civ6-mcp status classifier."""
+    """Ordered exception-type rule for the canonical civ6-mcp classifier."""
 
     status: Civ6McpClassificationStatus
     exception_types: tuple[type[BaseException], ...]
@@ -80,7 +85,7 @@ class Civ6McpExceptionClassificationRule:
     predicate: Callable[[BaseException], bool] | None = None
 
     def matches(self, exc: BaseException) -> bool:
-        """Return whether this exception belongs to the rule."""
+        """Return whether an exception matches this classifier rule."""
         if isinstance(exc, self.exception_types):
             return True
         return bool(self.predicate and self.predicate(exc))
@@ -181,7 +186,7 @@ CIV6_MCP_EXCEPTION_CLASSIFICATION_PRECEDENCE: tuple[Civ6McpExceptionClassificati
 
 @dataclass(frozen=True)
 class Civ6McpNormalizedResult:
-    """Typed, backend-local representation of one MCP tool response."""
+    """Typed backend-local metadata for one normalized civ6-mcp response."""
 
     tool: str
     arguments: dict[str, Any] = field(default_factory=dict)
@@ -198,7 +203,7 @@ class Civ6McpNormalizedResult:
 
 
 def classify_civ6_mcp_status(text: str) -> Civ6McpClassificationStatus:
-    """Classify civ6-mcp text using the canonical status precedence table."""
+    """Classify response text into the canonical civ6-mcp status taxonomy."""
     body = str(text or "").strip()
     if not body:
         return Civ6McpClassificationStatus.SUCCESS
@@ -209,7 +214,7 @@ def classify_civ6_mcp_status(text: str) -> Civ6McpClassificationStatus:
 
 
 def classify_civ6_mcp_text(text: str) -> Civ6McpResponseClassification:
-    """Classify civ6-mcp text and return the legacy classification value."""
+    """Classify response text into the legacy civ6-mcp response class."""
     body = str(text or "").strip()
     status = classify_civ6_mcp_status(body)
     if status == Civ6McpClassificationStatus.RETRYABLE and _END_TURN_SOFT.search(body):
@@ -218,7 +223,7 @@ def classify_civ6_mcp_text(text: str) -> Civ6McpResponseClassification:
 
 
 def classify_civ6_mcp_exception_status(exc: BaseException) -> Civ6McpClassificationStatus:
-    """Classify a civ6-mcp exception into the canonical status taxonomy."""
+    """Classify an exception into the canonical civ6-mcp status taxonomy."""
     message = str(exc or "").strip()
     message_status = classify_civ6_mcp_status(message)
     if message_status not in {Civ6McpClassificationStatus.SUCCESS, Civ6McpClassificationStatus.FATAL}:
@@ -232,7 +237,7 @@ def classify_civ6_mcp_exception_status(exc: BaseException) -> Civ6McpClassificat
 
 
 def classify_civ6_mcp_exception(exc: BaseException) -> Civ6McpResponseClassification:
-    """Classify a civ6-mcp exception and return the legacy classification value."""
+    """Classify an exception into the legacy civ6-mcp response class."""
     message = str(exc or "").strip()
     status = classify_civ6_mcp_exception_status(exc)
     if status == Civ6McpClassificationStatus.RETRYABLE and _END_TURN_SOFT.search(message):
@@ -245,9 +250,9 @@ def normalize_mcp_tool_result(
     arguments: dict[str, Any] | None,
     result: Any,
 ) -> Civ6McpNormalizedResult:
-    """Parse an MCP SDK CallToolResult into a typed backend result."""
+    """Normalize an MCP SDK tool result into backend-local response metadata."""
     args = dict(arguments or {})
-    content_blocks = tuple(_extract_text_blocks(_result_value(result, "content") or []))
+    content_blocks = tuple(extract_text_blocks(_result_value(result, "content") or []))
     text = "\n".join(content_blocks).strip()
     is_error = bool(_result_value(result, "isError") or _result_value(result, "is_error"))
     if is_error and not text:
@@ -280,7 +285,7 @@ def normalize_mcp_response_text(
     arguments: dict[str, Any] | None,
     text: str,
 ) -> Civ6McpNormalizedResult:
-    """Normalize a legacy text-only MCP response."""
+    """Normalize legacy text-only output into backend-local response metadata."""
     args = dict(arguments or {})
     body = str(text or "").strip()
     status = classify_civ6_mcp_status(body)
@@ -306,7 +311,7 @@ def normalize_mcp_response_error(
     *,
     raw: Any | None = None,
 ) -> Civ6McpNormalizedResult:
-    """Normalize a transport, JSON-RPC, or validation error."""
+    """Normalize error text into backend-local response metadata."""
     args = dict(arguments or {})
     message = str(error or "").strip()
     status = classify_civ6_mcp_status(message)
@@ -334,7 +339,7 @@ def normalize_mcp_response_exception(
     arguments: dict[str, Any] | None,
     exc: BaseException,
 ) -> Civ6McpNormalizedResult:
-    """Normalize an exception raised while calling civ6-mcp."""
+    """Normalize an invocation exception into backend-local response metadata."""
     args = dict(arguments or {})
     message = str(exc or "").strip() or type(exc).__name__
     status = classify_civ6_mcp_exception_status(exc)
@@ -359,7 +364,7 @@ def normalize_mcp_response_timeout(
     *,
     timeout_seconds: float,
 ) -> Civ6McpNormalizedResult:
-    """Normalize a tool-call timeout without losing the timeout signal."""
+    """Normalize a tool-call timeout into backend-local response metadata."""
     message = f"civ6-mcp tool '{tool}' timed out after {timeout_seconds:g}s"
     return Civ6McpNormalizedResult(
         tool=tool,
@@ -373,24 +378,8 @@ def normalize_mcp_response_timeout(
     )
 
 
-def _extract_text_blocks(content: list[Any]) -> list[str]:
-    text_parts: list[str] = []
-    for block in content:
-        text = getattr(block, "text", None)
-        if isinstance(text, str):
-            text_parts.append(text)
-            continue
-        if isinstance(block, dict):
-            dict_text = block.get("text")
-            if isinstance(dict_text, str):
-                text_parts.append(dict_text)
-    return text_parts
-
-
 def _result_value(result: Any, name: str) -> Any:
-    if isinstance(result, Mapping):
-        return result.get(name)
-    return getattr(result, name, None)
+    return payload_value(result, name)
 
 
 def _extract_error_message(result: Any) -> str:
@@ -411,21 +400,8 @@ def _get_structured_content(result: Any) -> Any | None:
     for name in ("structuredContent", "structured_content"):
         value = _result_value(result, name)
         if value is not None:
-            return _dump_model(value)
+            return dump_model(value, json_safe=True)
     return None
-
-
-def _dump_model(value: Any) -> Any:
-    if hasattr(value, "model_dump"):
-        return value.model_dump()
-    if hasattr(value, "dict"):
-        return value.dict()
-    if isinstance(value, dict | list | str | int | float | bool) or value is None:
-        return value
-    try:
-        return json.loads(json.dumps(value))
-    except TypeError:
-        return str(value)
 
 
 def _is_success(classification: Civ6McpResponseClassification) -> bool:

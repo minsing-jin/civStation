@@ -45,7 +45,7 @@ _TERMINAL_STATUSES = frozenset(
 
 @dataclass(frozen=True)
 class Civ6McpCommandOutcome:
-    """Backend-local command outcome consumed by civ6-mcp runtime decisions."""
+    """Classified command outcome consumed by civ6-mcp runtime decisions."""
 
     status: Civ6McpClassificationStatus
     classification: Civ6McpResponseClassification
@@ -59,7 +59,7 @@ class Civ6McpCommandOutcome:
 
 @dataclass(frozen=True)
 class Civ6McpExecutedToolCallOutcome:
-    """Structured record for one executed civ6-mcp tool call."""
+    """JSONL-ready record for one executed civ6-mcp tool call."""
 
     tool: str
     arguments: dict[str, Any]
@@ -76,7 +76,7 @@ class Civ6McpExecutedToolCallOutcome:
     structured_content: Any | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        """Render this tool-call outcome as a JSON-safe mapping."""
+        """Render this executed tool-call outcome as a JSON-safe mapping."""
         return {
             "tool": self.tool,
             "arguments": _json_safe(self.arguments),
@@ -96,7 +96,7 @@ class Civ6McpExecutedToolCallOutcome:
 
 @dataclass(frozen=True)
 class Civ6McpTurnOutcomeRecord:
-    """Durable structured outcome for one civ6-mcp turn."""
+    """Durable JSONL-ready outcome record for one civ6-mcp turn."""
 
     turn_index: int
     observation_summary: str
@@ -115,7 +115,7 @@ class Civ6McpTurnOutcomeRecord:
     synthesized_end_turn_reflection: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        """Render this turn outcome as a JSON-safe mapping."""
+        """Render this turn outcome with JSON-safe nested fields."""
         return {
             "schema_version": self.schema_version,
             "backend": self.backend,
@@ -174,7 +174,7 @@ def classify_civ6_mcp_command_outcome(
 
 
 def get_civ6_mcp_turn_outcome_log_path(base_dir: Path | str | None = None) -> Path:
-    """Return the deterministic JSONL path for latest civ6-mcp turn outcomes."""
+    """Return the deterministic JSONL path for civ6-mcp turn outcomes."""
     return get_project_runtime_root(base_dir=base_dir) / CIV6_MCP_TURN_OUTCOME_LOG_FILENAME
 
 
@@ -183,7 +183,7 @@ def append_civ6_mcp_turn_outcome(
     *,
     path: Path | str | None = None,
 ) -> Path:
-    """Append one structured turn outcome as a JSONL record and return the path."""
+    """Append one turn outcome as a JSONL record and return the path."""
     output_path = Path(path) if path is not None else get_civ6_mcp_turn_outcome_log_path()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("a", encoding="utf-8") as handle:
@@ -193,7 +193,7 @@ def append_civ6_mcp_turn_outcome(
 
 
 def build_civ6_mcp_turn_outcome_record(turn_result: object) -> Civ6McpTurnOutcomeRecord:
-    """Build a durable structured outcome from a ``Civ6McpTurnResult``-like object."""
+    """Build a durable turn outcome from a ``Civ6McpTurnResult``-like object."""
     state = getattr(turn_result, "state", None)
     normalized_observation = getattr(state, "normalized_observation", None)
     tool_results = list(getattr(turn_result, "tool_results", []) or [])

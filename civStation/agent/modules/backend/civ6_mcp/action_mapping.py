@@ -50,12 +50,12 @@ _METADATA_FIELDS = frozenset(
 
 
 class Civ6McpActionMappingError(ValueError):
-    """Raised when a planned action cannot be mapped to a civ6-mcp tool call."""
+    """Raised when a planned action cannot resolve to a supported civ6-mcp tool call."""
 
 
 @dataclass(frozen=True)
 class Civ6McpFreeFormActionType:
-    """A free-form civ6-mcp action type and the upstream tool it dispatches."""
+    """Describe a free-form civ6-mcp action type and its upstream tool target."""
 
     action_type: str
     tool: str
@@ -63,7 +63,7 @@ class Civ6McpFreeFormActionType:
 
     @property
     def accepted_types(self) -> tuple[str, ...]:
-        """Return the canonical free-form type plus all accepted aliases."""
+        """Return the canonical action type plus all planner-facing aliases."""
         return (self.action_type, *self.aliases)
 
 
@@ -157,14 +157,14 @@ PLANNED_ACTION_TYPE_TO_MCP_TOOL: dict[str, str] = dict(CIV6_MCP_FREE_FORM_ACTION
 
 @dataclass(frozen=True)
 class MappedCiv6McpAction:
-    """A validated civ6-mcp action mapping result."""
+    """Store the canonical tool call metadata produced by action mapping."""
 
     tool: str
     arguments: dict[str, Any]
     reasoning: str = ""
 
     def to_tool_call(self) -> ToolCall:
-        """Return the executor-facing tool call."""
+        """Build the executor-facing tool call from canonical mapping metadata."""
         return ToolCall(
             tool=self.tool,
             arguments=dict(self.arguments),
@@ -173,19 +173,13 @@ class MappedCiv6McpAction:
 
 
 def map_civ6_mcp_action(planned_action: Any) -> ToolCall:
-    """Translate one supported planned action into a validated `ToolCall`.
-
-    Supported inputs are:
-    - `ToolCall` or any object exposing `to_tool_call()`.
-    - mappings with direct `tool`/`name` fields.
-    - mappings whose `type` names a supported civ6-mcp tool or semantic alias.
-    """
+    """Map one supported planner action shape into a validated executor `ToolCall`."""
     mapped = map_civ6_mcp_action_details(planned_action)
     return mapped.to_tool_call()
 
 
 def map_civ6_mcp_action_details(planned_action: Any) -> MappedCiv6McpAction:
-    """Translate one supported planned action and retain mapping metadata."""
+    """Map one supported planner action while retaining canonical tool metadata."""
     try:
         if isinstance(planned_action, ToolCall):
             return _validate_tool_call(planned_action)
@@ -214,7 +208,7 @@ def map_civ6_mcp_action_details(planned_action: Any) -> MappedCiv6McpAction:
 
 
 def map_civ6_mcp_actions(planned_actions: Iterable[Any]) -> list[ToolCall]:
-    """Translate a sequence of planned actions into executor tool calls."""
+    """Map an iterable of planner actions into validated executor tool calls."""
     if isinstance(planned_actions, Mapping) or isinstance(planned_actions, str | bytes):
         raise Civ6McpActionMappingError("planned actions must be an iterable of action objects, not a single action")
     return [map_civ6_mcp_action(action) for action in planned_actions]

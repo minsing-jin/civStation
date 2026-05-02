@@ -15,13 +15,21 @@ import logging
 from collections.abc import Mapping
 from typing import Any
 
+from civStation.agent.modules.backend.civ6_mcp._payload import planner_tool_call_items
 from civStation.agent.modules.backend.civ6_mcp.executor import coerce_tool_calls
 from civStation.agent.modules.backend.civ6_mcp.observation_schema import (
     Civ6McpNormalizedObservation,
     normalize_raw_mcp_game_state,
 )
-from civStation.agent.modules.backend.civ6_mcp.operations import END_TURN_REFLECTION_FIELDS, END_TURN_TOOL
-from civStation.agent.modules.backend.civ6_mcp.planner_types import Civ6McpPlannerProvider, PlannerResult
+from civStation.agent.modules.backend.civ6_mcp.operations import (
+    END_TURN_REFLECTION_FIELDS,
+    END_TURN_TOOL,
+)
+from civStation.agent.modules.backend.civ6_mcp.planner_types import (
+    DEFAULT_PLANNER_TOOL_ALLOWLIST,
+    Civ6McpPlannerProvider,
+    PlannerResult,
+)
 from civStation.agent.modules.backend.civ6_mcp.prompts import (
     build_planner_system_prompt,
     build_planner_user_prompt,
@@ -32,77 +40,11 @@ from civStation.agent.modules.backend.civ6_mcp.turn_planning import build_priori
 logger = logging.getLogger(__name__)
 
 
-_DEFAULT_PLANNER_TOOL_ALLOWLIST: tuple[str, ...] = (
-    # observation
-    "get_game_overview",
-    "get_units",
-    "get_cities",
-    "get_city_production",
-    "get_empire_resources",
-    "get_diplomacy",
-    "get_tech_civics",
-    "get_policies",
-    "get_governors",
-    "get_pantheon_beliefs",
-    "get_religion_beliefs",
-    "get_world_congress",
-    "get_great_people",
-    "get_notifications",
-    "get_pending_diplomacy",
-    "get_pending_trades",
-    "get_victory_progress",
-    "get_strategic_map",
-    "get_dedications",
-    "get_unit_promotions",
-    "get_purchasable_tiles",
-    "get_district_advisor",
-    "get_wonder_advisor",
-    "get_settle_advisor",
-    "get_global_settle_advisor",
-    "get_pathing_estimate",
-    "get_trade_routes",
-    "get_trade_destinations",
-    "get_trade_options",
-    "get_builder_tasks",
-    "get_religion_spread",
-    # action
-    "unit_action",
-    "skip_remaining_units",
-    "city_action",
-    "set_city_production",
-    "set_city_focus",
-    "purchase_item",
-    "purchase_tile",
-    "set_research",
-    "set_policies",
-    "change_government",
-    "appoint_governor",
-    "assign_governor",
-    "promote_governor",
-    "promote_unit",
-    "upgrade_unit",
-    "send_envoy",
-    "send_diplomatic_action",
-    "form_alliance",
-    "propose_trade",
-    "respond_to_trade",
-    "propose_peace",
-    "respond_to_diplomacy",
-    "choose_pantheon",
-    "found_religion",
-    "choose_dedication",
-    "queue_wc_votes",
-    "patronize_great_person",
-    "recruit_great_person",
-    "reject_great_person",
-    "spy_action",
-    "dismiss_popup",
-    "end_turn",
-)
+_DEFAULT_PLANNER_TOOL_ALLOWLIST = DEFAULT_PLANNER_TOOL_ALLOWLIST
 
 
 class MissingEndTurnPlannerOutputError(RuntimeError):
-    """Raised when parsed civ6-mcp planner output never emitted ``end_turn``."""
+    """Error raised when civ6-mcp planner output omits the required final ``end_turn``."""
 
     def __init__(
         self,
@@ -136,12 +78,7 @@ class _MissingEndTurnPlanError(ValueError):
 
 
 class Civ6McpToolPlanner:
-    """Asks an LLM to produce a tool-call plan for one turn.
-
-    The provider must implement civStation's `BaseVLMProvider` interface;
-    we call `_send_to_api()` with text-only content (no image), the same
-    way `StrategyPlanner._call_vlm` does today.
-    """
+    """Coordinates LLM-backed planning for allowlisted civ6-mcp tool calls."""
 
     def __init__(
         self,
@@ -153,15 +90,16 @@ class Civ6McpToolPlanner:
     ) -> None:
         self._provider = provider
         self._tool_catalog = tool_catalog
-        self._allowed_tools = tuple(allowed_tools or _DEFAULT_PLANNER_TOOL_ALLOWLIST)
+        self._allowed_tools = tuple(allowed_tools or DEFAULT_PLANNER_TOOL_ALLOWLIST)
         self._max_retries = max_retries
 
     @property
     def allowed_tools(self) -> tuple[str, ...]:
+        """Return the tool names this planner may emit."""
         return self._allowed_tools
 
     def render_tool_catalog(self) -> str:
-        """Render the tool catalog text shown to the planner LLM."""
+        """Render allowlisted tool metadata for the planner prompt."""
         lines: list[str] = []
         for name in self._allowed_tools:
             entry = self._tool_catalog.get(name)
@@ -195,8 +133,11 @@ class Civ6McpToolPlanner:
         recent_calls: str,
         hitl_directive: str = "",
     ) -> PlannerResult:
-        """Produce a PlannerResult or raise if retries keep yielding invalid plans."""
-        system_prompt = build_planner_system_prompt(tool_catalog=self.render_tool_catalog())
+        """Return a validated PlannerResult, retrying invalid provider responses."""
+        system_prompt = build_planner_system_prompt(
+            tool_catalog=self.render_tool_catalog(),
+            allowed_tools=self._allowed_tools,
+        )
         user_prompt = build_planner_user_prompt(
             strategy=strategy,
             state_context=state_context,
@@ -265,7 +206,7 @@ class Civ6McpToolPlanner:
         recent_calls: str,
         hitl_directive: str = "",
     ) -> PlannerResult:
-        """Produce an ordered MCP tool-call plan from a normalized observation payload."""
+        """Return a validated tool-call plan from a normalized observation."""
         normalized_observation = _normalize_planner_observation(observation)
 
         turn_plan = build_prioritized_turn_plan(normalized_observation, strategy=strategy)
@@ -288,14 +229,17 @@ def _load_strict_planner_payload(raw: str) -> dict[str, Any]:
     payload = json.loads(raw)
     if not isinstance(payload, dict):
         raise ValueError("Planner output must be a top-level JSON object with a 'tool_calls' array.")
-    if "tool_calls" not in payload:
-        if "actions" in payload:
-            raise ValueError(
-                "VLM/computer-use action-plan payload cannot run on the civ6-mcp backend; expected 'tool_calls'."
-            )
-        raise ValueError("Planner output must include a 'tool_calls' array.")
-    if not isinstance(payload["tool_calls"], list):
-        raise ValueError("Planner output 'tool_calls' must be a list.")
+    try:
+        planner_tool_call_items(payload, reject_vlm_actions=True)
+    except ValueError as exc:
+        message = str(exc)
+        if "VLM/computer-use action-plan payload cannot run" in message:
+            raise ValueError(message) from exc
+        if "Planner payload 'tool_calls' must be a list." in message:
+            raise ValueError("Planner output 'tool_calls' must be a list.") from exc
+        if "Unexpected planner payload shape" in message:
+            raise ValueError("Planner output must include a 'tool_calls' array.") from exc
+        raise
     return payload
 
 
@@ -379,6 +323,7 @@ def _render_observation_payload_hints(observation: Civ6McpNormalizedObservation)
 
 __all__ = [
     "Civ6McpToolPlanner",
+    "DEFAULT_PLANNER_TOOL_ALLOWLIST",
     "MissingEndTurnPlannerOutputError",
     "PlannerResult",
 ]

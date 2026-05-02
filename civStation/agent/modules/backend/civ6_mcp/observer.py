@@ -33,6 +33,7 @@ from civStation.agent.modules.backend.civ6_mcp.operations import (
     Civ6McpRequest,
     Civ6McpRequestBuilder,
 )
+from civStation.agent.modules.backend.civ6_mcp.planner import DEFAULT_PLANNER_TOOL_ALLOWLIST
 from civStation.agent.modules.backend.civ6_mcp.response import Civ6McpNormalizedResult
 from civStation.agent.modules.backend.civ6_mcp.state_parser import (
     GameOverviewSnapshot,
@@ -48,48 +49,13 @@ logger = logging.getLogger(__name__)
 DEFAULT_CIV6_MCP_OBSERVE_TIMEOUT_SECONDS = 30.0
 
 
-DEFAULT_CIV6_MCP_OBSERVE_TOOLS: tuple[str, ...] = (
-    "get_game_overview",
-    "get_units",
-    "get_cities",
-    "get_city_production",
-    "get_empire_resources",
-    "get_diplomacy",
-    "get_tech_civics",
-    "get_policies",
-    "get_governors",
-    "get_pantheon_beliefs",
-    "get_religion_beliefs",
-    "get_world_congress",
-    "get_great_people",
-    "get_notifications",
-    "get_pending_diplomacy",
-    "get_pending_trades",
-    "get_victory_progress",
-    "get_strategic_map",
-    "get_dedications",
-    "get_unit_promotions",
-    "get_purchasable_tiles",
-    "get_district_advisor",
-    "get_wonder_advisor",
-    "get_settle_advisor",
-    "get_global_settle_advisor",
-    "get_pathing_estimate",
-    "get_trade_routes",
-    "get_trade_destinations",
-    "get_trade_options",
-    "get_builder_tasks",
-    "get_religion_spread",
+DEFAULT_CIV6_MCP_OBSERVE_TOOLS: tuple[str, ...] = tuple(
+    tool for tool in DEFAULT_PLANNER_TOOL_ALLOWLIST if tool.startswith("get_")
 )
 
 
 class Civ6McpObserver:
-    """Polls the civ6-mcp server and updates ContextManager.
-
-    Designed to be called synchronously at the start of each turn iteration.
-    Errors from individual tools are caught so a single failing endpoint does
-    not stall the whole observation.
-    """
+    """Collect civ6-mcp observations and mirror them into ``ContextManager``."""
 
     def __init__(
         self,
@@ -109,18 +75,21 @@ class Civ6McpObserver:
 
     @property
     def last_bundle(self) -> StateBundle | None:
+        """Most recent ``StateBundle`` cached from ``observe``, if any."""
         return self._last_bundle
 
     @property
     def last_observation(self) -> Civ6McpNormalizedObservation | None:
+        """Most recent normalized observation cached from ``observe``, if any."""
         return self._last_observation
 
     @property
     def last_tool_observations(self) -> tuple[Civ6McpToolObservation, ...]:
+        """Per-tool observations parsed during the most recent cached snapshot."""
         return self._last_tool_observations
 
     def observe(self) -> StateBundle:
-        """Pull a fresh state bundle and push the structured fields into ContextManager."""
+        """Collect one civ6-mcp snapshot and sync normalized fields to ``ContextManager``."""
         bundle = StateBundle()
         tool_observations: list[Civ6McpToolObservation] = []
         attempted_tools = 0
@@ -239,7 +208,7 @@ def build_civ6_mcp_observer(
     observe_tools: tuple[str, ...] | None = None,
     observe_timeout_seconds: float | None = DEFAULT_CIV6_MCP_OBSERVE_TIMEOUT_SECONDS,
 ) -> Civ6McpObserver:
-    """Build the observer used by the civ6-mcp backend turn loop."""
+    """Construct a ``Civ6McpObserver`` for the civ6-mcp turn loop."""
     return Civ6McpObserver(
         client=client,
         context_manager=context_manager,
@@ -249,12 +218,7 @@ def build_civ6_mcp_observer(
 
 
 def discover_civ6_mcp_observe_tools(client: Civ6McpClientProtocol) -> tuple[str, ...]:
-    """Discover observation tools exposed by civ6-mcp.
-
-    The upstream backend uses ``get_*`` names for read-only observation tools.
-    Filtering the live MCP catalog keeps the observer separate from action and
-    end-turn tools while still picking up newly bundled observation endpoints.
-    """
+    """Return live ``get_*`` observation tools in stable planner-preferred order."""
     available = _available_tool_names(client)
     if not available:
         return DEFAULT_CIV6_MCP_OBSERVE_TOOLS

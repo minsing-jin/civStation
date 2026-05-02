@@ -1,4 +1,4 @@
-"""civ6-mcp backend public interface.
+"""Lazy public exports for the civ6-mcp backend.
 
 The upstream project (github.com/lmwilki/civ6-mcp) exposes Civ6's internal
 state and commands through a Python MCP server that talks to the game over
@@ -23,6 +23,7 @@ _EXPORT_MODULES: dict[str, str] = {
     "CIV6_MCP_OBSERVATION_SECTION_MAPPINGS": "observation_schema",
     "CIV6_MCP_TURN_OUTCOME_LOG_FILENAME": "outcome",
     "DEFAULT_CIV6_MCP_OBSERVE_TOOLS": "observer",
+    "DEFAULT_PLANNER_TOOL_ALLOWLIST": "planner",
     "END_TURN_REFLECTION_FIELDS": "operations",
     "END_TURN_TOOL": "operations",
     "OBSERVATION_TOOLS": "operations",
@@ -134,7 +135,7 @@ __all__ = sorted(_EXPORT_MODULES)
 
 
 def __getattr__(name: str) -> Any:
-    """Resolve public backend exports without eager cross-backend imports."""
+    """Resolve civ6-mcp exports without importing implementation modules eagerly."""
     module_name = _EXPORT_MODULES.get(name)
     if module_name is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
@@ -145,4 +146,5 @@ def __getattr__(name: str) -> Any:
 
 
 def __dir__() -> list[str]:
+    """Return lazy public civ6-mcp exports alongside loaded module globals."""
     return sorted((*globals(), *__all__))

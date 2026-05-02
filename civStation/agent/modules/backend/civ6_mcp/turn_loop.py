@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from civStation.agent.modules.backend.civ6_mcp._payload import planner_tool_call_items
 from civStation.agent.modules.backend.civ6_mcp.client import (
     Civ6McpClient,
     Civ6McpConfig,
@@ -63,7 +64,7 @@ DEFAULT_CIV6_MCP_STRATEGY = "Pursue a science victory while avoiding unnecessary
 
 @dataclass(frozen=True)
 class Civ6McpTurnLoopConfig:
-    """Configuration inputs for the civ6-mcp turn loop."""
+    """Runtime configuration for civ6-mcp turn execution."""
 
     max_planner_calls_per_turn: int = 25
     delay_between_turns: float = 1.0
@@ -73,7 +74,7 @@ class Civ6McpTurnLoopConfig:
     outcome_log_path: Path | str | None = None
 
     def validate(self) -> None:
-        """Validate runtime bounds before a turn starts."""
+        """Validate civ6-mcp turn-loop runtime bounds."""
         if self.max_planner_calls_per_turn < 1:
             raise ValueError("max_planner_calls_per_turn must be at least 1")
         if self.delay_between_turns < 0:
@@ -87,7 +88,7 @@ Civ6McpTurnConfig = Civ6McpTurnLoopConfig
 
 @dataclass
 class Civ6McpTurnState:
-    """Observable state for one civ6-mcp turn-loop iteration."""
+    """Mutable state snapshot for one civ6-mcp turn iteration."""
 
     turn_index: int = 0
     phase: str = "initialized"
@@ -103,7 +104,7 @@ class Civ6McpTurnState:
 
 @dataclass(frozen=True)
 class Civ6McpTurnRequestContext:
-    """Stable request context passed into a single civ6-mcp turn iteration."""
+    """Stable inputs for one civ6-mcp turn execution."""
 
     turn_index: int
     planner_provider: object
@@ -116,7 +117,7 @@ class Civ6McpTurnRequestContext:
     state_bridge: object | None = None
 
     def to_run_one_kwargs(self, *, civ6_mcp_client: Civ6McpClient) -> dict[str, object]:
-        """Render this context as keyword arguments for ``run_one_turn_civ6_mcp``."""
+        """Render this context for ``run_one_turn_civ6_mcp``."""
         return {
             "civ6_mcp_client": civ6_mcp_client,
             "planner_provider": self.planner_provider,
@@ -133,7 +134,7 @@ class Civ6McpTurnRequestContext:
 
 @dataclass
 class Civ6McpTurnResult:
-    """Outcome of one civ6-mcp turn iteration."""
+    """Result data produced by one civ6-mcp turn execution."""
 
     turn_index: int
     success: bool = False
@@ -149,7 +150,7 @@ class Civ6McpTurnResult:
     synthesized_end_turn_reflection: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        """Keep default result state aligned with the result turn index."""
+        """Align default result state with the result turn index."""
         if self.state.turn_index == 0 and self.turn_index != 0:
             self.state.turn_index = self.turn_index
 
@@ -281,7 +282,7 @@ def _tool_call_snapshot(call: ToolCall) -> dict[str, Any]:
 
 
 def synthesize_missing_end_turn_call(*, strategy_text: str) -> ToolCall:
-    """Build a backend-local civ6-mcp ``end_turn`` call for missing planner output."""
+    """Create a backend-local civ6-mcp ``end_turn`` call when planning omits one."""
     request = Civ6McpRequestBuilder.end_turn(
         tactical="Planner did not include end_turn. Closing turn defensively.",
         strategic=strategy_text[:240] or "Hold course on current strategy.",
@@ -303,7 +304,7 @@ def build_synthesized_end_turn_reflection_metadata(
     call: ToolCall,
     planner_output: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
-    """Build backend-local metadata for a synthesized civ6-mcp ``end_turn`` call."""
+    """Build audit metadata for a synthesized civ6-mcp ``end_turn`` call."""
     return {
         "backend": "civ6-mcp",
         "action": call.tool,
@@ -323,8 +324,9 @@ def build_synthesized_end_turn_reflection_metadata(
 def _planner_tool_names(planner_output: Mapping[str, Any] | None) -> list[str]:
     if not isinstance(planner_output, Mapping):
         return []
-    raw_tool_calls = planner_output.get("tool_calls", [])
-    if not isinstance(raw_tool_calls, list):
+    try:
+        raw_tool_calls = planner_tool_call_items(dict(planner_output))
+    except ValueError:
         return []
     names: list[str] = []
     for item in raw_tool_calls:
@@ -352,7 +354,7 @@ def run_one_turn_civ6_mcp(
     turn_config: Civ6McpTurnLoopConfig | None = None,
     observer_factory: Civ6McpObserverFactory | None = None,
 ) -> Civ6McpTurnResult:
-    """Drive a single Civ6 turn through the civ6-mcp tool-call backend."""
+    """Execute one Civ6 turn through the civ6-mcp tool-call backend."""
     config = turn_config or Civ6McpTurnLoopConfig()
     config.validate()
     effective_max_planner_calls = (
@@ -611,7 +613,7 @@ def run_multi_turn_civ6_mcp(
     turn_config: Civ6McpTurnLoopConfig | None = None,
     observer_factory: Civ6McpObserverFactory | None = None,
 ) -> list[Civ6McpTurnResult]:
-    """Sequential multi-turn driver. Stops early on game-over / abort / stop."""
+    """Execute civ6-mcp turns sequentially until completion, stop, or failure."""
     config = turn_config or Civ6McpTurnLoopConfig()
     config.validate()
     effective_delay_between_turns = (
@@ -676,7 +678,7 @@ def run_civ6_mcp_turn_loop(
     client_factory: Civ6McpClientFactory | None = None,
     env_overrides: dict[str, str] | None = None,
 ) -> list[Civ6McpTurnResult]:
-    """Own civ6-mcp connection lifecycle around one or more turn iterations."""
+    """Manage the civ6-mcp client lifecycle around turn execution."""
     if num_turns < 1:
         return []
     if _check_stop_requested(agent_gate, command_queue):
@@ -778,11 +780,7 @@ def build_civ6_mcp_client(
     launcher: str | None,
     env_overrides: dict[str, str] | None = None,
 ) -> Civ6McpClient:
-    """Helper used by turn_runner to construct + start a client safely.
-
-    Raises Civ6McpUnavailableError before start() so the caller can report a
-    crisp configuration error instead of a stack trace.
-    """
+    """Construct and start a civ6-mcp client with clear configuration errors."""
     config = Civ6McpConfig.from_environment(
         install_path=install_path,
         launcher=launcher,

@@ -41,7 +41,7 @@ _DIAGNOSTIC_TOOL_PATTERN = re.compile(r"\bget_[a-z0-9_]+\b")
 
 @dataclass(frozen=True)
 class Civ6McpPrioritizedIntent:
-    """One prioritized civ6-mcp planner intent derived from normalized state."""
+    """Prioritized planner intent inferred from normalized civ6-mcp state."""
 
     priority: int
     intent: Civ6McpPlannerIntent
@@ -50,29 +50,29 @@ class Civ6McpPrioritizedIntent:
 
     @property
     def tool(self) -> str:
-        """Upstream civ6-mcp tool name."""
+        """Return the upstream civ6-mcp tool name for this intent."""
         return self.intent.tool
 
     @property
     def arguments(self) -> dict[str, Any]:
-        """Tool arguments copied from the underlying intent."""
+        """Return a copy of the tool arguments for this intent."""
         return dict(self.intent.arguments)
 
     @property
     def reasoning(self) -> str:
-        """Human-readable reason for this intent."""
+        """Return the planner-facing rationale for this intent."""
         return self.intent.reasoning
 
     def to_action(self) -> Civ6McpPlannerAction:
-        """Convert this prioritized intent into an executable planner action."""
+        """Convert this intent into an executable planner action."""
         return self.intent.to_action()
 
     def to_tool_call(self) -> ToolCall:
-        """Convert this prioritized intent into an executor tool call."""
+        """Convert this intent into an executor tool call."""
         return self.intent.to_tool_call()
 
     def render_for_prompt(self) -> str:
-        """Render a compact line for planner prompt guidance."""
+        """Render a compact prompt line for this intent."""
         detail = f" | source={self.source_section}" if self.source_section else ""
         trigger = f" | trigger={self.trigger}" if self.trigger else ""
         return f"P{self.priority:03d} {self.tool} - {self.reasoning}{detail}{trigger}"
@@ -80,27 +80,27 @@ class Civ6McpPrioritizedIntent:
 
 @dataclass(frozen=True)
 class Civ6McpTurnPlan:
-    """Prioritized civ6-mcp intents/actions for a single normalized state."""
+    """Deterministic civ6-mcp intent plan for one normalized state."""
 
     intents: tuple[Civ6McpPrioritizedIntent, ...] = ()
     notes: tuple[str, ...] = ()
     backend: str = "civ6-mcp"
 
     def to_actions(self) -> list[Civ6McpPlannerAction]:
-        """Return executable planner actions in priority order."""
+        """Return executable planner actions ordered by priority."""
         return [item.to_action() for item in self.intents]
 
     @property
     def actions(self) -> list[Civ6McpPlannerAction]:
-        """Alias for consumers that expect a plan to expose actions."""
+        """Return actions for consumers that expect plan.actions."""
         return self.to_actions()
 
     def to_tool_calls(self) -> list[ToolCall]:
-        """Return executor tool calls in priority order."""
+        """Return executor tool calls ordered by priority."""
         return [item.to_tool_call() for item in self.intents]
 
     def render_for_prompt(self) -> str:
-        """Render the plan as deterministic guidance for the LLM planner."""
+        """Render deterministic turn guidance for the LLM planner."""
         if not self.intents:
             return "\n".join(self.notes) if self.notes else "(no deterministic civ6-mcp intents)"
         lines = [item.render_for_prompt() for item in self.intents]
@@ -115,7 +115,7 @@ def build_prioritized_turn_plan(
     strategy: str = "",
     include_end_turn: bool = True,
 ) -> Civ6McpTurnPlan:
-    """Map normalized civ6-mcp state into prioritized planner intents/actions."""
+    """Build deterministic planner guidance from normalized civ6-mcp state."""
     bundle, sections = _coerce_state_and_sections(state)
     notes: list[str] = []
     candidates: list[Civ6McpPrioritizedIntent] = []

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 import time
 from typing import Any
@@ -11,6 +12,7 @@ import pytest
 import civStation.agent.modules.backend.civ6_mcp.observer as observer_module
 from civStation.agent.modules.backend.civ6_mcp.observer import Civ6McpObserver
 from civStation.agent.modules.backend.civ6_mcp.operations import Civ6McpDispatchResult, Civ6McpRequest
+from civStation.agent.modules.backend.civ6_mcp.planner import DEFAULT_PLANNER_TOOL_ALLOWLIST
 from civStation.agent.modules.backend.civ6_mcp.response import (
     Civ6McpNormalizedResult,
     Civ6McpResponseClassification,
@@ -127,6 +129,13 @@ Civic Researching: STATE_WORKFORCE
     assert ctx.high_level_context.latest_game_observation["current_turn"] == 17
     assert ctx.high_level_context.latest_game_observation["game_era"] == "Classical"
     assert ctx.high_level_context.latest_game_observation["current_research"] == "BRONZE_WORKING"
+
+
+def test_default_observe_tools_are_derived_from_planner_allowlist() -> None:
+    assert observer_module.DEFAULT_CIV6_MCP_OBSERVE_TOOLS == tuple(
+        tool for tool in DEFAULT_PLANNER_TOOL_ALLOWLIST if tool.startswith("get_")
+    )
+    assert "DEFAULT_PLANNER_TOOL_ALLOWLIST" in inspect.getsource(observer_module)
 
 
 def test_observer_skips_missing_tools_silently() -> None:

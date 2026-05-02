@@ -13,12 +13,16 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
+from civStation.agent.modules.backend.civ6_mcp._payload import planner_tool_call_items
 from civStation.agent.modules.backend.civ6_mcp.action_mapping import (
     Civ6McpActionMappingError,
     map_civ6_mcp_action,
     map_civ6_mcp_actions,
 )
 from civStation.agent.modules.backend.civ6_mcp.client import Civ6McpClientProtocol
+from civStation.agent.modules.backend.civ6_mcp.operations import (
+    _DOCUMENTED_PREFIX_CLASSIFICATIONS as _OPERATIONS_DOCUMENTED_PREFIX_CLASSIFICATIONS,
+)
 from civStation.agent.modules.backend.civ6_mcp.operations import (
     Civ6McpOperationDispatcher,
     Civ6McpRequestBuilder,
@@ -32,22 +36,22 @@ from civStation.agent.modules.backend.civ6_mcp.results import (
 
 _TERMINAL_CLASSIFICATIONS = frozenset({"game_over", "aborted", "hang"})
 StopRequested = Callable[[], bool]
+_DOCUMENTED_PREFIX_CLASSIFICATIONS = _OPERATIONS_DOCUMENTED_PREFIX_CLASSIFICATIONS
 
 
 class Civ6McpExecutor:
-    """Synchronous executor that runs ToolCalls against a civ6-mcp client."""
+    """Execute planned civ6-mcp tool calls through a synchronous client.
+
+    Text outcomes are classified by the shared civ6-mcp response rules. The
+    documented prefix inventory covers terminal banners, abort/hang
+    markers, tool errors, end-turn blockers, and timeout messages.
+    """
 
     def __init__(self, client: Civ6McpClientProtocol) -> None:
         self._dispatcher = Civ6McpOperationDispatcher(client)
 
     def execute(self, planned_action: Any) -> ToolCallResult:
-        """Run one planned civ6-mcp action and classify its outcome.
-
-        The public executor surface is intentionally structural: turn-loop code
-        can pass a ``ToolCall``, a planner action with ``to_tool_call()``, or a
-        planner JSON mapping. This keeps executor.py independent from
-        planner_types.py while still accepting the backend action interface.
-        """
+        """Run one planned civ6-mcp action and return its classified result."""
         try:
             call = coerce_tool_call(planned_action)
         except ValueError as exc:
@@ -85,7 +89,7 @@ class Civ6McpExecutor:
         *,
         stop_requested: StopRequested | None = None,
     ) -> list[ToolCallResult]:
-        """Run a sequence of tool calls; stop early on terminal classifications."""
+        """Run tool calls sequentially until a terminal outcome or stop request."""
         results: list[ToolCallResult] = []
         for call in calls:
             if stop_requested is not None and stop_requested():
@@ -98,6 +102,7 @@ class Civ6McpExecutor:
 
     @staticmethod
     def _classify(text: str) -> str:
+        """Classify text using the documented civ6-mcp prefix semantics."""
         return classify_civ6_mcp_text(text)
 
 
@@ -106,7 +111,7 @@ def _is_terminal_outcome(outcome: ToolCallResult) -> bool:
 
 
 def coerce_tool_call(planned_action: Any) -> ToolCall:
-    """Normalize one backend planned action into an executor ``ToolCall``."""
+    """Convert one planned backend action into an executor ``ToolCall``."""
     try:
         return map_civ6_mcp_action(planned_action)
     except Civ6McpActionMappingError as exc:
@@ -114,15 +119,7 @@ def coerce_tool_call(planned_action: Any) -> ToolCall:
 
 
 def coerce_tool_calls(payload: Any) -> list[ToolCall]:
-    """Normalize a planner JSON payload into a list of ToolCalls.
-
-    Accepts either::
-
-        {"tool_calls": [{"tool": "...", "arguments": {...}}, ...]}
-
-    or just the list itself for resilience against minor format drift. Each
-    entry may be a canonical tool call or a civ6-mcp free-form action type.
-    """
+    """Convert a planner payload or bare list into executor ``ToolCall`` objects."""
     items = _tool_call_items_from_payload(payload)
     try:
         return map_civ6_mcp_actions(items)
@@ -131,19 +128,7 @@ def coerce_tool_calls(payload: Any) -> list[ToolCall]:
 
 
 def _tool_call_items_from_payload(payload: Any) -> list[Any]:
-    if isinstance(payload, dict) and "tool_calls" in payload:
-        items = payload["tool_calls"]
-    elif isinstance(payload, dict) and "actions" in payload:
-        raise ValueError(
-            "VLM/computer-use action-plan payload cannot run on the civ6-mcp backend; expected 'tool_calls'."
-        )
-    elif isinstance(payload, list):
-        items = payload
-    else:
-        raise ValueError(f"Unexpected planner payload shape: {type(payload).__name__}")
-
-    if not isinstance(items, list):
-        raise ValueError("Planner payload 'tool_calls' must be a list.")
+    items = planner_tool_call_items(payload, reject_vlm_actions=True)
     for item in items:
         if not isinstance(item, dict):
             raise ValueError(f"Tool call entry must be an object, got {type(item).__name__}")

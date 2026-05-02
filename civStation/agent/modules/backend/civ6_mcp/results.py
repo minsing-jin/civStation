@@ -20,7 +20,7 @@ from civStation.agent.modules.backend.civ6_mcp.response import (
 
 @dataclass
 class ToolCall:
-    """A single planner-issued civ6-mcp tool invocation."""
+    """Planner-requested civ6-mcp tool invocation."""
 
     tool: str
     arguments: dict[str, Any] = field(default_factory=dict)
@@ -29,7 +29,7 @@ class ToolCall:
 
 @dataclass
 class ToolCallResult:
-    """Outcome of executing one ToolCall."""
+    """Executor result for one civ6-mcp tool call and its normalized MCP metadata."""
 
     call: ToolCall
     success: bool = False
@@ -47,7 +47,7 @@ class ToolCallResult:
 
     @property
     def response(self) -> Civ6McpNormalizedResult | None:
-        """Captured normalized MCP response for callers that prefer a short name."""
+        """Return the normalized MCP response alias used by existing callers."""
         return self.normalized_response
 
 
@@ -55,7 +55,7 @@ def executor_result_from_normalized_response(
     call: ToolCall,
     response: Civ6McpNormalizedResult,
 ) -> ToolCallResult:
-    """Convert a normalized civ6-mcp response into an executor result."""
+    """Build an executor result from a normalized civ6-mcp response."""
     classification = _classification_value(response.classification)
     status = _classification_value(response.status)
     return ToolCallResult(
@@ -79,7 +79,7 @@ def executor_result_from_mcp_tool_result(
     call: ToolCall,
     result: Any,
 ) -> ToolCallResult:
-    """Normalize a raw MCP SDK tool result into an executor result."""
+    """Build a public executor result from a raw MCP tool result."""
     response = normalize_mcp_tool_result(call.tool, call.arguments, result)
     return executor_result_from_normalized_response(call, response)
 
@@ -90,7 +90,7 @@ def executor_result_from_mcp_error(
     *,
     raw: Any | None = None,
 ) -> ToolCallResult:
-    """Normalize a transport, JSON-RPC, or validation error into an executor result."""
+    """Build an executor result from a transport, JSON-RPC, or validation error."""
     response = normalize_mcp_response_error(call.tool, call.arguments, error, raw=raw)
     return executor_result_from_normalized_response(call, response)
 
@@ -100,13 +100,13 @@ def executor_result_from_mcp_timeout(
     *,
     timeout_seconds: float,
 ) -> ToolCallResult:
-    """Normalize an MCP tool-call timeout into an executor result."""
+    """Build an executor result from an MCP tool-call timeout."""
     response = normalize_mcp_response_timeout(call.tool, call.arguments, timeout_seconds=timeout_seconds)
     return executor_result_from_normalized_response(call, response)
 
 
 def tool_call_result_from_dispatch(call: ToolCall, dispatch_result: Any) -> ToolCallResult:
-    """Convert a dispatcher result into the public executor result shape."""
+    """Build a public executor result from dispatcher result metadata."""
     response = getattr(dispatch_result, "response", None)
     if isinstance(response, Civ6McpNormalizedResult):
         return executor_result_from_normalized_response(call, response)

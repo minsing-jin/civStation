@@ -7,6 +7,32 @@ separately so the planner LLM still sees rich context.
 Heuristic by design — civ6-mcp's text format is not a stable contract. We
 try multiple regex shapes and silently fall back to "leave the field
 unchanged" rather than crashing the agent loop.
+
+Parsing helper inventory:
+- ``parse_game_overview``: raw text, SDK-style result objects, or structured
+  overview mappings to ``GameOverviewSnapshot``. The parsed shape contains the
+  original rendered ``raw_text`` plus typed turn, era, speed, civilization,
+  leader, yield, population, military, research, civic, and game-over fields.
+- ``state_bundle_from_raw_mcp_state``: raw observation state mappings,
+  single overview payloads, or SDK-style result objects to ``StateBundle``.
+  The parsed shape contains one overview snapshot, fixed ``*_text`` sections
+  for known observation tools, ``extra`` text keyed by unknown tool name, and
+  observation diagnostic containers.
+- ``StateBundle.to_planner_context``: parsed bundle to the normalized planner
+  context string produced by ``observation_schema.normalize_observation_bundle``.
+
+Output-shape invariants that downstream normalization depends on:
+- ``parse_game_overview`` always returns ``GameOverviewSnapshot``; it never
+  exposes upstream aliases or raw dictionaries to callers.
+- ``GameOverviewSnapshot.raw_text`` is always a string, missing parsed values
+  stay ``None``, and ``is_game_over`` defaults to ``False``.
+- Parsed numeric overview fields are finite ``int``/``float`` values; malformed
+  or non-finite source values are omitted instead of represented as strings.
+- ``state_bundle_from_raw_mcp_state`` always returns ``StateBundle`` unless the
+  input is already a ``StateBundle`` instance.
+- Known observation tools are routed to fixed ``*_text`` fields, unknown
+  non-empty tools are preserved in ``extra`` by tool name, and observation
+  diagnostics keep their tuple/dict shapes.
 """
 
 from __future__ import annotations
@@ -18,12 +44,15 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from civStation.agent.modules.backend.civ6_mcp._payload import dump_model as _dump_model
+from civStation.agent.modules.backend.civ6_mcp._payload import select_payload_body
+
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class GameOverviewSnapshot:
-    """Best-effort structured view of `get_game_overview` output."""
+    """Parsed civ6-mcp overview fields plus the rendered source text."""
 
     raw_text: str = ""
     current_turn: int | None = None
@@ -158,9 +187,18 @@ _OVERVIEW_PAYLOAD_KEYS = frozenset(
 
 
 def parse_game_overview(text: Any) -> GameOverviewSnapshot:
-    """Extract turn/era/yields/research/civic from `get_game_overview` text."""
-    snapshot = GameOverviewSnapshot(raw_text=_render_state_payload(text))
-    structured = _load_structured_payload(text)
+    """Parse a civ6-mcp overview payload into a stable snapshot.
+
+    Accepted inputs include raw strings/bytes, JSON strings, direct structured
+    mappings, and MCP SDK-ish result objects with ``content``, ``text``, or
+    ``structuredContent`` attributes. The output is always a
+    ``GameOverviewSnapshot`` with ``raw_text`` set to the rendered source,
+    unparsed fields left as ``None``, and numeric fields coerced to finite
+    ``int``/``float`` values.
+    """
+    payload = select_payload_body(text).value
+    snapshot = GameOverviewSnapshot(raw_text=_render_state_payload(payload))
+    structured = _load_structured_payload(payload)
     if isinstance(structured, dict):
         _apply_structured_overview(snapshot, structured)
 
@@ -253,18 +291,20 @@ def parse_game_overview(text: Any) -> GameOverviewSnapshot:
 
 
 def state_bundle_from_raw_mcp_state(raw_state: Any) -> StateBundle:
-    """Convert raw civ6-mcp tool payloads into a ``StateBundle``.
+    """Parse raw civ6-mcp observation payloads into a stable state bundle.
 
-    Accepts direct tool-name keys (``get_units``), short aliases
-    (``units``), and MCP SDK-ish result dictionaries containing ``content``
-    and/or ``structuredContent``.
+    Accepted mappings may use upstream tool names (``get_units``), short aliases
+    (``units``), overview-shaped payloads, or MCP SDK-ish result containers. The
+    output is a ``StateBundle`` with known tools routed to fixed text fields,
+    unknown non-empty tools preserved in ``extra``, and diagnostics normalized to
+    tuple/dict containers. Existing ``StateBundle`` instances are returned as-is.
     """
     if isinstance(raw_state, StateBundle):
         return raw_state
 
     bundle = StateBundle()
     if not isinstance(raw_state, dict):
-        bundle.overview = parse_game_overview(_unwrap_raw_mcp_payload(raw_state))
+        bundle.overview = parse_game_overview(raw_state)
         return bundle
 
     if _looks_like_overview_payload(raw_state):
@@ -280,11 +320,11 @@ def state_bundle_from_raw_mcp_state(raw_state: Any) -> StateBundle:
             continue
         key = str(raw_key)
         tool = _RAW_TOOL_ALIASES.get(key, key)
-        payload = _unwrap_raw_mcp_payload(raw_payload)
         if tool == "get_game_overview":
-            bundle.overview = parse_game_overview(payload)
+            bundle.overview = parse_game_overview(raw_payload)
             continue
 
+        payload = select_payload_body(raw_payload).value
         text = _render_state_payload(payload).strip()
         if not text:
             continue
@@ -297,53 +337,8 @@ def state_bundle_from_raw_mcp_state(raw_state: Any) -> StateBundle:
     return bundle
 
 
-def _unwrap_raw_mcp_payload(payload: Any) -> Any:
-    content = _payload_value(payload, "content")
-    if isinstance(content, list):
-        text_blocks = _extract_text_blocks(content)
-        if text_blocks:
-            return "\n".join(text_blocks)
-
-    content_blocks = _payload_value(payload, "content_blocks")
-    if isinstance(content_blocks, list | tuple):
-        text_blocks = [str(block) for block in content_blocks if str(block).strip()]
-        if text_blocks:
-            return "\n".join(text_blocks)
-
-    text = _payload_value(payload, "text")
-    if isinstance(text, str) and text.strip():
-        return text
-
-    for key in ("structuredContent", "structured_content"):
-        value = _payload_value(payload, key)
-        if value is not None:
-            return _dump_model(value)
-
-    return payload
-
-
 def _looks_like_overview_payload(payload: dict[str, Any]) -> bool:
     return any(key in payload for key in _OVERVIEW_PAYLOAD_KEYS)
-
-
-def _extract_text_blocks(content: list[Any]) -> list[str]:
-    text_blocks: list[str] = []
-    for block in content:
-        if isinstance(block, dict):
-            text = block.get("text")
-        else:
-            text = getattr(block, "text", None)
-        if isinstance(text, str):
-            text_blocks.append(text)
-    return text_blocks
-
-
-def _payload_value(payload: Any, key: str) -> Any | None:
-    if isinstance(payload, dict):
-        return payload.get(key)
-    if hasattr(payload, key):
-        return getattr(payload, key)
-    return None
 
 
 def _coerce_string_tuple(value: Any) -> tuple[str, ...]:
@@ -376,14 +371,6 @@ def _render_state_payload(payload: Any) -> str:
         return json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
     except TypeError:
         return str(payload)
-
-
-def _dump_model(value: Any) -> Any:
-    if hasattr(value, "model_dump"):
-        return value.model_dump()
-    if hasattr(value, "dict"):
-        return value.dict()
-    return value
 
 
 def _load_structured_payload(payload: Any) -> Any | None:
@@ -548,7 +535,7 @@ def _structured_civilization_fields(value: Any) -> tuple[str | None, str | None]
 
 @dataclass
 class StateBundle:
-    """Aggregated civ6-mcp state pulled at the start of a turn."""
+    """Parsed civ6-mcp observation sections and planner-safe diagnostics."""
 
     overview: GameOverviewSnapshot = field(default_factory=GameOverviewSnapshot)
     units_text: str = ""
@@ -567,7 +554,7 @@ class StateBundle:
     """Observation diagnostics that are safe to show the planner."""
 
     def to_planner_context(self, *, max_section_chars: int = 1200) -> str:
-        """Render a compact context block for the planner LLM."""
+        """Render this bundle as normalized planner context text."""
         from civStation.agent.modules.backend.civ6_mcp.observation_schema import (
             normalize_observation_bundle,
         )

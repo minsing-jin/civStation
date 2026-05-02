@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
+
 from civStation.agent.modules.backend.civ6_mcp.observation_schema import (
     CIV6_MCP_CONTEXT_FIELD_MAPPINGS,
     CIV6_MCP_OBSERVATION_SECTION_MAPPINGS,
@@ -18,6 +20,7 @@ from civStation.agent.modules.backend.civ6_mcp.state_parser import (
     GameOverviewSnapshot,
     StateBundle,
     parse_game_overview,
+    state_bundle_from_raw_mcp_state,
 )
 
 VALID_OVERVIEW = """\
@@ -290,6 +293,129 @@ def test_normalize_raw_mcp_game_state_converts_mcp_result_objects_to_planner_rea
     assert "Turn 115" in observation.game_observation_updates["situation_summary"]
 
 
+def test_normalized_observation_output_remains_stable_for_mixed_helper_payload_shapes() -> None:
+    payload = {
+        "game_overview": {
+            "content": [],
+            "structured_content": {
+                "turn_number": "118",
+                "era": "Future Era",
+                "game_speed": "Online",
+                "civilization": {"name": "Korea", "leader": "Seondeok"},
+                "gold_balance": "345",
+                "faith_balance": "27",
+                "totalPopulation": "33",
+                "militaryStrength": "512",
+                "unitCount": "14",
+                "yields": {
+                    "science": "612.5",
+                    "culture": 250,
+                    "gold": "+101.5",
+                    "faith": "18",
+                },
+                "researching": "OFFWORLD_MISSION",
+                "civicResearching": "EXODUS_IMPERATIVE",
+            },
+        },
+        "units": {
+            "content": [
+                {"type": "text", "text": "Units:"},
+                {"type": "text", "text": "- Giant Death Robot at (8, 9)"},
+            ]
+        },
+        "get_cities": {"content_blocks": ["Cities:", "- Seoul: pop 22"]},
+        "get_diplomacy": {"text": "Diplomacy:\n- Gilgamesh: allied"},
+        "get_trade_routes": {"content": [{"type": "text", "text": "Trade Routes:\n- Seoul -> Busan"}]},
+        "missing_tools": ("get_victory_progress",),
+        "failed_tools": {"get_pending_trades": "timeout"},
+        "malformed_tools": {"get_notifications": "empty response body"},
+    }
+    overview_text = (
+        '{"civicResearching": "EXODUS_IMPERATIVE", '
+        '"civilization": {"leader": "Seondeok", "name": "Korea"}, '
+        '"era": "Future Era", "faith_balance": "27", "game_speed": "Online", '
+        '"gold_balance": "345", "militaryStrength": "512", '
+        '"researching": "OFFWORLD_MISSION", "totalPopulation": "33", '
+        '"turn_number": "118", "unitCount": "14", '
+        '"yields": {"culture": 250, "faith": "18", "gold": "+101.5", "science": "612.5"}}'
+    )
+
+    assert asdict(normalize_raw_mcp_game_state(payload, max_section_chars=1200)) == {
+        "backend": "civ6-mcp",
+        "global_context_updates": {
+            "current_turn": 118,
+            "game_era": "Future",
+            "game_speed": "Online",
+            "civilization_name": "Korea",
+            "leader_name": "Seondeok",
+            "gold": 345,
+            "science_per_turn": 612.5,
+            "culture_per_turn": 250.0,
+            "gold_per_turn": 101.5,
+            "faith": 27,
+            "faith_per_turn": 18.0,
+            "total_population": 33,
+            "military_strength": 512,
+            "unit_count": 14,
+            "current_research": "OFFWORLD_MISSION",
+            "current_civic": "EXODUS_IMPERATIVE",
+        },
+        "game_observation_updates": {
+            "situation_summary": (
+                "Turn 118 | Era Future | Sci +612.5/t | Cul +250.0/t | "
+                "Research OFFWORLD_MISSION | Civic EXODUS_IMPERATIVE"
+            ),
+            "observation_fields": {
+                "current_turn": 118,
+                "game_era": "Future",
+                "game_speed": "Online",
+                "civilization_name": "Korea",
+                "leader_name": "Seondeok",
+                "gold": 345,
+                "science_per_turn": 612.5,
+                "culture_per_turn": 250.0,
+                "gold_per_turn": 101.5,
+                "faith": 27,
+                "faith_per_turn": 18.0,
+                "total_population": 33,
+                "military_strength": 512,
+                "unit_count": 14,
+                "current_research": "OFFWORLD_MISSION",
+                "current_civic": "EXODUS_IMPERATIVE",
+            },
+        },
+        "raw_sections": {
+            "OVERVIEW": overview_text,
+            "UNITS": "Units:\n- Giant Death Robot at (8, 9)",
+            "CITIES": "Cities:\n- Seoul: pop 22",
+            "DIPLOMACY": "Diplomacy:\n- Gilgamesh: allied",
+            "GET_TRADE_ROUTES": "Trade Routes:\n- Seoul -> Busan",
+            "STATE_DIAGNOSTICS": (
+                "missing: get_victory_progress\n"
+                "failed: get_pending_trades (timeout)\n"
+                "malformed: get_notifications (empty response body)"
+            ),
+        },
+        "planner_context": (
+            f"## OVERVIEW\n{overview_text}\n\n"
+            "## UNITS\nUnits:\n- Giant Death Robot at (8, 9)\n\n"
+            "## CITIES\nCities:\n- Seoul: pop 22\n\n"
+            "## DIPLOMACY\nDiplomacy:\n- Gilgamesh: allied\n\n"
+            "## GET_TRADE_ROUTES\nTrade Routes:\n- Seoul -> Busan\n\n"
+            "## STATE_DIAGNOSTICS\nmissing: get_victory_progress\n"
+            "failed: get_pending_trades (timeout)\n"
+            "malformed: get_notifications (empty response body)"
+        ),
+        "tool_results": {
+            "get_game_overview": overview_text,
+            "get_units": "Units:\n- Giant Death Robot at (8, 9)",
+            "get_cities": "Cities:\n- Seoul: pop 22",
+            "get_diplomacy": "Diplomacy:\n- Gilgamesh: allied",
+            "get_trade_routes": "Trade Routes:\n- Seoul -> Busan",
+        },
+    }
+
+
 def test_parse_observation_tool_response_validates_one_successful_get_tool_payload() -> None:
     parsed = parse_observation_tool_response(
         "get_game_overview",
@@ -312,6 +438,28 @@ def test_parse_observation_tool_response_validates_one_successful_get_tool_paylo
         "current_research": "OFFWORLD_MISSION",
     }
     assert parsed.normalized.tool_results["get_game_overview"]
+
+
+def test_observation_tool_response_matches_state_bundle_sdk_payload_shapes() -> None:
+    sdk_payloads = (
+        FakeMcpCallToolResult(content=[FakeMcpTextBlock("Units:\n- Builder at (3, 4)")]),
+        {
+            "content": [
+                {"type": "text", "text": "Units:"},
+                {"type": "text", "text": "- Builder at (3, 4)"},
+            ]
+        },
+        {"content_blocks": ["Units:", "- Builder at (3, 4)"]},
+        {"text": "Units:\n- Builder at (3, 4)"},
+        {"structuredContent": {"units": [{"type": "Builder", "location": [3, 4]}]}},
+    )
+
+    for payload in sdk_payloads:
+        parsed = parse_observation_tool_response("get_units", payload)
+        bundle = state_bundle_from_raw_mcp_state({"get_units": payload})
+
+        assert parsed.bundle.units_text == bundle.units_text
+        assert parsed.normalized.tool_results["get_units"] == bundle.units_text
 
 
 def test_parse_observation_tool_response_rejects_non_get_and_empty_payloads() -> None:

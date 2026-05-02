@@ -362,6 +362,80 @@ def test_run_one_turn_preserves_terminal_game_over(
     assert ctx.advanced_turns == []
 
 
+@pytest.mark.parametrize(
+    ("terminal_text", "expected_condition", "expected_game_over", "expected_phase"),
+    [
+        ("RUN ABORTED: operator stopped automation.", "aborted", False, "failed"),
+        ("GAME OVER - DEFEAT", "game_over", True, "game_over"),
+    ],
+)
+def test_run_one_turn_stops_on_terminal_response_prefixes(
+    monkeypatch: pytest.MonkeyPatch,
+    terminal_text: str,
+    expected_condition: str,
+    expected_game_over: bool,
+    expected_phase: str,
+) -> None:
+    class TerminalPrefixPlanner:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def plan(self, **_kwargs: object) -> PlannerResult:
+            return PlannerResult(
+                tool_calls=[
+                    ToolCall(
+                        tool="end_turn",
+                        arguments={
+                            "tactical": "No blockers.",
+                            "strategic": "Keep science pace.",
+                            "tooling": "All civ6-mcp calls completed.",
+                            "planning": "Observe next turn.",
+                            "hypothesis": "Next turn exposes new choices.",
+                        },
+                    ),
+                    ToolCall(tool="get_units"),
+                ]
+            )
+
+    class PrefixResponseClient:
+        def __init__(self, text: str) -> None:
+            self._text = text
+            self.calls: list[tuple[str, dict[str, Any]]] = []
+
+        def tool_schemas(self) -> dict[str, dict[str, object]]:
+            return {"end_turn": {}, "get_units": {}}
+
+        def has_tool(self, name: str) -> bool:
+            return name in {"end_turn", "get_units"}
+
+        def call_tool_result(self, name: str, arguments: dict[str, Any] | None = None) -> str:
+            self.calls.append((name, dict(arguments or {})))
+            if name != "end_turn":
+                raise AssertionError(f"turn loop continued after terminal prefix: {name}")
+            return self._text
+
+    client = PrefixResponseClient(terminal_text)
+    ctx = FakeContextManager()
+    monkeypatch.setattr(turn_loop_module, "Civ6McpToolPlanner", TerminalPrefixPlanner)
+
+    result = run_one_turn_civ6_mcp(
+        civ6_mcp_client=client,  # type: ignore[arg-type]
+        planner_provider=object(),
+        context_manager=ctx,  # type: ignore[arg-type]
+        observer_factory=lambda **_kwargs: FakeObserver(_active_turn_bundle()),
+    )
+
+    assert result.success is False
+    assert result.game_over is expected_game_over
+    assert result.terminal_condition == expected_condition
+    assert result.end_turn_called is True
+    assert result.end_turn_text == terminal_text
+    assert result.state.phase == expected_phase
+    assert result.error_message == f"terminal classification {expected_condition!r} at tool 'end_turn'"
+    assert [name for name, _arguments in client.calls] == ["end_turn"]
+    assert ctx.advanced_turns == []
+
+
 def test_run_one_turn_fails_and_logs_failed_operation_before_synthesizing_end_turn(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,

@@ -15,6 +15,8 @@ from typing import Any, Protocol, TypeAlias, runtime_checkable
 from civStation.agent.modules.backend.civ6_mcp.executor import ToolCall
 from civStation.agent.modules.backend.civ6_mcp.observation_schema import Civ6McpNormalizedObservation
 from civStation.agent.modules.backend.civ6_mcp.operations import (
+    _ACTION_TOOL_ORDER,
+    _OBSERVATION_TOOL_ORDER,
     ACTION_TOOLS,
     END_TURN_TOOL,
     OBSERVATION_TOOLS,
@@ -25,9 +27,16 @@ Civ6McpToolSchema: TypeAlias = Mapping[str, Any]
 Civ6McpToolCatalog: TypeAlias = Mapping[str, Civ6McpToolSchema]
 Civ6McpPlannerPayload: TypeAlias = dict[str, Any] | Sequence[Mapping[str, Any]]
 
+DEFAULT_PLANNER_TOOL_ALLOWLIST: tuple[str, ...] = (
+    *_OBSERVATION_TOOL_ORDER,
+    *_ACTION_TOOL_ORDER,
+    END_TURN_TOOL,
+)
+"""Canonical ordered civ6-mcp tool allow-list for planner prompts and defaults."""
+
 
 class Civ6McpIntentType(str, Enum):
-    """Planner intent categories understood by the civ6-mcp backend."""
+    """Planner intent categories for supported civ6-mcp tools."""
 
     OBSERVE = "observe"
     ACT = "act"
@@ -35,18 +44,14 @@ class Civ6McpIntentType(str, Enum):
 
 
 class Civ6McpActionType(str, Enum):
-    """Executable action categories for the civ6-mcp backend."""
+    """Executable action categories emitted for civ6-mcp tool calls."""
 
     TOOL_CALL = "tool_call"
 
 
 @dataclass(frozen=True)
 class Civ6McpPlannerIntent:
-    """A planner intent before execution.
-
-    The intent is still backend-specific: it identifies an upstream civ6-mcp
-    tool and its arguments rather than a VLM screen action.
-    """
+    """Planner intent describing one civ6-mcp tool before execution."""
 
     tool: str
     arguments: Civ6McpToolArguments = field(default_factory=dict)
@@ -61,7 +66,7 @@ class Civ6McpPlannerIntent:
         *,
         reasoning: str = "",
     ) -> Civ6McpPlannerIntent:
-        """Build an intent and infer its category from the civ6-mcp tool name."""
+        """Build an intent and classify the supported civ6-mcp tool name."""
         return cls(
             tool=tool,
             arguments=dict(arguments or {}),
@@ -71,11 +76,11 @@ class Civ6McpPlannerIntent:
 
     @property
     def type(self) -> Civ6McpIntentType:
-        """Alias for consumers that use action-schema style ``type`` fields."""
+        """Expose the intent category as an action-schema-style ``type`` field."""
         return self.intent_type
 
     def to_action(self) -> Civ6McpPlannerAction:
-        """Convert this intent into the executable backend action shape."""
+        """Return this intent as an executable civ6-mcp planner action."""
         return Civ6McpPlannerAction(
             tool=self.tool,
             arguments=dict(self.arguments),
@@ -83,17 +88,13 @@ class Civ6McpPlannerIntent:
         )
 
     def to_tool_call(self) -> ToolCall:
-        """Convert this intent directly into the executor's ToolCall."""
+        """Return this intent as the executor ``ToolCall`` shape."""
         return self.to_action().to_tool_call()
 
 
 @dataclass(frozen=True)
 class Civ6McpPlannerAction:
-    """Executable planner action for civ6-mcp.
-
-    This is the MCP backend counterpart to VLM ``AgentAction`` but represents a
-    JSON-RPC tool invocation, not coordinates or keyboard/mouse operations.
-    """
+    """Executable planner action for one civ6-mcp JSON-RPC tool call."""
 
     tool: str
     arguments: Civ6McpToolArguments = field(default_factory=dict)
@@ -102,7 +103,7 @@ class Civ6McpPlannerAction:
 
     @classmethod
     def from_tool_call(cls, call: ToolCall) -> Civ6McpPlannerAction:
-        """Build a planner action from an executor ToolCall."""
+        """Build a planner action from an executor ``ToolCall``."""
         return cls(
             tool=call.tool,
             arguments=dict(call.arguments),
@@ -111,11 +112,11 @@ class Civ6McpPlannerAction:
 
     @property
     def type(self) -> Civ6McpActionType:
-        """Alias for consumers that use action-schema style ``type`` fields."""
+        """Expose the action category as an action-schema-style ``type`` field."""
         return self.action_type
 
     def to_tool_call(self) -> ToolCall:
-        """Convert this action into the executor's ToolCall."""
+        """Return this action as the executor ``ToolCall`` shape."""
         return ToolCall(
             tool=self.tool,
             arguments=dict(self.arguments),
@@ -125,7 +126,7 @@ class Civ6McpPlannerAction:
 
 @dataclass
 class PlannerResult:
-    """Parsed output from a civ6-mcp planner invocation."""
+    """Parsed civ6-mcp planner output with executable tool calls."""
 
     tool_calls: list[ToolCall]
     raw_response: str = ""
@@ -133,20 +134,20 @@ class PlannerResult:
 
     @property
     def actions(self) -> list[ToolCall]:
-        """Alias for planner results consumed as backend actions."""
+        """Expose planner tool calls under the backend-action alias."""
         return self.tool_calls
 
 
 @runtime_checkable
 class Civ6McpPlannerResponse(Protocol):
-    """Response object returned by civStation text-capable LLM providers."""
+    """Minimal text response returned by civStation planner providers."""
 
     content: str
 
 
 @runtime_checkable
 class Civ6McpPlannerProvider(Protocol):
-    """Provider surface required by Civ6McpToolPlanner."""
+    """Text-provider surface required to request a civ6-mcp plan."""
 
     def _build_text_content(self, text: str) -> object:
         """Build a text-only content part for the provider."""
@@ -159,11 +160,11 @@ class Civ6McpPlannerProvider(Protocol):
 
 @runtime_checkable
 class Civ6McpPlanner(Protocol):
-    """Protocol implemented by civ6-mcp planners."""
+    """Planner protocol that converts civ6-mcp observations into tool calls."""
 
     @property
     def allowed_tools(self) -> tuple[str, ...]:
-        """Tool names the planner may emit."""
+        """Return tool names the planner may emit."""
         ...
 
     def render_tool_catalog(self) -> str:
@@ -178,7 +179,7 @@ class Civ6McpPlanner(Protocol):
         recent_calls: str,
         hitl_directive: str = "",
     ) -> PlannerResult:
-        """Produce a parsed civ6-mcp tool-call plan."""
+        """Return a parsed civ6-mcp tool-call plan from rendered state context."""
         ...
 
     def plan_from_observation(
@@ -189,12 +190,12 @@ class Civ6McpPlanner(Protocol):
         recent_calls: str,
         hitl_directive: str = "",
     ) -> PlannerResult:
-        """Produce a parsed civ6-mcp tool-call plan from an observation payload."""
+        """Return a parsed civ6-mcp tool-call plan from an observation payload."""
         ...
 
 
 def infer_civ6_mcp_intent_type(tool: str) -> Civ6McpIntentType:
-    """Infer a planner intent category from a supported civ6-mcp tool name."""
+    """Classify a supported civ6-mcp tool name as observe, act, or end-turn."""
     if tool == END_TURN_TOOL:
         return Civ6McpIntentType.END_TURN
     if tool in OBSERVATION_TOOLS:
@@ -228,6 +229,7 @@ __all__ = [
     "Civ6McpToolArguments",
     "Civ6McpToolCatalog",
     "Civ6McpToolSchema",
+    "DEFAULT_PLANNER_TOOL_ALLOWLIST",
     "PlannerResult",
     "infer_civ6_mcp_intent_type",
 ]

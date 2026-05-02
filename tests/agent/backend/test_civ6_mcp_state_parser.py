@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from dataclasses import asdict, fields
+
 import pytest
 
 from civStation.agent.modules.backend.civ6_mcp.state_parser import (
@@ -78,6 +81,59 @@ def test_parse_overview_resilient_to_empty_input() -> None:
     assert snap.current_turn is None
     assert snap.game_era is None
     assert snap.is_game_over is False
+
+
+def test_state_parser_output_shapes_remain_stable() -> None:
+    snap = parse_game_overview("")
+    bundle = state_bundle_from_raw_mcp_state({})
+
+    assert tuple(field.name for field in fields(snap)) == (
+        "raw_text",
+        "current_turn",
+        "game_era",
+        "game_speed",
+        "civilization_name",
+        "leader_name",
+        "gold",
+        "science_per_turn",
+        "culture_per_turn",
+        "gold_per_turn",
+        "faith",
+        "faith_per_turn",
+        "total_population",
+        "military_strength",
+        "unit_count",
+        "current_research",
+        "current_civic",
+        "is_game_over",
+        "victory_text",
+    )
+    assert snap.raw_text == ""
+    assert snap.is_game_over is False
+    assert all(getattr(snap, field.name) is None for field in fields(snap)[1:-2])
+    assert snap.victory_text is None
+
+    assert isinstance(bundle, StateBundle)
+    assert tuple(field.name for field in fields(bundle)) == (
+        "overview",
+        "units_text",
+        "cities_text",
+        "diplomacy_text",
+        "tech_civics_text",
+        "notifications_text",
+        "pending_diplomacy_text",
+        "pending_trades_text",
+        "victory_progress_text",
+        "extra",
+        "missing_tools",
+        "failed_tools",
+        "malformed_tools",
+    )
+    assert bundle.units_text == ""
+    assert bundle.extra == {}
+    assert bundle.missing_tools == ()
+    assert bundle.failed_tools == {}
+    assert bundle.malformed_tools == {}
 
 
 def test_parse_valid_civ6_mcp_overview_payload_extracts_context_fields() -> None:
@@ -310,6 +366,28 @@ def test_parse_structured_civ6_mcp_overview_payload() -> None:
     assert "STEAM_POWER" in snap.raw_text
 
 
+def test_parse_overview_accepts_sdk_style_structured_payload() -> None:
+    payload = FakeMcpCallToolResult(
+        structured_content={
+            "turn_number": "92",
+            "game_era": "Modern Era",
+            "sciencePerTurn": "199.5",
+            "current_research": "RADIO",
+            "current_civic": "MASS_MEDIA",
+        }
+    )
+
+    snap = parse_game_overview(payload)
+
+    assert snap.current_turn == 92
+    assert snap.game_era == "Modern"
+    assert snap.science_per_turn == 199.5
+    assert snap.current_research == "RADIO"
+    assert snap.current_civic == "MASS_MEDIA"
+    assert isinstance(snap.raw_text, str)
+    assert "RADIO" in snap.raw_text
+
+
 def test_state_bundle_from_raw_mcp_state_maps_tool_payloads() -> None:
     bundle = state_bundle_from_raw_mcp_state(
         {
@@ -397,6 +475,162 @@ def test_state_bundle_from_raw_mcp_state_accepts_mcp_result_objects() -> None:
     assert bundle.overview.current_research == "ROBOTICS"
     assert bundle.units_text == "Units:\n- Infantry at (5, 6)"
     assert bundle.notifications_text == "Notifications:\n- Choose civic"
+
+
+def test_state_bundle_output_remains_stable_for_mixed_helper_payload_shapes() -> None:
+    payload = {
+        "game_overview": {
+            "content": [],
+            "structured_content": {
+                "turn_number": "118",
+                "era": "Future Era",
+                "game_speed": "Online",
+                "civilization": {"name": "Korea", "leader": "Seondeok"},
+                "gold_balance": "345",
+                "faith_balance": "27",
+                "totalPopulation": "33",
+                "militaryStrength": "512",
+                "unitCount": "14",
+                "yields": {
+                    "science": "612.5",
+                    "culture": 250,
+                    "gold": "+101.5",
+                    "faith": "18",
+                },
+                "researching": "OFFWORLD_MISSION",
+                "civicResearching": "EXODUS_IMPERATIVE",
+            },
+        },
+        "units": {
+            "content": [
+                {"type": "text", "text": "Units:"},
+                {"type": "text", "text": "- Giant Death Robot at (8, 9)"},
+            ]
+        },
+        "get_cities": {"content_blocks": ["Cities:", "- Seoul: pop 22"]},
+        "get_diplomacy": {"text": "Diplomacy:\n- Gilgamesh: allied"},
+        "get_trade_routes": {"content": [{"type": "text", "text": "Trade Routes:\n- Seoul -> Busan"}]},
+        "missing_tools": ("get_victory_progress",),
+        "failed_tools": {"get_pending_trades": "timeout"},
+        "malformed_tools": {"get_notifications": "empty response body"},
+    }
+
+    assert asdict(state_bundle_from_raw_mcp_state(payload)) == {
+        "overview": {
+            "raw_text": (
+                '{"civicResearching": "EXODUS_IMPERATIVE", '
+                '"civilization": {"leader": "Seondeok", "name": "Korea"}, '
+                '"era": "Future Era", "faith_balance": "27", "game_speed": "Online", '
+                '"gold_balance": "345", "militaryStrength": "512", '
+                '"researching": "OFFWORLD_MISSION", "totalPopulation": "33", '
+                '"turn_number": "118", "unitCount": "14", '
+                '"yields": {"culture": 250, "faith": "18", "gold": "+101.5", "science": "612.5"}}'
+            ),
+            "current_turn": 118,
+            "game_era": "Future",
+            "game_speed": "Online",
+            "civilization_name": "Korea",
+            "leader_name": "Seondeok",
+            "gold": 345,
+            "science_per_turn": 612.5,
+            "culture_per_turn": 250.0,
+            "gold_per_turn": 101.5,
+            "faith": 27,
+            "faith_per_turn": 18.0,
+            "total_population": 33,
+            "military_strength": 512,
+            "unit_count": 14,
+            "current_research": "OFFWORLD_MISSION",
+            "current_civic": "EXODUS_IMPERATIVE",
+            "is_game_over": False,
+            "victory_text": None,
+        },
+        "units_text": "Units:\n- Giant Death Robot at (8, 9)",
+        "cities_text": "Cities:\n- Seoul: pop 22",
+        "diplomacy_text": "Diplomacy:\n- Gilgamesh: allied",
+        "tech_civics_text": "",
+        "notifications_text": "",
+        "pending_diplomacy_text": "",
+        "pending_trades_text": "",
+        "victory_progress_text": "",
+        "extra": {"get_trade_routes": "Trade Routes:\n- Seoul -> Busan"},
+        "missing_tools": ("get_victory_progress",),
+        "failed_tools": {"get_pending_trades": "timeout"},
+        "malformed_tools": {"get_notifications": "empty response body"},
+    }
+
+
+def test_state_bundle_parsed_output_matches_direct_and_consolidated_payload_paths() -> None:
+    direct_payload = {
+        "get_game_overview": VALID_CIV6_MCP_OVERVIEW_PAYLOAD,
+        "get_units": "Units:\n- Builder at (3, 4)\n- Scout at (1, 2)",
+        "get_cities": "Cities:\n- Seoul: pop 7",
+        "get_notifications": "Notifications:\n- Choose civic",
+        "get_trade_routes": "Trade Routes:\n- Seoul -> Busan",
+        "missing_tools": ("get_victory_progress",),
+        "failed_tools": {"get_diplomacy": "timeout"},
+        "malformed_tools": {"get_pending_trades": "empty response body"},
+    }
+    consolidated_payload = {
+        "game_overview": {"content": [FakeMcpTextBlock(VALID_CIV6_MCP_OVERVIEW_PAYLOAD)]},
+        "units": {
+            "content": [
+                {"type": "text", "text": "Units:"},
+                {"type": "text", "text": "- Builder at (3, 4)"},
+                {"type": "text", "text": "- Scout at (1, 2)"},
+            ]
+        },
+        "cities": {"content_blocks": ["Cities:", "- Seoul: pop 7"]},
+        "notifications": FakeMcpCallToolResult(text="Notifications:\n- Choose civic"),
+        "get_trade_routes": {"text": "Trade Routes:\n- Seoul -> Busan"},
+        "missing_tools": ["get_victory_progress"],
+        "failed_tools": {"get_diplomacy": "timeout"},
+        "malformed_tools": {"get_pending_trades": "empty response body"},
+    }
+
+    direct_bundle = state_bundle_from_raw_mcp_state(direct_payload)
+    consolidated_bundle = state_bundle_from_raw_mcp_state(consolidated_payload)
+
+    assert asdict(consolidated_bundle) == asdict(direct_bundle)
+
+
+def test_state_bundle_matches_fixture_regression_baselines(
+    civ6_mcp_parser_regression_cases: dict[str, dict[str, object]],
+) -> None:
+    assert set(civ6_mcp_parser_regression_cases) == {
+        "direct_tool_mapping",
+        "consolidated_alias_sdk_mapping",
+        "overview_only_structured_mapping",
+    }
+
+    for case_name, case in civ6_mcp_parser_regression_cases.items():
+        bundle = state_bundle_from_raw_mcp_state(case["raw_state"])
+
+        assert _jsonable(asdict(bundle)) == case["expected_bundle"], case_name
+
+
+def test_representative_parser_regression_inputs_match_baseline_sections(
+    civ6_mcp_parser_regression_cases: dict[str, dict[str, object]],
+) -> None:
+    direct_case = civ6_mcp_parser_regression_cases["direct_tool_mapping"]
+    consolidated_case = civ6_mcp_parser_regression_cases["consolidated_alias_sdk_mapping"]
+    structured_case = civ6_mcp_parser_regression_cases["overview_only_structured_mapping"]
+
+    direct_bundle = state_bundle_from_raw_mcp_state(direct_case["raw_state"])
+    consolidated_bundle = state_bundle_from_raw_mcp_state(consolidated_case["raw_state"])
+    structured_bundle = state_bundle_from_raw_mcp_state(structured_case["raw_state"])
+
+    assert _jsonable(asdict(direct_bundle)) == direct_case["expected_bundle"]
+    assert _jsonable(asdict(consolidated_bundle)) == direct_case["expected_bundle"]
+    assert consolidated_case["expected_bundle"] == direct_case["expected_bundle"]
+
+    assert _jsonable(asdict(structured_bundle)) == structured_case["expected_bundle"]
+    assert structured_bundle.to_planner_context(max_section_chars=1200) == (
+        f"## OVERVIEW\n{structured_case['expected_bundle']['overview']['raw_text']}"
+    )
+    assert direct_bundle.to_planner_context(max_section_chars=1200) == consolidated_bundle.to_planner_context(
+        max_section_chars=1200
+    )
 
 
 def test_state_bundle_from_raw_mcp_state_renders_string_lists_as_text_sections() -> None:
@@ -508,3 +742,7 @@ def test_state_bundle_renders_planner_context_with_truncation() -> None:
     assert "## UNITS" in rendered
     assert "(truncated)" in rendered
     assert len(rendered) < 2500
+
+
+def _jsonable(value: object) -> object:
+    return json.loads(json.dumps(value, sort_keys=True))

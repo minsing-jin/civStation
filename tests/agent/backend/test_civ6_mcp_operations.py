@@ -8,9 +8,13 @@ import pytest
 
 from civStation.agent.modules.backend.civ6_mcp.client import Civ6McpError
 from civStation.agent.modules.backend.civ6_mcp.operations import (
+    _DOCUMENTED_PREFIX_CLASSIFICATIONS as OPERATIONS_DOCUMENTED_PREFIX_CLASSIFICATIONS,
+)
+from civStation.agent.modules.backend.civ6_mcp.operations import (
     Civ6McpOperationDispatcher,
     Civ6McpRequestBuilder,
     SupportedCiv6McpOperation,
+    classify_civ6_mcp_text,
     coerce_civ6_mcp_requests,
 )
 
@@ -125,6 +129,11 @@ def test_dispatcher_classifies_terminal_text_and_stops_sequence() -> None:
     )
     assert [name for name, _args in client.calls] == ["get_units", "end_turn"]
     assert results[-1].classification == "game_over"
+
+
+@pytest.mark.parametrize(("text", "expected"), OPERATIONS_DOCUMENTED_PREFIX_CLASSIFICATIONS)
+def test_classify_text_covers_documented_upstream_prefixes(text: str, expected: str) -> None:
+    assert classify_civ6_mcp_text(text) == expected
 
 
 def test_dispatcher_rechecks_stop_predicate_between_requests() -> None:

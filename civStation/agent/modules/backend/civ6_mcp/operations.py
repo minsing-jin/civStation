@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from civStation.agent.modules.backend.civ6_mcp._payload import planner_tool_call_items
 from civStation.agent.modules.backend.civ6_mcp.client import Civ6McpClientProtocol, Civ6McpError
 from civStation.agent.modules.backend.civ6_mcp.response import (
     Civ6McpNormalizedResult,
@@ -23,84 +24,80 @@ logger = logging.getLogger(__name__)
 
 
 class SupportedCiv6McpOperation(str, Enum):
-    """Backend operation categories backed by upstream civ6-mcp tools."""
+    """Operation categories supported by the civ6-mcp backend."""
 
     OBSERVE = "observe"
     ACT = "act"
     END_TURN = "end_turn"
 
 
-OBSERVATION_TOOLS: frozenset[str] = frozenset(
-    {
-        "get_game_overview",
-        "get_units",
-        "get_cities",
-        "get_city_production",
-        "get_empire_resources",
-        "get_diplomacy",
-        "get_tech_civics",
-        "get_policies",
-        "get_governors",
-        "get_pantheon_beliefs",
-        "get_religion_beliefs",
-        "get_world_congress",
-        "get_great_people",
-        "get_notifications",
-        "get_pending_diplomacy",
-        "get_pending_trades",
-        "get_victory_progress",
-        "get_strategic_map",
-        "get_dedications",
-        "get_unit_promotions",
-        "get_purchasable_tiles",
-        "get_district_advisor",
-        "get_wonder_advisor",
-        "get_settle_advisor",
-        "get_global_settle_advisor",
-        "get_pathing_estimate",
-        "get_trade_routes",
-        "get_trade_destinations",
-        "get_trade_options",
-        "get_builder_tasks",
-        "get_religion_spread",
-    }
+_OBSERVATION_TOOL_ORDER: tuple[str, ...] = (
+    "get_game_overview",
+    "get_units",
+    "get_cities",
+    "get_city_production",
+    "get_empire_resources",
+    "get_diplomacy",
+    "get_tech_civics",
+    "get_policies",
+    "get_governors",
+    "get_pantheon_beliefs",
+    "get_religion_beliefs",
+    "get_world_congress",
+    "get_great_people",
+    "get_notifications",
+    "get_pending_diplomacy",
+    "get_pending_trades",
+    "get_victory_progress",
+    "get_strategic_map",
+    "get_dedications",
+    "get_unit_promotions",
+    "get_purchasable_tiles",
+    "get_district_advisor",
+    "get_wonder_advisor",
+    "get_settle_advisor",
+    "get_global_settle_advisor",
+    "get_pathing_estimate",
+    "get_trade_routes",
+    "get_trade_destinations",
+    "get_trade_options",
+    "get_builder_tasks",
+    "get_religion_spread",
 )
 
 
-ACTION_TOOLS: frozenset[str] = frozenset(
-    {
-        "unit_action",
-        "skip_remaining_units",
-        "city_action",
-        "set_city_production",
-        "set_city_focus",
-        "purchase_item",
-        "purchase_tile",
-        "set_research",
-        "set_policies",
-        "change_government",
-        "appoint_governor",
-        "assign_governor",
-        "promote_governor",
-        "promote_unit",
-        "upgrade_unit",
-        "send_envoy",
-        "send_diplomatic_action",
-        "form_alliance",
-        "propose_trade",
-        "respond_to_trade",
-        "propose_peace",
-        "respond_to_diplomacy",
-        "choose_pantheon",
-        "found_religion",
-        "choose_dedication",
-        "queue_wc_votes",
-        "patronize_great_person",
-        "recruit_great_person",
-        "reject_great_person",
-        "spy_action",
-        "dismiss_popup",
-    }
+_ACTION_TOOL_ORDER: tuple[str, ...] = (
+    "unit_action",
+    "skip_remaining_units",
+    "city_action",
+    "set_city_production",
+    "set_city_focus",
+    "purchase_item",
+    "purchase_tile",
+    "set_research",
+    "set_policies",
+    "change_government",
+    "appoint_governor",
+    "assign_governor",
+    "promote_governor",
+    "promote_unit",
+    "upgrade_unit",
+    "send_envoy",
+    "send_diplomatic_action",
+    "form_alliance",
+    "propose_trade",
+    "respond_to_trade",
+    "propose_peace",
+    "respond_to_diplomacy",
+    "choose_pantheon",
+    "found_religion",
+    "choose_dedication",
+    "queue_wc_votes",
+    "patronize_great_person",
+    "recruit_great_person",
+    "reject_great_person",
+    "spy_action",
+    "dismiss_popup",
 )
 
 
@@ -112,15 +109,38 @@ END_TURN_REFLECTION_FIELDS: tuple[str, ...] = (
     "planning",
     "hypothesis",
 )
+OBSERVATION_TOOLS: frozenset[str] = frozenset(_OBSERVATION_TOOL_ORDER)
+ACTION_TOOLS: frozenset[str] = frozenset(_ACTION_TOOL_ORDER)
 SUPPORTED_CIV6_MCP_TOOLS: frozenset[str] = OBSERVATION_TOOLS | ACTION_TOOLS | frozenset({END_TURN_TOOL})
 
 _TERMINAL_CLASSIFICATIONS = frozenset({"game_over", "aborted", "hang"})
 StopRequested = Callable[[], bool]
 
+# Documentation-only inventory for the public operations classifier wrapper.
+# Runtime classification remains delegated to response.py so prefix behavior
+# stays centralized and cannot diverge from normalized MCP result handling.
+_DOCUMENTED_PREFIX_CLASSIFICATIONS: tuple[tuple[str, str], ...] = (
+    ("GAME OVER - VICTORY! You won a Science victory.", "game_over"),
+    ("*** GAME OVER - DEFEAT ***", "game_over"),
+    ("RUN ABORTED: operator stopped automation.", "aborted"),
+    ("HANG:57:AutoSave_0057|AI turn did not finish.", "hang"),
+    ("HANG RECOVERY FAILED after repeated no-op turns.", "hang"),
+    ("Error: must specify a known tech", "error"),
+    ("Tool failed:\nError: must specify a known tech", "error"),
+    ("Traceback (most recent call last):", "error"),
+    ("NO_ENEMY: target not attackable until next turn.", "error"),
+    ("ERR:NO_ENEMY|target not attackable until next turn.", "error"),
+    ("Cannot end turn: choose production first.", "blocked"),
+    ("End turn requested, but units still need orders.", "soft_block"),
+    ("civ6-mcp tool 'end_turn' timed out after 120s", "timeout"),
+    ("request timed out while waiting for FireTuner", "timeout"),
+    ("asyncio.exceptions.TimeoutError: civ6-mcp request exceeded 30s", "timeout"),
+)
+
 
 @dataclass(frozen=True)
 class Civ6McpRequest:
-    """A validated tool request to dispatch to the upstream civ6-mcp server."""
+    """Validated request for one upstream civ6-mcp tool call."""
 
     tool: str
     arguments: dict[str, Any] = field(default_factory=dict)
@@ -130,7 +150,7 @@ class Civ6McpRequest:
 
 @dataclass(frozen=True)
 class Civ6McpDispatchResult:
-    """Outcome of dispatching a single civ6-mcp request."""
+    """Result metadata from dispatching one civ6-mcp request."""
 
     request: Civ6McpRequest
     success: bool = False
@@ -142,11 +162,11 @@ class Civ6McpDispatchResult:
 
 
 class Civ6McpRequestBuilder:
-    """Construct typed requests for the civ6-mcp backend operation surface."""
+    """Build validated requests for supported civ6-mcp operations."""
 
     @classmethod
     def observation(cls, tool: str, arguments: dict[str, Any] | None = None, *, reasoning: str = "") -> Civ6McpRequest:
-        """Build an observation request, e.g. ``get_game_overview``."""
+        """Build a validated observation request such as ``get_game_overview``."""
         request = cls.build(tool, arguments, operation=SupportedCiv6McpOperation.OBSERVE, reasoning=reasoning)
         if not is_civ6_mcp_observation_tool(request.tool):
             raise ValueError(f"Tool {request.tool!r} is not a civ6-mcp observation operation.")
@@ -154,7 +174,7 @@ class Civ6McpRequestBuilder:
 
     @classmethod
     def action(cls, tool: str, arguments: dict[str, Any] | None = None, *, reasoning: str = "") -> Civ6McpRequest:
-        """Build an action request, e.g. ``set_research`` or ``unit_action``."""
+        """Build a validated action request such as ``set_research`` or ``unit_action``."""
         request = cls.build(tool, arguments, operation=SupportedCiv6McpOperation.ACT, reasoning=reasoning)
         if request.tool not in ACTION_TOOLS:
             raise ValueError(f"Tool {request.tool!r} is not a civ6-mcp action operation.")
@@ -171,7 +191,7 @@ class Civ6McpRequestBuilder:
         hypothesis: str,
         reasoning: str = "",
     ) -> Civ6McpRequest:
-        """Build the required civ6-mcp ``end_turn`` request with five reflections."""
+        """Build the required ``end_turn`` request with all reflection fields."""
         arguments = {
             "tactical": tactical,
             "strategic": strategic,
@@ -197,7 +217,7 @@ class Civ6McpRequestBuilder:
         reasoning: str = "",
         require_supported: bool = True,
     ) -> Civ6McpRequest:
-        """Build and validate a civ6-mcp tool request."""
+        """Build a normalized tool request and validate its operation category."""
         if not isinstance(tool, str) or not tool:
             raise ValueError("civ6-mcp request tool must be a non-empty string.")
         if require_supported and tool not in SUPPORTED_CIV6_MCP_TOOLS and not _is_dynamic_observation_tool(tool):
@@ -220,13 +240,13 @@ class Civ6McpRequestBuilder:
 
 
 class Civ6McpOperationDispatcher:
-    """Dispatch validated civ6-mcp requests through a client protocol."""
+    """Dispatch validated civ6-mcp requests through a synchronous client."""
 
     def __init__(self, client: Civ6McpClientProtocol) -> None:
         self._client = client
 
     def dispatch(self, request: Civ6McpRequest) -> Civ6McpDispatchResult:
-        """Invoke one request and classify the textual response."""
+        """Validate and invoke one request, returning normalized result metadata."""
         try:
             validate_civ6_mcp_request(request)
         except ValueError as exc:
@@ -300,7 +320,7 @@ class Civ6McpOperationDispatcher:
         stop_on_terminal: bool = True,
         stop_requested: StopRequested | None = None,
     ) -> list[Civ6McpDispatchResult]:
-        """Dispatch requests in order and stop on terminal civ6-mcp responses."""
+        """Dispatch requests in order and optionally stop on terminal outcomes."""
         results: list[Civ6McpDispatchResult] = []
         for request in requests:
             if stop_requested is not None and stop_requested():
@@ -319,7 +339,7 @@ class Civ6McpOperationDispatcher:
 
 
 def operation_for_tool(tool: str) -> SupportedCiv6McpOperation:
-    """Infer the backend operation category for a supported civ6-mcp tool."""
+    """Infer the supported operation category for a civ6-mcp tool name."""
     if tool == END_TURN_TOOL:
         return SupportedCiv6McpOperation.END_TURN
     if is_civ6_mcp_observation_tool(tool):
@@ -328,7 +348,7 @@ def operation_for_tool(tool: str) -> SupportedCiv6McpOperation:
 
 
 def validate_civ6_mcp_request(request: Civ6McpRequest) -> None:
-    """Validate a request before dispatch."""
+    """Validate a request's tool, arguments, operation, and end-turn fields."""
     if request.tool not in SUPPORTED_CIV6_MCP_TOOLS and not _is_dynamic_observation_tool(request.tool):
         raise ValueError(f"Unsupported civ6-mcp tool: {request.tool!r}")
     if not isinstance(request.arguments, dict):
@@ -343,22 +363,9 @@ def validate_civ6_mcp_request(request: Civ6McpRequest) -> None:
 
 
 def coerce_civ6_mcp_requests(payload: Any) -> list[Civ6McpRequest]:
-    """Normalize planner JSON into validated civ6-mcp requests.
-
-    Accepts either ``{"tool_calls": [...]}`` or the bare list form.
-    """
-    if isinstance(payload, dict) and "tool_calls" in payload:
-        items = payload["tool_calls"]
-    elif isinstance(payload, list):
-        items = payload
-    else:
-        raise ValueError(f"Unexpected planner payload shape: {type(payload).__name__}")
-
-    if not isinstance(items, list):
-        raise ValueError("Planner payload 'tool_calls' must be a list.")
-
+    """Convert planner tool-call payloads into validated civ6-mcp requests."""
     requests: list[Civ6McpRequest] = []
-    for raw in items:
+    for raw in planner_tool_call_items(payload):
         if not isinstance(raw, dict):
             raise ValueError(f"Tool call entry must be an object, got {type(raw).__name__}")
         tool = raw.get("tool") or raw.get("name")
@@ -378,12 +385,18 @@ def coerce_civ6_mcp_requests(payload: Any) -> list[Civ6McpRequest]:
 
 
 def classify_civ6_mcp_text(text: str) -> str:
-    """Classify civ6-mcp text and return the stable string value."""
+    """Classify civ6-mcp response text as a stable string value.
+
+    Documented upstream prefixes include terminal banners, abort/hang markers,
+    tool errors, end-turn blockers, and timeout messages. The examples are
+    captured in ``_DOCUMENTED_PREFIX_CLASSIFICATIONS`` while the actual
+    precedence rules remain centralized in ``response.py``.
+    """
     return _classify_response_text(text).value
 
 
 def is_civ6_mcp_observation_tool(tool: str) -> bool:
-    """Return whether a tool name represents a read-only civ6-mcp observation."""
+    """Return whether a tool name is an allowlisted or dynamic observation."""
     return tool in OBSERVATION_TOOLS or _is_dynamic_observation_tool(tool)
 
 

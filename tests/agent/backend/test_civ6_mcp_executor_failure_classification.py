@@ -9,7 +9,13 @@ from typing import Any
 import pytest
 
 from civStation.agent.modules.backend.civ6_mcp.client import Civ6McpError
-from civStation.agent.modules.backend.civ6_mcp.executor import Civ6McpExecutor, ToolCall
+from civStation.agent.modules.backend.civ6_mcp.executor import (
+    _DOCUMENTED_PREFIX_CLASSIFICATIONS as EXECUTOR_DOCUMENTED_PREFIX_CLASSIFICATIONS,
+)
+from civStation.agent.modules.backend.civ6_mcp.executor import (
+    Civ6McpExecutor,
+    ToolCall,
+)
 from civStation.agent.modules.backend.civ6_mcp.response import normalize_mcp_response_timeout
 
 END_TURN_ARGUMENTS = {
@@ -194,9 +200,11 @@ def test_execute_classifies_error_responses_without_vlm_components(
     ("text", "expected_category", "expected_status", "expected_success", "expected_terminal", "expected_retryable"),
     [
         ("Error: must specify a known tech", "error", "fatal", False, False, False),
+        ("NO_ENEMY: target not attackable until next turn.", "error", "fatal", False, False, False),
         ("Cannot end turn: incoming trade deal pending.", "blocked", "blocked", False, False, False),
         ("End turn requested but units still need orders.", "soft_block", "retryable", True, False, True),
         ("RUN ABORTED: FireTuner bridge disconnected.", "aborted", "aborted", False, True, False),
+        ("HANG:57:AutoSave_0057|AI turn did not finish.", "hang", "hang", False, True, False),
         ("HANG RECOVERY FAILED after repeated end-turn checks.", "hang", "hang", False, True, False),
         ("*** GAME OVER - VICTORY ***", "game_over", "game_over", False, True, False),
     ],
@@ -224,6 +232,30 @@ def test_executor_maps_tool_response_failures_to_expected_categories(
     assert client.calls == [("end_turn", END_TURN_ARGUMENTS)]
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "NO_ENEMY: target not attackable until next turn.",
+        "ERR:NO_ENEMY|target not attackable until next turn.",
+    ],
+)
+def test_executor_classifies_combat_no_enemy_prefixes_as_fatal_errors(text: str) -> None:
+    arguments = {"unit_id": 7, "action": "ATTACK", "target": "barbarian_scout"}
+    client = FakeTextClient(responses={"unit_action": text}, known={"unit_action"})
+    executor = Civ6McpExecutor(client)
+
+    result = executor.execute(ToolCall(tool="unit_action", arguments=arguments))
+
+    assert result.success is False
+    assert result.classification == "error"
+    assert result.status == "fatal"
+    assert result.terminal is False
+    assert result.retryable is False
+    assert result.text == text
+    assert result.error == text
+    assert client.calls == [("unit_action", arguments)]
+
+
 def test_executor_classifies_backend_exception_with_civ6_mcp_failure_prefix() -> None:
     client = FakeTextClient(
         responses={"end_turn": Civ6McpError("RUN ABORTED: upstream civ6-mcp server exited.")},
@@ -238,6 +270,11 @@ def test_executor_classifies_backend_exception_with_civ6_mcp_failure_prefix() ->
     assert result.text == ""
     assert result.error == "RUN ABORTED: upstream civ6-mcp server exited."
     assert client.calls == [("end_turn", END_TURN_ARGUMENTS)]
+
+
+@pytest.mark.parametrize(("text", "expected_classification"), EXECUTOR_DOCUMENTED_PREFIX_CLASSIFICATIONS)
+def test_executor_classify_matches_documented_prefix_inventory(text: str, expected_classification: str) -> None:
+    assert Civ6McpExecutor._classify(text) == expected_classification
 
 
 def test_executor_preserves_typed_timeout_failure_category() -> None:

@@ -136,6 +136,55 @@ def test_classify_civ6_mcp_status_applies_precedence_before_success_default() ->
     assert classify_civ6_mcp_status(text) == Civ6McpClassificationStatus.GAME_OVER
 
 
+def test_cannot_end_turn_colon_prefix_is_blocked_across_normalizers() -> None:
+    text = "Cannot end turn: choose production first."
+    normalized_results = (
+        normalize_mcp_response_text("end_turn", {}, text),
+        normalize_mcp_tool_result("end_turn", {}, {"content": [{"type": "text", "text": text}]}),
+        normalize_mcp_response_error("end_turn", {}, text),
+        normalize_mcp_response_exception("end_turn", {}, RuntimeError(text)),
+    )
+
+    assert classify_civ6_mcp_status(text) == Civ6McpClassificationStatus.BLOCKED
+    assert classify_civ6_mcp_text(text) == Civ6McpResponseClassification.BLOCKED
+    assert classify_civ6_mcp_exception_status(RuntimeError(text)) == Civ6McpClassificationStatus.BLOCKED
+    assert classify_civ6_mcp_exception(RuntimeError(text)) == Civ6McpResponseClassification.BLOCKED
+    for result in normalized_results:
+        assert result.status == Civ6McpClassificationStatus.BLOCKED
+        assert result.classification == Civ6McpResponseClassification.BLOCKED
+        assert result.success is False
+        assert result.error == text
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "NO_ENEMY: target not attackable until next turn.",
+        "ERR:NO_ENEMY|target not attackable until next turn.",
+    ],
+)
+def test_no_enemy_prefix_is_fatal_across_combat_response_normalizers(text: str) -> None:
+    arguments = {"unit_id": 7, "action": "ATTACK", "target": "barbarian_scout"}
+    normalized_results = (
+        normalize_mcp_response_text("unit_action", arguments, text),
+        normalize_mcp_tool_result("unit_action", arguments, {"content": [{"type": "text", "text": text}]}),
+        normalize_mcp_response_error("unit_action", arguments, text),
+        normalize_mcp_response_exception("unit_action", arguments, RuntimeError(text)),
+    )
+
+    assert classify_civ6_mcp_status(text) == Civ6McpClassificationStatus.FATAL
+    assert classify_civ6_mcp_text(text) == Civ6McpResponseClassification.ERROR
+    assert classify_civ6_mcp_exception_status(RuntimeError(text)) == Civ6McpClassificationStatus.FATAL
+    assert classify_civ6_mcp_exception(RuntimeError(text)) == Civ6McpResponseClassification.ERROR
+    for result in normalized_results:
+        assert result.tool == "unit_action"
+        assert result.arguments == arguments
+        assert result.status == Civ6McpClassificationStatus.FATAL
+        assert result.classification == Civ6McpResponseClassification.ERROR
+        assert result.success is False
+        assert result.error == text
+
+
 @pytest.mark.parametrize(
     ("exc", "expected_status", "expected_legacy"),
     [

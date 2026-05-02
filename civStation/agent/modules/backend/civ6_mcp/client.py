@@ -38,16 +38,16 @@ logger = logging.getLogger(__name__)
 
 
 class Civ6McpError(RuntimeError):
-    """Raised when the civ6-mcp server returns an error or fails to start."""
+    """Base error for civ6-mcp startup, connection, and tool-call failures."""
 
 
 class Civ6McpUnavailableError(Civ6McpError):
-    """Raised when the civ6-mcp install or `uv`/`python` runtime is missing."""
+    """Raised when the civ6-mcp checkout or launcher runtime is unavailable."""
 
 
 @dataclass(frozen=True)
 class Civ6McpHealth:
-    """Snapshot of the stdio MCP connection health."""
+    """Connection-health snapshot for the civ6-mcp stdio session."""
 
     ok: bool
     started: bool
@@ -66,16 +66,16 @@ STARTUP_CANCEL_DRAIN_TIMEOUT_SECONDS = 1.0
 
 @runtime_checkable
 class Civ6McpClientProtocol(Protocol):
-    """Public client surface consumed by civ6-mcp backend components."""
+    """Synchronous client contract used by civ6-mcp backend components."""
 
     @property
     def tool_names(self) -> set[str]:
-        """Names of tools exposed by the connected civ6-mcp server."""
+        """Tool names exposed by the connected civ6-mcp server."""
         ...
 
     @property
     def tool_catalog(self) -> dict[str, dict[str, Any]]:
-        """MCP tool metadata loaded during startup and later health refreshes."""
+        """Tool metadata from startup and later health refreshes."""
         ...
 
     def has_tool(self, name: str) -> bool:
@@ -83,26 +83,26 @@ class Civ6McpClientProtocol(Protocol):
         ...
 
     def tool_schemas(self) -> dict[str, dict[str, Any]]:
-        """Return MCP tool metadata keyed by tool name."""
+        """Return tool metadata keyed by MCP tool name."""
         ...
 
     def health_check(self, required_tools: set[str] | frozenset[str] | None = None) -> Civ6McpHealth:
-        """Return current MCP connection health after probing the session."""
+        """Refresh the tool catalog and return current connection health."""
         ...
 
     @property
     def startup_health(self) -> Civ6McpHealth:
-        """Required-tool validation captured from the startup tool catalog."""
+        """Startup required-tool validation result."""
         ...
 
     @property
     def has_required_tools(self) -> bool:
-        """Return whether startup catalog validation found every required tool."""
+        """Return whether the startup catalog includes every required tool."""
         ...
 
     @property
     def missing_required_tools(self) -> frozenset[str]:
-        """Required civ6-mcp tool names absent from the startup catalog."""
+        """Required civ6-mcp tool names missing from the startup catalog."""
         ...
 
     def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> str:
@@ -114,13 +114,13 @@ class Civ6McpClientProtocol(Protocol):
         name: str,
         arguments: dict[str, Any] | None = None,
     ) -> Civ6McpNormalizedResult:
-        """Invoke a civ6-mcp tool and return a normalized typed response."""
+        """Invoke a civ6-mcp tool and return normalized result metadata."""
         ...
 
 
 @dataclass
 class Civ6McpConfig:
-    """How to launch and talk to the upstream civ6-mcp server."""
+    """Configuration for launching and calling the upstream civ6-mcp server."""
 
     install_path: Path
     """Absolute path to the `civ6-mcp` checkout (where pyproject.toml lives)."""
@@ -209,13 +209,7 @@ class Civ6McpConfig:
         launcher: str | None = None,
         env_overrides: dict[str, str] | None = None,
     ) -> Civ6McpConfig:
-        """Build a config from CLI/env hints with sensible fallbacks.
-
-        Resolution order for install_path:
-            1. explicit argument
-            2. CIV6_MCP_PATH env var
-            3. ~/civ6-mcp
-        """
+        """Build a config from explicit arguments, environment variables, and defaults."""
         path: Path
         if install_path is not None:
             path = Path(install_path).expanduser().resolve()
@@ -243,7 +237,7 @@ class Civ6McpConfig:
         return cls(install_path=path, launcher=chosen_launcher, env_overrides=merged_env)
 
     def validate(self) -> None:
-        """Check the install path looks usable; raise Civ6McpUnavailableError otherwise."""
+        """Validate the civ6-mcp install path, launcher value, and launcher binary."""
         install_path = self._resolved_install_path()
         launcher = self._required_config_value("launcher")
         launcher = self._validate_launcher_type(launcher)
@@ -264,7 +258,7 @@ class Civ6McpConfig:
         self._resolve_launcher_binary(launcher)
 
     def server_command(self) -> list[str]:
-        """Build the argv used to launch the civ6-mcp stdio server."""
+        """Build the command used to launch the civ6-mcp stdio server."""
         launcher = self._required_config_value("launcher")
         launcher = self._validate_launcher_type(launcher)
         install_path = self._resolved_install_path()
@@ -288,19 +282,7 @@ class Civ6McpConfig:
 
 
 class Civ6McpClient:
-    """Synchronous stdio client wrapper around the upstream MCP server.
-
-    Lifecycle::
-
-        client = Civ6McpClient(config)
-        client.start()
-        text = client.call_tool("get_game_overview")
-        ...
-        client.stop()
-
-    Thread-safety: `call_tool` is safe to call from any thread; calls are
-    serialized onto the internal event loop.
-    """
+    """Thread-safe synchronous client for the upstream civ6-mcp stdio server."""
 
     def __init__(self, config: Civ6McpConfig) -> None:
         self.config = config
@@ -319,7 +301,7 @@ class Civ6McpClient:
     # ----- lifecycle -------------------------------------------------
 
     def start(self) -> None:
-        """Spawn the upstream server and complete the MCP handshake."""
+        """Start the upstream server and complete the MCP handshake."""
         with self._lock:
             if self._started:
                 return
@@ -372,7 +354,7 @@ class Civ6McpClient:
             )
 
     def stop(self) -> None:
-        """Tear down the MCP session and stop the event-loop thread."""
+        """Close the MCP session and stop the event-loop thread."""
         with self._lock:
             try:
                 if self._has_mcp_contexts():
@@ -384,31 +366,37 @@ class Civ6McpClient:
                 self._teardown_loop()
 
     def __enter__(self) -> Civ6McpClient:
+        """Start the client and return it for context-manager use."""
         self.start()
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
+        """Stop the client when leaving a context manager."""
         self.stop()
 
     # ----- tool surface ---------------------------------------------
 
     @property
     def tool_names(self) -> set[str]:
+        """Tool names currently known from the civ6-mcp catalog."""
         return set(self._tool_names)
 
     @property
     def tool_catalog(self) -> dict[str, dict[str, Any]]:
+        """Tool metadata keyed by name from the latest civ6-mcp catalog."""
         return dict(self._tool_schemas)
 
     def has_tool(self, name: str) -> bool:
+        """Return whether the connected civ6-mcp server exposes ``name``."""
         return name in self._tool_names
 
     def tool_schemas(self) -> dict[str, dict[str, Any]]:
+        """Return a copy of MCP tool metadata keyed by tool name."""
         return self.tool_catalog
 
     @property
     def startup_health(self) -> Civ6McpHealth:
-        """Required-tool validation captured from the startup tool catalog."""
+        """Startup required-tool validation result."""
         if self._startup_health is not None:
             return self._startup_health
         return self._catalog_health(
@@ -418,21 +406,16 @@ class Civ6McpClient:
 
     @property
     def has_required_tools(self) -> bool:
-        """Return whether startup catalog validation found every required tool."""
+        """Return whether the startup catalog includes every required tool."""
         return self.startup_health.ok
 
     @property
     def missing_required_tools(self) -> frozenset[str]:
-        """Required civ6-mcp tool names absent from the startup catalog."""
+        """Required civ6-mcp tool names missing from the startup catalog."""
         return self.startup_health.missing_required_tools
 
     def health_check(self, required_tools: set[str] | frozenset[str] | None = None) -> Civ6McpHealth:
-        """Probe the MCP session and refresh the known tool catalog.
-
-        The check is intentionally explicit. VLM callers never reach this
-        method, and civ6-mcp startup failures remain civ6-mcp failures rather
-        than falling back to computer-use.
-        """
+        """Refresh the tool catalog and return current connection health."""
         required = frozenset(required_tools) if required_tools is not None else DEFAULT_HEALTH_REQUIRED_TOOLS
         if not self._started or self._session is None:
             missing = required.difference(self._tool_names)
@@ -454,13 +437,7 @@ class Civ6McpClient:
             raise Civ6McpError(f"civ6-mcp health check failed: {exc}") from exc
 
     def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> str:
-        """Invoke a server tool and return the textual result.
-
-        The upstream server returns narrated text (see end_turn.py et al.).
-        Errors arrive either as text-prefixed bodies (`"Error: ..."`) or as
-        JSON-RPC `isError: true`. Both are surfaced; callers should pattern-
-        match the prefixes documented in civ6-mcp/AGENTS.md.
-        """
+        """Invoke a civ6-mcp tool and return text, raising on error metadata."""
         result = self.call_tool_result(name, arguments)
         if result.timed_out:
             raise Civ6McpError(result.error)
@@ -473,7 +450,7 @@ class Civ6McpClient:
         name: str,
         arguments: dict[str, Any] | None = None,
     ) -> Civ6McpNormalizedResult:
-        """Invoke a server tool and return a typed normalized result."""
+        """Invoke a civ6-mcp tool and return normalized result metadata."""
         if not self._started:
             raise Civ6McpError("Civ6McpClient.start() must be called before call_tool().")
         request_arguments = arguments or {}

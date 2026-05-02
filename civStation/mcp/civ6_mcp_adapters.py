@@ -89,6 +89,7 @@ def make_civ6_mcp_router_adapter(
     """Routing is a no-op for civ6-mcp — there is no screen to classify."""
 
     def adapter(session: Any, pil_image: Any) -> Civ6McpRouteResult:  # noqa: ARG001 - builtin_router parity
+        """Return the fixed civ6-mcp primitive route for outward MCP callers."""
         return {
             "primitive": "civ6_mcp",
             "reasoning": "civ6-mcp backend does not classify screenshots; planner picks tools directly.",
@@ -119,6 +120,7 @@ def make_civ6_mcp_planner_adapter(
         strategy_override: str | None = None,
         recent_actions_override: str | None = None,
     ) -> AgentAction:
+        """Observe state, plan civ6-mcp tool calls, and encode them as AgentAction."""
         _raise_if_non_civ6_mcp_primitive(primitive_name)
         if provider_factory is None:
             raise RuntimeError("civ6-mcp planner adapter requires a provider_factory")
@@ -160,6 +162,7 @@ def make_civ6_mcp_observer_adapter(client: Civ6McpClientProtocol) -> Callable[[A
     """Translate upstream civ6-mcp observations into the existing outward schema."""
 
     def adapter(session: Any, pil_image: Any) -> Civ6McpObservationResult:  # noqa: ARG001
+        """Observe civ6-mcp state and encode it for the outward MCP observer slot."""
         observer = Civ6McpObserver(client, _CtxView(session))
         bundle = observer.observe()
         observation = observer.last_observation or normalize_observation_bundle(bundle)
@@ -188,6 +191,7 @@ def make_civ6_mcp_executor_adapter(client: Civ6McpClientProtocol) -> Callable[[A
     executor = Civ6McpExecutor(client)
 
     def adapter(session: Any, action: AgentAction, capture: Any) -> dict[str, Any]:  # noqa: ARG001
+        """Decode a civ6-mcp AgentAction envelope and execute its tool calls."""
         if action.action not in (CIV6_MCP_TOOL_PLAN_ACTION, CIV6_MCP_TOOL_CALL_ACTION):
             return {
                 "executed": False,
