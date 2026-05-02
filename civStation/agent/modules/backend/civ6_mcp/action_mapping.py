@@ -55,7 +55,7 @@ class Civ6McpActionMappingError(ValueError):
 
 @dataclass(frozen=True)
 class Civ6McpFreeFormActionType:
-    """Describe a free-form civ6-mcp action type and its upstream tool target."""
+    """Describe a planner-facing action type and its upstream tool target."""
 
     action_type: str
     tool: str
@@ -157,14 +157,14 @@ PLANNED_ACTION_TYPE_TO_MCP_TOOL: dict[str, str] = dict(CIV6_MCP_FREE_FORM_ACTION
 
 @dataclass(frozen=True)
 class MappedCiv6McpAction:
-    """Store the canonical tool call metadata produced by action mapping."""
+    """Carry validated tool-call metadata produced by action mapping."""
 
     tool: str
     arguments: dict[str, Any]
     reasoning: str = ""
 
     def to_tool_call(self) -> ToolCall:
-        """Build the executor-facing tool call from canonical mapping metadata."""
+        """Build the executor-facing tool call from validated mapping metadata."""
         return ToolCall(
             tool=self.tool,
             arguments=dict(self.arguments),
@@ -173,13 +173,13 @@ class MappedCiv6McpAction:
 
 
 def map_civ6_mcp_action(planned_action: Any) -> ToolCall:
-    """Map one supported planner action shape into a validated executor `ToolCall`."""
+    """Map one supported planner action shape into a validated executor ``ToolCall``."""
     mapped = map_civ6_mcp_action_details(planned_action)
     return mapped.to_tool_call()
 
 
 def map_civ6_mcp_action_details(planned_action: Any) -> MappedCiv6McpAction:
-    """Map one supported planner action while retaining canonical tool metadata."""
+    """Map one supported planner action while retaining validated tool metadata."""
     try:
         if isinstance(planned_action, ToolCall):
             return _validate_tool_call(planned_action)

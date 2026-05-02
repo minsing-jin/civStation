@@ -21,31 +21,64 @@ Output-shape invariants for the parsing helpers:
   one validated successful ``get_*`` payload and rejects non-observation or
   empty payloads with ``ValueError``.
 
-Parsing helper output inventory:
-- ``normalize_observation_bundle``: ``StateBundle`` to
-  ``Civ6McpNormalizedObservation`` with context-update dictionaries,
-  ``raw_sections``, ``planner_context``, and ``tool_results`` populated from
-  parsed bundle fields.
-- ``normalize_raw_mcp_game_state``: raw civ6-mcp payload mapping/object to the
-  same normalized envelope after ``state_bundle_from_raw_mcp_state`` parsing.
-- ``parse_observation_tool_response``: one validated ``get_*`` payload to
-  ``Civ6McpToolObservation(tool, bundle, normalized)``.
-- ``build_global_context_updates``: ``StateBundle`` to
-  ``dict[str, object]`` containing typed ``update_global_context`` kwargs.
-- ``build_game_observation_updates``: ``StateBundle`` to
-  ``dict[str, object]`` containing ``situation_summary`` and/or
-  ``observation_fields`` when either parsed value is non-empty.
-- ``build_game_observation_fields``: ``StateBundle`` to
-  ``dict[str, object]`` of non-empty parsed overview fields.
-- ``build_situation_summary``: ``StateBundle`` to a pipe-delimited ``str`` or
-  ``""`` when no summary fields are available.
-- ``section_texts_for_bundle``: ``StateBundle`` to ``dict[str, str]`` keyed by
-  planner section labels, including dynamic uppercase extras and optional
-  ``STATE_DIAGNOSTICS``.
-- ``tool_results_for_bundle``: ``StateBundle`` to ``dict[str, str]`` keyed by
-  upstream civ6-mcp tool names, excluding diagnostics.
-- ``render_planner_context``: section mapping to a ``"## LABEL\nbody"``
-  context block or the empty-state sentinel.
+Parsing helper catalog:
+- ``normalize_observation_bundle(bundle, max_section_chars=1200)`` accepts a
+  parsed ``StateBundle`` and returns ``Civ6McpNormalizedObservation``. It does
+  not raise on empty or partial bundles; missing values normalize to empty
+  update dictionaries, empty section mappings, and the empty-state planner
+  sentinel. It preserves the civ6-mcp backend label, omits ``None``/empty
+  fields, and applies planner section truncation only when rendering
+  ``planner_context``.
+- ``normalize_raw_mcp_game_state(raw_state, max_section_chars=1200)`` accepts a
+  raw civ6-mcp payload mapping or SDK-like object, delegates shape parsing to
+  ``state_bundle_from_raw_mcp_state``, then returns the same normalized
+  envelope as ``normalize_observation_bundle``. Parser diagnostics are carried
+  into ``STATE_DIAGNOSTICS`` rather than raised by this layer.
+- ``parse_observation_tool_response(tool, payload, max_section_chars=1200)``
+  accepts one upstream observation tool name and payload, returns
+  ``Civ6McpToolObservation(tool, bundle, normalized)``, and raises
+  ``ValueError`` when ``tool`` is not a ``get_*`` observation tool or when the
+  payload normalizes to an empty response body. The returned tool name is the
+  validated input string, and the normalized result is the single-tool
+  observation envelope.
+- ``build_global_context_updates(bundle)`` accepts a ``StateBundle`` and
+  returns typed ``update_global_context`` kwargs from
+  ``CIV6_MCP_CONTEXT_FIELD_MAPPINGS``. It skips unmapped, missing, ``None``,
+  and empty-string values, coercing mapped values to the declared
+  ``int``/``float``/``str`` ContextManager schema type.
+- ``build_game_observation_updates(bundle)`` accepts a ``StateBundle`` and
+  returns ``update_game_observation`` kwargs. It includes
+  ``situation_summary`` and/or ``observation_fields`` only when those derived
+  values are non-empty, so empty bundles produce ``{}``.
+- ``build_game_observation_fields(bundle)`` accepts a ``StateBundle`` and
+  returns non-empty parsed overview fields for observation sync. It omits
+  ``None`` and empty strings, includes ``is_game_over`` only when true, and
+  keeps canonical overview field names.
+- ``build_situation_summary(bundle)`` accepts a ``StateBundle`` and returns a
+  pipe-delimited summary string, or ``""`` when no summary fields are parsed.
+  Numeric yields render to one decimal place, and game-over text is appended
+  only when both ``is_game_over`` and ``victory_text`` are present.
+- ``section_texts_for_bundle(bundle)`` accepts a ``StateBundle`` and returns
+  planner sections keyed by canonical labels. Known sections follow
+  ``CIV6_MCP_OBSERVATION_SECTION_MAPPINGS`` order, dynamic extras normalize to
+  uppercase tool names, empty text is omitted, and diagnostics are appended as
+  ``STATE_DIAGNOSTICS`` when present.
+- ``tool_results_for_bundle(bundle)`` accepts a ``StateBundle`` and returns
+  successful observation text keyed by upstream civ6-mcp tool names. It shares
+  the same non-empty inventory as ``section_texts_for_bundle`` but deliberately
+  excludes missing/failed/malformed diagnostics.
+- ``render_planner_context(sections, max_section_chars=1200)`` accepts a
+  section mapping and returns ``"## LABEL\nbody"`` blocks separated by blank
+  lines. Bodies are stripped, truncated with ``"...(truncated)"`` after the
+  configured character limit, and empty mappings return the empty-state
+  sentinel.
+- Private helpers centralize shared rules: ``_nonempty_observation_texts``
+  builds the known-section/dynamic-extra inventory, ``_value_at_path`` resolves
+  dotted attributes to ``None`` on the first gap, ``_coerce_context_value``
+  performs the declared type coercion, ``_validate_observation_tool`` raises
+  ``ValueError`` for non-string or non-``get_*`` tool names, and
+  ``_diagnostic_section_for_bundle`` renders missing, failed, and malformed
+  tool diagnostics for planner context only.
 """
 
 from __future__ import annotations
@@ -59,7 +92,7 @@ from civStation.agent.modules.backend.civ6_mcp.state_parser import StateBundle, 
 
 @dataclass(frozen=True)
 class Civ6McpObservationSectionMapping:
-    """Map one upstream observation tool to a normalized planner section."""
+    """Map one registered observation tool to a normalized planner section."""
 
     tool: str
     bundle_attr: str
@@ -80,7 +113,7 @@ class Civ6McpContextFieldMapping:
 
 @dataclass(frozen=True)
 class Civ6McpNormalizedObservation:
-    """Carry normalized civStation data for one civ6-mcp observation snapshot."""
+    """Bundle normalized context updates, planner text, and tool results for one snapshot."""
 
     backend: str = "civ6-mcp"
     global_context_updates: dict[str, object] = field(default_factory=dict)
@@ -92,7 +125,7 @@ class Civ6McpNormalizedObservation:
 
 @dataclass(frozen=True)
 class Civ6McpToolObservation:
-    """Carry one validated ``get_*`` response with parsed and normalized forms."""
+    """Bundle one validated observation-tool response with parsed and normalized state."""
 
     tool: str
     bundle: StateBundle
@@ -182,7 +215,7 @@ def normalize_observation_bundle(
     *,
     max_section_chars: int = 1200,
 ) -> Civ6McpNormalizedObservation:
-    """Build the stable civStation observation envelope from a parsed bundle."""
+    """Build the stable civStation observation envelope from a parsed state bundle."""
     raw_sections = section_texts_for_bundle(bundle)
     return Civ6McpNormalizedObservation(
         global_context_updates=build_global_context_updates(bundle),
@@ -211,13 +244,13 @@ def parse_observation_tool_response(
     *,
     max_section_chars: int = 1200,
 ) -> Civ6McpToolObservation:
-    """Validate a non-empty ``get_*`` payload and return its normalized observation."""
+    """Validate one non-empty ``get_*`` payload and return parsed observation state."""
     normalized_tool = _validate_observation_tool(tool)
     if not payload_has_body(payload):
         raise ValueError(f"civ6-mcp observation tool {normalized_tool!r} returned an empty response body.")
     bundle = state_bundle_from_raw_mcp_state({normalized_tool: payload})
     normalized = normalize_observation_bundle(bundle, max_section_chars=max_section_chars)
-    if not str(normalized.tool_results.get(normalized_tool) or "").strip():
+    if not any(tool == normalized_tool and text.strip() for tool, _, text in _nonempty_observation_texts(bundle)):
         raise ValueError(f"civ6-mcp observation tool {normalized_tool!r} returned an empty response body.")
     return Civ6McpToolObservation(
         tool=normalized_tool,
@@ -227,7 +260,7 @@ def parse_observation_tool_response(
 
 
 def build_global_context_updates(bundle: StateBundle) -> dict[str, object]:
-    """Return ``update_global_context`` kwargs from parsed overview fields."""
+    """Return ``update_global_context`` kwargs from mapped parsed overview fields."""
     updates: dict[str, object] = {}
     for mapping in CIV6_MCP_CONTEXT_FIELD_MAPPINGS:
         if mapping.target_context != "global_context":
@@ -240,7 +273,7 @@ def build_global_context_updates(bundle: StateBundle) -> dict[str, object]:
 
 
 def build_game_observation_updates(bundle: StateBundle) -> dict[str, object]:
-    """Return ``update_game_observation`` kwargs from parsed observation fields."""
+    """Return ``update_game_observation`` kwargs for summary and fields."""
     updates: dict[str, object] = {}
     summary = build_situation_summary(bundle)
     if summary:
@@ -305,15 +338,7 @@ def build_situation_summary(bundle: StateBundle) -> str:
 
 def section_texts_for_bundle(bundle: StateBundle) -> dict[str, str]:
     """Return planner sections, dynamic extras, and diagnostics from a bundle."""
-    sections: dict[str, str] = {}
-    for mapping in CIV6_MCP_OBSERVATION_SECTION_MAPPINGS:
-        value = _value_at_path(bundle, mapping.bundle_attr)
-        if isinstance(value, str) and value.strip():
-            sections[mapping.planner_section] = value
-
-    for key, value in bundle.extra.items():
-        if value.strip():
-            sections[key.upper()] = value
+    sections = {section: text for _, section, text in _nonempty_observation_texts(bundle)}
     diagnostics = _diagnostic_section_for_bundle(bundle)
     if diagnostics:
         sections["STATE_DIAGNOSTICS"] = diagnostics
@@ -322,16 +347,26 @@ def section_texts_for_bundle(bundle: StateBundle) -> dict[str, str]:
 
 def tool_results_for_bundle(bundle: StateBundle) -> dict[str, str]:
     """Return parsed observation text keyed by upstream civ6-mcp tool name."""
-    results: dict[str, str] = {}
+    return {tool: text for tool, _, text in _nonempty_observation_texts(bundle)}
+
+
+def _nonempty_observation_texts(bundle: StateBundle) -> tuple[tuple[str, str, str], ...]:
+    """Return the shared successful-observation inventory for bundle renderers.
+
+    Each tuple is ``(tool_name, planner_section, text)``. Keeping the inventory
+    in one helper prevents known-tool and dynamic-extra traversal from drifting
+    between ``section_texts_for_bundle`` and ``tool_results_for_bundle``.
+    """
+    items: list[tuple[str, str, str]] = []
     for mapping in CIV6_MCP_OBSERVATION_SECTION_MAPPINGS:
         value = _value_at_path(bundle, mapping.bundle_attr)
         if isinstance(value, str) and value.strip():
-            results[mapping.tool] = value
+            items.append((mapping.tool, mapping.planner_section, value))
 
     for tool, value in bundle.extra.items():
         if value.strip():
-            results[tool] = value
-    return results
+            items.append((tool, tool.upper(), value))
+    return tuple(items)
 
 
 def render_planner_context(
@@ -339,7 +374,7 @@ def render_planner_context(
     *,
     max_section_chars: int = 1200,
 ) -> str:
-    """Render section text as the compact planner context block."""
+    """Render section mappings as the compact planner context block."""
     rendered: list[str] = []
     for label, body in sections.items():
         trimmed = body.strip()
@@ -350,6 +385,7 @@ def render_planner_context(
 
 
 def _value_at_path(source: object, path: str) -> Any:
+    """Resolve a dotted attribute path and return ``None`` at the first gap."""
     value: Any = source
     for part in path.split("."):
         value = getattr(value, part, None)
@@ -359,6 +395,7 @@ def _value_at_path(source: object, path: str) -> Any:
 
 
 def _coerce_context_value(value: object, value_type: str) -> object:
+    """Coerce a parsed overview value to a ContextManager schema type."""
     if value_type == "float":
         return float(value)
     if value_type == "int":
@@ -369,12 +406,14 @@ def _coerce_context_value(value: object, value_type: str) -> object:
 
 
 def _validate_observation_tool(tool: str) -> str:
+    """Return a valid civ6-mcp observation tool name or raise ``ValueError``."""
     if not isinstance(tool, str) or not tool.startswith("get_"):
         raise ValueError(f"{tool!r} is not a civ6-mcp observation tool.")
     return tool
 
 
 def _diagnostic_section_for_bundle(bundle: StateBundle) -> str:
+    """Render missing, failed, and malformed tool diagnostics for planner context."""
     lines: list[str] = []
     if bundle.missing_tools:
         lines.append(f"missing: {', '.join(bundle.missing_tools)}")

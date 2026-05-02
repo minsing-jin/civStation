@@ -75,7 +75,7 @@ class Civ6McpClientProtocol(Protocol):
 
     @property
     def tool_catalog(self) -> dict[str, dict[str, Any]]:
-        """Tool metadata from startup and later health refreshes."""
+        """Tool metadata keyed by name from the latest civ6-mcp catalog."""
         ...
 
     def has_tool(self, name: str) -> bool:
@@ -83,21 +83,21 @@ class Civ6McpClientProtocol(Protocol):
         ...
 
     def tool_schemas(self) -> dict[str, dict[str, Any]]:
-        """Return tool metadata keyed by MCP tool name."""
+        """Return a copy of MCP tool metadata keyed by tool name."""
         ...
 
     def health_check(self, required_tools: set[str] | frozenset[str] | None = None) -> Civ6McpHealth:
-        """Refresh the tool catalog and return current connection health."""
+        """Return current connection health, refreshing the catalog when connected."""
         ...
 
     @property
     def startup_health(self) -> Civ6McpHealth:
-        """Startup required-tool validation result."""
+        """Return startup required-tool validation health, or a not-run snapshot."""
         ...
 
     @property
     def has_required_tools(self) -> bool:
-        """Return whether the startup catalog includes every required tool."""
+        """Return whether startup required-tool validation passed."""
         ...
 
     @property
@@ -106,7 +106,7 @@ class Civ6McpClientProtocol(Protocol):
         ...
 
     def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> str:
-        """Invoke a civ6-mcp tool and return its textual response."""
+        """Invoke a civ6-mcp tool and return text, raising on ``isError`` or timeout metadata."""
         ...
 
     def call_tool_result(
@@ -120,19 +120,19 @@ class Civ6McpClientProtocol(Protocol):
 
 @dataclass
 class Civ6McpConfig:
-    """Configuration for launching and calling the upstream civ6-mcp server."""
+    """Configuration for locating, launching, and calling the upstream civ6-mcp server."""
 
     install_path: Path
     """Absolute path to the `civ6-mcp` checkout (where pyproject.toml lives)."""
 
     launcher: str = "uv"
-    """Either `uv` (recommended) or `python` (uses civ6-mcp's own .venv)."""
+    """Either `uv` (recommended) or `python` from the active PATH."""
 
     extra_args: list[str] = field(default_factory=list)
-    """Extra CLI args passed after the launcher."""
+    """Extra CLI args appended to the civ6-mcp server command."""
 
     env_overrides: dict[str, str] = field(default_factory=dict)
-    """Extra environment variables for the subprocess (CIV_MCP_*)."""
+    """Additional subprocess environment variables beyond inherited CIV_MCP_* values."""
 
     client_name: str = "civStation"
     client_version: str = "0.1.0"
@@ -209,7 +209,7 @@ class Civ6McpConfig:
         launcher: str | None = None,
         env_overrides: dict[str, str] | None = None,
     ) -> Civ6McpConfig:
-        """Build a config from explicit arguments, environment variables, and defaults."""
+        """Build a config from explicit overrides, environment variables, and defaults."""
         path: Path
         if install_path is not None:
             path = Path(install_path).expanduser().resolve()
@@ -237,7 +237,7 @@ class Civ6McpConfig:
         return cls(install_path=path, launcher=chosen_launcher, env_overrides=merged_env)
 
     def validate(self) -> None:
-        """Validate the civ6-mcp install path, launcher value, and launcher binary."""
+        """Validate the civ6-mcp install path, launcher value, and launcher availability."""
         install_path = self._resolved_install_path()
         launcher = self._required_config_value("launcher")
         launcher = self._validate_launcher_type(launcher)
@@ -282,7 +282,7 @@ class Civ6McpConfig:
 
 
 class Civ6McpClient:
-    """Thread-safe synchronous client for the upstream civ6-mcp stdio server."""
+    """Synchronous client facade for the upstream civ6-mcp stdio server."""
 
     def __init__(self, config: Civ6McpConfig) -> None:
         self.config = config
@@ -396,7 +396,7 @@ class Civ6McpClient:
 
     @property
     def startup_health(self) -> Civ6McpHealth:
-        """Startup required-tool validation result."""
+        """Return startup required-tool validation health, or a not-run snapshot."""
         if self._startup_health is not None:
             return self._startup_health
         return self._catalog_health(
@@ -406,7 +406,7 @@ class Civ6McpClient:
 
     @property
     def has_required_tools(self) -> bool:
-        """Return whether the startup catalog includes every required tool."""
+        """Return whether startup required-tool validation passed."""
         return self.startup_health.ok
 
     @property
@@ -415,7 +415,7 @@ class Civ6McpClient:
         return self.startup_health.missing_required_tools
 
     def health_check(self, required_tools: set[str] | frozenset[str] | None = None) -> Civ6McpHealth:
-        """Refresh the tool catalog and return current connection health."""
+        """Return current connection health, refreshing the catalog when connected."""
         required = frozenset(required_tools) if required_tools is not None else DEFAULT_HEALTH_REQUIRED_TOOLS
         if not self._started or self._session is None:
             missing = required.difference(self._tool_names)
@@ -437,7 +437,7 @@ class Civ6McpClient:
             raise Civ6McpError(f"civ6-mcp health check failed: {exc}") from exc
 
     def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> str:
-        """Invoke a civ6-mcp tool and return text, raising on error metadata."""
+        """Invoke a civ6-mcp tool and return text, raising on ``isError`` or timeout metadata."""
         result = self.call_tool_result(name, arguments)
         if result.timed_out:
             raise Civ6McpError(result.error)

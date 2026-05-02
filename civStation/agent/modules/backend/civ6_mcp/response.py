@@ -32,7 +32,7 @@ class Civ6McpClassificationStatus(str, Enum):
 
 
 class Civ6McpResponseClassification(str, Enum):
-    """Backward-compatible response classes exposed to existing callers."""
+    """Backward-compatible legacy response classifications exposed to existing callers."""
 
     OK = "ok"
     SOFT_BLOCK = "soft_block"
@@ -52,7 +52,7 @@ _GAME_OVER = re.compile(r"^\s*(?:\*{3}\s*)?GAME OVER\b", _LINE_FLAGS)
 _RUN_ABORTED = re.compile(r"^\s*RUN ABORTED\b", _LINE_FLAGS)
 _HANG_FAILED = re.compile(r"^\s*(?:HANG:|HANG RECOVERY FAILED\b)", _LINE_FLAGS)
 _GENERIC_ERROR = re.compile(
-    r"^\s*(?:Error:|Tool failed:|Traceback\b|(?:ERR:)?NO_ENEMY\b|(?!(?:[A-Za-z_][\w.]*\.)?TimeoutError:)"
+    r"^\s*(?:Error:|Tool failed:|Traceback\b|ERR:|NO_ENEMY\b|(?!(?:[A-Za-z_][\w.]*\.)?TimeoutError:)"
     r"[A-Za-z_][\w.]*Error:|[A-Za-z_][\w.]*Exception:)",
     _LINE_FLAGS,
 )
@@ -62,6 +62,71 @@ _TIMEOUT = re.compile(
 )
 _RETRYABLE = re.compile(rf"(?:{_TIMEOUT.pattern})|(?:{_END_TURN_SOFT.pattern})", _LINE_FLAGS)
 _SUCCESS_DEFAULT = re.compile(r".*", re.DOTALL)
+
+_UPSTREAM_CIV6_MCP_ACTION_RESPONSE_REFERENCE = """
+The upstream civ6-mcp architecture documentation describes action responses
+as text strings that return either OK: for confirmations or ERR: for failures.
+Documented error examples include ERR:UNIT_NOT_FOUND, ERR:STACKING_CONFLICT,
+and ERR:CANNOT_MOVE.
+"""
+
+
+@dataclass(frozen=True)
+class _UpstreamTextPrefixChecklistItem:
+    """One documented upstream text response prefix and example inventory."""
+
+    prefix: str
+    legacy_classification: str
+    examples: tuple[str, ...] = ()
+
+
+def _extract_upstream_text_prefix_checklist(reference_text: str) -> tuple[_UpstreamTextPrefixChecklistItem, ...]:
+    """Extract the canonical checklist of documented upstream text prefixes."""
+    classifications: list[tuple[str, str]] = []
+    examples_by_prefix: dict[str, list[str]] = {}
+    for match in re.finditer(r"\b(?:OK|ERR):", reference_text):
+        prefix = match.group(0)
+        classification = "ok" if prefix == "OK:" else "error"
+        item = (prefix, classification)
+        if item not in classifications:
+            classifications.append(item)
+            examples_by_prefix[prefix] = []
+    for match in re.finditer(r"\b(?:OK|ERR):[A-Z0-9_]+", reference_text):
+        example = match.group(0)
+        prefix = "OK:" if example.startswith("OK:") else "ERR:"
+        if example not in examples_by_prefix.setdefault(prefix, []):
+            examples_by_prefix[prefix].append(example)
+    return tuple(
+        _UpstreamTextPrefixChecklistItem(prefix=prefix, legacy_classification=classification, examples=tuple(examples))
+        for prefix, classification in classifications
+        for examples in (examples_by_prefix.get(prefix, []),)
+    )
+
+
+def _extract_upstream_text_prefix_classifications(reference_text: str) -> tuple[tuple[str, str], ...]:
+    """Extract documented upstream text prefixes and their legacy classes."""
+    return tuple(
+        (item.prefix, item.legacy_classification) for item in _extract_upstream_text_prefix_checklist(reference_text)
+    )
+
+
+def _extract_upstream_text_error_prefixes(reference_text: str) -> tuple[str, ...]:
+    """Extract documented text-error prefixes from upstream reference prose."""
+    return tuple(
+        prefix
+        for prefix, classification in _extract_upstream_text_prefix_classifications(reference_text)
+        if classification == "error"
+    )
+
+
+_UPSTREAM_TEXT_PREFIX_CHECKLIST = _extract_upstream_text_prefix_checklist(_UPSTREAM_CIV6_MCP_ACTION_RESPONSE_REFERENCE)
+_UPSTREAM_TEXT_PREFIX_CLASSIFICATIONS = tuple(
+    (item.prefix, item.legacy_classification) for item in _UPSTREAM_TEXT_PREFIX_CHECKLIST
+)
+_UPSTREAM_TEXT_ERROR_PREFIXES = _extract_upstream_text_error_prefixes(_UPSTREAM_CIV6_MCP_ACTION_RESPONSE_REFERENCE)
+_UPSTREAM_TEXT_ERROR_PREFIX_CHECKLIST = tuple(
+    item for item in _UPSTREAM_TEXT_PREFIX_CHECKLIST if item.legacy_classification == "error"
+)
 
 
 @dataclass(frozen=True)
@@ -76,7 +141,7 @@ class Civ6McpClassificationRule:
 
 @dataclass(frozen=True)
 class Civ6McpExceptionClassificationRule:
-    """Ordered exception-type rule for the canonical civ6-mcp classifier."""
+    """Ordered exception-type or predicate rule for the canonical civ6-mcp classifier."""
 
     status: Civ6McpClassificationStatus
     exception_types: tuple[type[BaseException], ...]
@@ -141,6 +206,7 @@ def _exception_name_matches(*names: str) -> Callable[[BaseException], bool]:
     normalized = frozenset(names)
 
     def predicate(exc: BaseException) -> bool:
+        """Return whether an exception's concrete class name is allowlisted."""
         return type(exc).__name__ in normalized
 
     return predicate
@@ -285,7 +351,7 @@ def normalize_mcp_response_text(
     arguments: dict[str, Any] | None,
     text: str,
 ) -> Civ6McpNormalizedResult:
-    """Normalize legacy text-only output into backend-local response metadata."""
+    """Normalize text-only tool output into backend-local response metadata."""
     args = dict(arguments or {})
     body = str(text or "").strip()
     status = classify_civ6_mcp_status(body)
@@ -311,7 +377,7 @@ def normalize_mcp_response_error(
     *,
     raw: Any | None = None,
 ) -> Civ6McpNormalizedResult:
-    """Normalize error text into backend-local response metadata."""
+    """Normalize explicit MCP or transport error text into backend-local response metadata."""
     args = dict(arguments or {})
     message = str(error or "").strip()
     status = classify_civ6_mcp_status(message)
@@ -339,7 +405,7 @@ def normalize_mcp_response_exception(
     arguments: dict[str, Any] | None,
     exc: BaseException,
 ) -> Civ6McpNormalizedResult:
-    """Normalize an invocation exception into backend-local response metadata."""
+    """Normalize a tool invocation exception into backend-local response metadata."""
     args = dict(arguments or {})
     message = str(exc or "").strip() or type(exc).__name__
     status = classify_civ6_mcp_exception_status(exc)

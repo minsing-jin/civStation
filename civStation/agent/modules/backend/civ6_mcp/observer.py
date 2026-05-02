@@ -55,7 +55,7 @@ DEFAULT_CIV6_MCP_OBSERVE_TOOLS: tuple[str, ...] = tuple(
 
 
 class Civ6McpObserver:
-    """Collect civ6-mcp observations and mirror them into ``ContextManager``."""
+    """Collect configured civ6-mcp observations and mirror them into ``ContextManager``."""
 
     def __init__(
         self,
@@ -75,12 +75,12 @@ class Civ6McpObserver:
 
     @property
     def last_bundle(self) -> StateBundle | None:
-        """Most recent ``StateBundle`` cached from ``observe``, if any."""
+        """Most recent successful or initial ``StateBundle`` cached from ``observe``."""
         return self._last_bundle
 
     @property
     def last_observation(self) -> Civ6McpNormalizedObservation | None:
-        """Most recent normalized observation cached from ``observe``, if any."""
+        """Most recent successful or initial normalized observation cached from ``observe``."""
         return self._last_observation
 
     @property
@@ -208,7 +208,7 @@ def build_civ6_mcp_observer(
     observe_tools: tuple[str, ...] | None = None,
     observe_timeout_seconds: float | None = DEFAULT_CIV6_MCP_OBSERVE_TIMEOUT_SECONDS,
 ) -> Civ6McpObserver:
-    """Construct a ``Civ6McpObserver`` for the civ6-mcp turn loop."""
+    """Construct a ``Civ6McpObserver`` for configured or discovered observation tools."""
     return Civ6McpObserver(
         client=client,
         context_manager=context_manager,
@@ -218,7 +218,7 @@ def build_civ6_mcp_observer(
 
 
 def discover_civ6_mcp_observe_tools(client: Civ6McpClientProtocol) -> tuple[str, ...]:
-    """Return live ``get_*`` observation tools in stable planner-preferred order."""
+    """Return discovered ``get_*`` tools, falling back only when no tools are exposed."""
     available = _available_tool_names(client)
     if not available:
         return DEFAULT_CIV6_MCP_OBSERVE_TOOLS

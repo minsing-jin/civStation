@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import ast
 import inspect
+from importlib import import_module
 from typing import Any
 
+import civStation.agent.modules.backend as backend_module
 import civStation.agent.modules.backend.civ6_mcp.turn_loop as turn_loop_module
 from civStation.agent.modules.backend import (
     Civ6McpObserver as BackendCiv6McpObserver,
@@ -16,6 +18,7 @@ from civStation.agent.modules.backend import (
 from civStation.agent.modules.backend import (
     civ6_mcp,
 )
+from civStation.agent.modules.backend.civ6_mcp import _EXPORT_MODULES
 from civStation.agent.modules.backend.civ6_mcp.client import Civ6McpClientProtocol, Civ6McpHealth
 from civStation.agent.modules.backend.civ6_mcp.observer import (
     DEFAULT_CIV6_MCP_OBSERVE_TOOLS,
@@ -148,6 +151,25 @@ def test_civ6_mcp_package_exports_public_interfaces() -> None:
     assert expected.issubset(set(civ6_mcp.__all__))
     for name in expected:
         assert hasattr(civ6_mcp, name)
+
+
+def test_civ6_mcp_all_public_exports_resolve_to_declared_implementations() -> None:
+    assert civ6_mcp.__all__ == sorted(_EXPORT_MODULES)
+
+    for name in civ6_mcp.__all__:
+        module = import_module(f"{civ6_mcp.__name__}.{_EXPORT_MODULES[name]}")
+
+        assert getattr(civ6_mcp, name) is getattr(module, name), name
+
+
+def test_backend_package_lazy_civ6_mcp_exports_match_subpackage_exports() -> None:
+    selector_exports = {"BackendKind", "BackendNotConfiguredError", "parse_backend_kind"}
+
+    for name in backend_module.__all__:
+        if name in selector_exports:
+            continue
+
+        assert getattr(backend_module, name) is getattr(civ6_mcp, name), name
 
 
 def test_civ6_mcp_allowlist_public_api_resolves_to_planner_export() -> None:

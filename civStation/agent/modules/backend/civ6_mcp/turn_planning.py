@@ -41,7 +41,7 @@ _DIAGNOSTIC_TOOL_PATTERN = re.compile(r"\bget_[a-z0-9_]+\b")
 
 @dataclass(frozen=True)
 class Civ6McpPrioritizedIntent:
-    """Prioritized planner intent inferred from normalized civ6-mcp state."""
+    """Planner intent with deterministic priority from normalized civ6-mcp state."""
 
     priority: int
     intent: Civ6McpPlannerIntent
@@ -80,14 +80,14 @@ class Civ6McpPrioritizedIntent:
 
 @dataclass(frozen=True)
 class Civ6McpTurnPlan:
-    """Deterministic civ6-mcp intent plan for one normalized state."""
+    """Ordered deterministic civ6-mcp intents for one normalized state."""
 
     intents: tuple[Civ6McpPrioritizedIntent, ...] = ()
     notes: tuple[str, ...] = ()
     backend: str = "civ6-mcp"
 
     def to_actions(self) -> list[Civ6McpPlannerAction]:
-        """Return executable planner actions ordered by priority."""
+        """Return executable planner actions in this plan's intent order."""
         return [item.to_action() for item in self.intents]
 
     @property
@@ -96,7 +96,7 @@ class Civ6McpTurnPlan:
         return self.to_actions()
 
     def to_tool_calls(self) -> list[ToolCall]:
-        """Return executor tool calls ordered by priority."""
+        """Return executor tool calls in this plan's intent order."""
         return [item.to_tool_call() for item in self.intents]
 
     def render_for_prompt(self) -> str:
@@ -115,7 +115,7 @@ def build_prioritized_turn_plan(
     strategy: str = "",
     include_end_turn: bool = True,
 ) -> Civ6McpTurnPlan:
-    """Build deterministic planner guidance from normalized civ6-mcp state."""
+    """Build prioritized deterministic planner guidance from civ6-mcp state payloads."""
     bundle, sections = _coerce_state_and_sections(state)
     notes: list[str] = []
     candidates: list[Civ6McpPrioritizedIntent] = []

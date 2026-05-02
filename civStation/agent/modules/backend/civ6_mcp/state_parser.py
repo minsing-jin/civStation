@@ -33,6 +33,40 @@ Output-shape invariants that downstream normalization depends on:
 - Known observation tools are routed to fixed ``*_text`` fields, unknown
   non-empty tools are preserved in ``extra`` by tool name, and observation
   diagnostics keep their tuple/dict shapes.
+
+Internal normalization helper inventory:
+- ``_looks_like_overview_payload`` identifies structured overview-only mappings
+  by known upstream aliases so bundle parsing can distinguish them from
+  multi-tool observation mappings. It returns a boolean only and performs no
+  value validation.
+- ``_coerce_string_tuple`` and ``_coerce_string_dict`` normalize diagnostic
+  payloads into planner-safe containers, accepting scalars or mixed key/value
+  types and stringifying rather than failing. Unusable diagnostic mappings are
+  dropped as empty dictionaries.
+- ``render_payload_body`` is imported from ``_payload`` and applies the shared
+  MCP wrapper precedence plus canonical text rendering: strings pass through,
+  bytes decode with replacement, string/bytes sequences join with newlines,
+  structured objects are model-dumped then JSON-rendered with sorted keys, and
+  unrenderable values fall back to ``str``.
+- ``_load_structured_payload`` delegates JSON string decoding to
+  ``_payload._load_json_payload`` while preserving lenient overview probing:
+  dictionaries and JSON object/array strings are accepted, empty/non-JSON
+  strings and non-string inputs return ``None``, and malformed JSON is logged
+  then ignored so regex parsing can continue.
+- ``_apply_structured_overview`` maps upstream overview aliases to
+  ``GameOverviewSnapshot`` fields and delegates all value cleaning to the
+  scalar helpers below.
+- ``_first_present``, ``_first_number``, and ``_first_int`` implement alias
+  priority. Payload-level values win before nested ``yields`` values, and
+  invalid candidates are skipped until a finite value is found.
+- ``_coerce_int`` and ``_coerce_float`` reject ``None``, booleans, malformed
+  numbers, and non-finite floats; valid ints are truncated through ``int`` to
+  match existing ContextManager fields.
+- ``_normalize_era_name`` and ``_clean_short_text`` strip labels/whitespace and
+  length-limit noisy upstream text so malformed sections stay omitted.
+- ``_parse_civilization_and_leader`` and ``_structured_civilization_fields``
+  normalize either ``"Civ (Leader)"`` strings or structured civilization
+  mappings into separate short-text fields.
 """
 
 from __future__ import annotations
@@ -44,15 +78,17 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from civStation.agent.modules.backend.civ6_mcp._payload import dump_model as _dump_model
-from civStation.agent.modules.backend.civ6_mcp._payload import select_payload_body
+from civStation.agent.modules.backend.civ6_mcp._payload import (
+    _load_json_payload,
+    render_payload_body,
+)
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class GameOverviewSnapshot:
-    """Parsed civ6-mcp overview fields plus the rendered source text."""
+    """Stable civ6-mcp overview fields plus the rendered source text."""
 
     raw_text: str = ""
     current_turn: int | None = None
@@ -187,18 +223,19 @@ _OVERVIEW_PAYLOAD_KEYS = frozenset(
 
 
 def parse_game_overview(text: Any) -> GameOverviewSnapshot:
-    """Parse a civ6-mcp overview payload into a stable snapshot.
+    """Normalize a civ6-mcp overview response into a stable snapshot.
 
-    Accepted inputs include raw strings/bytes, JSON strings, direct structured
-    mappings, and MCP SDK-ish result objects with ``content``, ``text``, or
-    ``structuredContent`` attributes. The output is always a
-    ``GameOverviewSnapshot`` with ``raw_text`` set to the rendered source,
-    unparsed fields left as ``None``, and numeric fields coerced to finite
-    ``int``/``float`` values.
+    Inputs may be raw text/bytes, JSON strings, structured mappings, or MCP
+    SDK-style result wrappers. The output is always ``GameOverviewSnapshot``:
+    ``raw_text`` contains the rendered source, missing fields remain ``None``,
+    game-over defaults to ``False``, and malformed values are ignored rather
+    than raised. Normalization strips era suffixes, splits ``"Civ (Leader)"``
+    labels, length-limits short text fields, and keeps only finite numeric
+    values for ContextManager-compatible ``int``/``float`` fields.
     """
-    payload = select_payload_body(text).value
-    snapshot = GameOverviewSnapshot(raw_text=_render_state_payload(payload))
-    structured = _load_structured_payload(payload)
+    rendered_payload = render_payload_body(text)
+    snapshot = GameOverviewSnapshot(raw_text=rendered_payload.text)
+    structured = _load_structured_payload(rendered_payload.value)
     if isinstance(structured, dict):
         _apply_structured_overview(snapshot, structured)
 
@@ -291,13 +328,16 @@ def parse_game_overview(text: Any) -> GameOverviewSnapshot:
 
 
 def state_bundle_from_raw_mcp_state(raw_state: Any) -> StateBundle:
-    """Parse raw civ6-mcp observation payloads into a stable state bundle.
+    """Normalize raw civ6-mcp observation state into a stable bundle.
 
-    Accepted mappings may use upstream tool names (``get_units``), short aliases
-    (``units``), overview-shaped payloads, or MCP SDK-ish result containers. The
-    output is a ``StateBundle`` with known tools routed to fixed text fields,
-    unknown non-empty tools preserved in ``extra``, and diagnostics normalized to
-    tuple/dict containers. Existing ``StateBundle`` instances are returned as-is.
+    Inputs may be existing ``StateBundle`` instances, overview-only payloads,
+    multi-tool mappings with canonical or short tool names, or SDK-style result
+    wrappers. Existing bundles are returned unchanged; every other input
+    produces a ``StateBundle``. Unknown non-empty tools are preserved in
+    ``extra``, known tools fill fixed ``*_text`` fields, and malformed or empty
+    tool bodies are skipped. Diagnostic fields are normalized into
+    tuple/dict-of-string containers so planner rendering does not fail on mixed
+    upstream error shapes.
     """
     if isinstance(raw_state, StateBundle):
         return raw_state
@@ -324,8 +364,7 @@ def state_bundle_from_raw_mcp_state(raw_state: Any) -> StateBundle:
             bundle.overview = parse_game_overview(raw_payload)
             continue
 
-        payload = select_payload_body(raw_payload).value
-        text = _render_state_payload(payload).strip()
+        text = render_payload_body(raw_payload).text.strip()
         if not text:
             continue
         attr = _BUNDLE_TEXT_ATTRS.get(tool)
@@ -338,10 +377,24 @@ def state_bundle_from_raw_mcp_state(raw_state: Any) -> StateBundle:
 
 
 def _looks_like_overview_payload(payload: dict[str, Any]) -> bool:
+    """Return whether a mapping should be treated as a standalone overview.
+
+    Inputs are raw dictionaries from civ6-mcp or SDK result unwrapping. The
+    helper checks only for known overview aliases and does not validate values;
+    malformed or partial overview payloads still take the overview parsing path
+    so missing fields remain ``None`` instead of being misrouted as extras.
+    """
     return any(key in payload for key in _OVERVIEW_PAYLOAD_KEYS)
 
 
 def _coerce_string_tuple(value: Any) -> tuple[str, ...]:
+    """Normalize a diagnostic value into a tuple of strings.
+
+    ``None`` becomes an empty tuple, a single string remains one entry, common
+    iterables are stringified element-by-element, and all other scalars become a
+    one-item tuple. This keeps diagnostics displayable without rejecting unusual
+    upstream error shapes.
+    """
     if value is None:
         return ()
     if isinstance(value, str):
@@ -352,43 +405,42 @@ def _coerce_string_tuple(value: Any) -> tuple[str, ...]:
 
 
 def _coerce_string_dict(value: Any) -> dict[str, str]:
+    """Normalize diagnostic mappings into ``dict[str, str]``.
+
+    Non-mapping inputs are ignored because there is no reliable tool-to-reason
+    association to preserve. Mapping keys and values are stringified so planner
+    diagnostics remain serializable even when upstream errors use non-string
+    identifiers or exception-like values.
+    """
     if not isinstance(value, dict):
         return {}
     return {str(key): str(reason) for key, reason in value.items()}
 
 
-def _render_state_payload(payload: Any) -> str:
-    if isinstance(payload, str):
-        return payload
-    if isinstance(payload, bytes):
-        return payload.decode("utf-8", errors="replace")
-    if payload is None:
-        return ""
-    if isinstance(payload, list | tuple) and all(isinstance(item, str | bytes) for item in payload):
-        return "\n".join(_render_state_payload(item) for item in payload)
-    payload = _dump_model(payload)
-    try:
-        return json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
-    except TypeError:
-        return str(payload)
-
-
 def _load_structured_payload(payload: Any) -> Any | None:
-    if isinstance(payload, dict):
-        return payload
-    if not isinstance(payload, str):
-        return None
-    stripped = payload.strip()
-    if not stripped or stripped[0] not in "{[":
-        return None
+    """Return structured overview data when the payload is already structured.
+
+    Dictionaries are accepted directly. Strings are parsed only when they look
+    like JSON objects or arrays after trimming whitespace; empty strings,
+    non-JSON text, malformed JSON, and non-string values return ``None`` so the
+    caller can continue with heuristic text parsing.
+    """
     try:
-        return json.loads(stripped)
+        return _load_json_payload(payload, require_json_container=True)
     except json.JSONDecodeError:
         logger.debug("civ6-mcp overview looked like JSON but could not be decoded", exc_info=True)
         return None
 
 
 def _apply_structured_overview(snapshot: GameOverviewSnapshot, payload: dict[str, Any]) -> None:
+    """Apply structured overview aliases to an existing snapshot in place.
+
+    The input is a dictionary from a direct structured payload or decoded JSON.
+    Alias groups are checked in priority order, numeric values are coerced to
+    finite numbers, short labels are cleaned and length-limited, nested
+    ``yields`` are consulted after top-level values, and malformed fields are
+    left unset rather than raising.
+    """
     turn = _first_present(payload, "current_turn", "turn", "turn_number", "game_turn")
     parsed_turn = _coerce_int(turn)
     if parsed_turn is not None:
@@ -451,6 +503,12 @@ def _apply_structured_overview(snapshot: GameOverviewSnapshot, payload: dict[str
 
 
 def _first_present(*sources_and_keys: Any) -> Any | None:
+    """Return the first non-``None`` value for the provided keys.
+
+    The first argument must be a dictionary source and all remaining arguments
+    are candidate keys in priority order. Missing keys, explicit ``None``
+    values, and non-dictionary sources return ``None``.
+    """
     source = sources_and_keys[0]
     keys = sources_and_keys[1:]
     if not isinstance(source, dict):
@@ -462,6 +520,12 @@ def _first_present(*sources_and_keys: Any) -> Any | None:
 
 
 def _first_number(payload: dict[str, Any], yields: dict[str, Any], *keys: str) -> float | None:
+    """Return the first finite numeric value from overview aliases.
+
+    For each alias, the top-level payload is checked before the nested
+    ``yields`` mapping. Invalid, boolean, missing, or non-finite values are
+    skipped so a later alias can still populate the parsed overview field.
+    """
     for key in keys:
         value = _first_present(payload, key)
         number = _coerce_float(value)
@@ -475,6 +539,12 @@ def _first_number(payload: dict[str, Any], yields: dict[str, Any], *keys: str) -
 
 
 def _first_int(payload: dict[str, Any], *keys: str) -> int | None:
+    """Return the first finite integer-like value from top-level aliases.
+
+    Values are parsed with ``_coerce_int`` and therefore reject booleans,
+    malformed strings, and non-finite numbers. No nested ``yields`` lookup is
+    performed because the integer fields represent balances or counts.
+    """
     for key in keys:
         parsed = _coerce_int(_first_present(payload, key))
         if parsed is not None:
@@ -483,6 +553,12 @@ def _first_int(payload: dict[str, Any], *keys: str) -> int | None:
 
 
 def _coerce_int(value: Any) -> int | None:
+    """Coerce a finite scalar to ``int`` or return ``None``.
+
+    The helper shares float validation with ``_coerce_float`` and truncates
+    valid values through Python's ``int`` constructor to preserve the existing
+    ContextManager count/balance field shape.
+    """
     number = _coerce_float(value)
     if number is None:
         return None
@@ -490,6 +566,12 @@ def _coerce_int(value: Any) -> int | None:
 
 
 def _coerce_float(value: Any) -> float | None:
+    """Coerce a scalar to a finite ``float`` or return ``None``.
+
+    ``None`` and booleans are rejected before conversion, malformed inputs are
+    ignored, and ``NaN``/infinite values are omitted. This prevents untrusted
+    upstream payload text from leaking non-finite numbers into normalized state.
+    """
     if value is None or isinstance(value, bool):
         return None
     try:
@@ -500,6 +582,12 @@ def _coerce_float(value: Any) -> float | None:
 
 
 def _normalize_era_name(value: str) -> str | None:
+    """Normalize an era label by removing a trailing ``Era`` suffix.
+
+    Empty values and labels longer than 32 characters return ``None``. The
+    length guard prevents regex or structured parsing from preserving a noisy
+    line as a concise overview field.
+    """
     era = value.strip()
     if not era:
         return None
@@ -508,11 +596,18 @@ def _normalize_era_name(value: str) -> str | None:
 
 
 def _clean_short_text(value: str) -> str | None:
+    """Strip a short text field and reject empty or oversized values."""
     cleaned = value.strip()
     return cleaned if cleaned and len(cleaned) <= 80 else None
 
 
 def _parse_civilization_and_leader(value: str) -> tuple[str | None, str | None]:
+    """Split a text civilization label into civilization and leader fields.
+
+    Inputs such as ``"Korea (Seondeok)"`` produce both fields. Plain labels
+    produce only the civilization name, and empty or oversized segments are
+    dropped through ``_clean_short_text``.
+    """
     cleaned = value.strip()
     if not cleaned:
         return None, None
@@ -523,6 +618,12 @@ def _parse_civilization_and_leader(value: str) -> tuple[str | None, str | None]:
 
 
 def _structured_civilization_fields(value: Any) -> tuple[str | None, str | None]:
+    """Normalize structured or scalar civilization payloads.
+
+    Mapping inputs may provide separate civilization and leader aliases; scalar
+    inputs are parsed with the same parenthetical convention as text overview
+    lines. Missing or noisy values return ``None`` for the affected field.
+    """
     if isinstance(value, dict):
         name = _first_present(value, "name", "civilization_name", "civilization", "civ")
         leader = _first_present(value, "leader", "leader_name")
@@ -535,7 +636,7 @@ def _structured_civilization_fields(value: Any) -> tuple[str | None, str | None]
 
 @dataclass
 class StateBundle:
-    """Parsed civ6-mcp observation sections and planner-safe diagnostics."""
+    """Stable civ6-mcp observation sections and planner-safe diagnostics."""
 
     overview: GameOverviewSnapshot = field(default_factory=GameOverviewSnapshot)
     units_text: str = ""
@@ -554,7 +655,7 @@ class StateBundle:
     """Observation diagnostics that are safe to show the planner."""
 
     def to_planner_context(self, *, max_section_chars: int = 1200) -> str:
-        """Render this bundle as normalized planner context text."""
+        """Render this bundle into normalized planner context text."""
         from civStation.agent.modules.backend.civ6_mcp.observation_schema import (
             normalize_observation_bundle,
         )

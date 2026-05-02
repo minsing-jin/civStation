@@ -1,16 +1,19 @@
-"""Request construction and dispatch for supported civ6-mcp operations."""
+"""Request construction and dispatch for registered civ6-mcp tool operations."""
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from civStation.agent.modules.backend.civ6_mcp._payload import planner_tool_call_items
+from civStation.agent.modules.backend.civ6_mcp._payload import planner_tool_call_dicts
 from civStation.agent.modules.backend.civ6_mcp.client import Civ6McpClientProtocol, Civ6McpError
 from civStation.agent.modules.backend.civ6_mcp.response import (
+    _UPSTREAM_TEXT_ERROR_PREFIX_CHECKLIST,
+    _UPSTREAM_TEXT_PREFIX_CHECKLIST,
+    _UPSTREAM_TEXT_PREFIX_CLASSIFICATIONS,
     Civ6McpNormalizedResult,
     normalize_mcp_response_exception,
     normalize_mcp_response_text,
@@ -24,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 class SupportedCiv6McpOperation(str, Enum):
-    """Operation categories supported by the civ6-mcp backend."""
+    """Operation categories assigned to civ6-mcp tool requests."""
 
     OBSERVE = "observe"
     ACT = "act"
@@ -116,6 +119,35 @@ SUPPORTED_CIV6_MCP_TOOLS: frozenset[str] = OBSERVATION_TOOLS | ACTION_TOOLS | fr
 _TERMINAL_CLASSIFICATIONS = frozenset({"game_over", "aborted", "hang"})
 StopRequested = Callable[[], bool]
 
+
+def _documented_upstream_prefix_examples() -> tuple[tuple[str, str], ...]:
+    """Build operations samples for every response.py documented prefix."""
+    examples: list[tuple[str, str]] = []
+    error_examples_by_prefix = {item.prefix: item.examples for item in _UPSTREAM_TEXT_ERROR_PREFIX_CHECKLIST}
+    for prefix, classification in _UPSTREAM_TEXT_PREFIX_CLASSIFICATIONS:
+        if classification == "ok":
+            examples.append((f"{prefix} action accepted by civ6-mcp.", classification))
+            continue
+        if classification == "error":
+            examples.append((f"{prefix} tool failed in civ6-mcp.", classification))
+            examples.extend((example, classification) for example in error_examples_by_prefix.get(prefix, ()))
+    return tuple(examples)
+
+
+def _documented_prefix_classification_gaps(
+    tables: Mapping[str, tuple[tuple[str, str], ...]],
+) -> tuple[tuple[str, str, str], ...]:
+    """Return documented response.py prefixes absent from named sample tables."""
+    gaps: list[tuple[str, str, str]] = []
+    for table_name, table in tables.items():
+        for item in _UPSTREAM_TEXT_PREFIX_CHECKLIST:
+            if not any(
+                expected == item.legacy_classification and text.startswith(item.prefix) for text, expected in table
+            ):
+                gaps.append((table_name, item.prefix, item.legacy_classification))
+    return tuple(gaps)
+
+
 # Documentation-only inventory for the public operations classifier wrapper.
 # Runtime classification remains delegated to response.py so prefix behavior
 # stays centralized and cannot diverge from normalized MCP result handling.
@@ -125,6 +157,7 @@ _DOCUMENTED_PREFIX_CLASSIFICATIONS: tuple[tuple[str, str], ...] = (
     ("RUN ABORTED: operator stopped automation.", "aborted"),
     ("HANG:57:AutoSave_0057|AI turn did not finish.", "hang"),
     ("HANG RECOVERY FAILED after repeated no-op turns.", "hang"),
+    *_documented_upstream_prefix_examples(),
     ("Error: must specify a known tech", "error"),
     ("Tool failed:\nError: must specify a known tech", "error"),
     ("Traceback (most recent call last):", "error"),
@@ -136,11 +169,17 @@ _DOCUMENTED_PREFIX_CLASSIFICATIONS: tuple[tuple[str, str], ...] = (
     ("request timed out while waiting for FireTuner", "timeout"),
     ("asyncio.exceptions.TimeoutError: civ6-mcp request exceeded 30s", "timeout"),
 )
+_UNCOVERED_DOCUMENTED_PREFIX_CLASSIFICATIONS: tuple[tuple[str, str], ...] = tuple(
+    (prefix, classification)
+    for _table_name, prefix, classification in _documented_prefix_classification_gaps(
+        {"operations": _DOCUMENTED_PREFIX_CLASSIFICATIONS}
+    )
+)
 
 
 @dataclass(frozen=True)
 class Civ6McpRequest:
-    """Validated request for one upstream civ6-mcp tool call."""
+    """Validated request metadata for one upstream civ6-mcp tool call."""
 
     tool: str
     arguments: dict[str, Any] = field(default_factory=dict)
@@ -162,11 +201,11 @@ class Civ6McpDispatchResult:
 
 
 class Civ6McpRequestBuilder:
-    """Build validated requests for supported civ6-mcp operations."""
+    """Build validated requests for registered tools and dynamic observations."""
 
     @classmethod
     def observation(cls, tool: str, arguments: dict[str, Any] | None = None, *, reasoning: str = "") -> Civ6McpRequest:
-        """Build a validated observation request such as ``get_game_overview``."""
+        """Build a validated registered or dynamic ``get_*`` observation request."""
         request = cls.build(tool, arguments, operation=SupportedCiv6McpOperation.OBSERVE, reasoning=reasoning)
         if not is_civ6_mcp_observation_tool(request.tool):
             raise ValueError(f"Tool {request.tool!r} is not a civ6-mcp observation operation.")
@@ -217,7 +256,7 @@ class Civ6McpRequestBuilder:
         reasoning: str = "",
         require_supported: bool = True,
     ) -> Civ6McpRequest:
-        """Build a normalized tool request and validate its operation category."""
+        """Build a normalized request and validate support, arguments, and operation."""
         if not isinstance(tool, str) or not tool:
             raise ValueError("civ6-mcp request tool must be a non-empty string.")
         if require_supported and tool not in SUPPORTED_CIV6_MCP_TOOLS and not _is_dynamic_observation_tool(tool):
@@ -240,13 +279,13 @@ class Civ6McpRequestBuilder:
 
 
 class Civ6McpOperationDispatcher:
-    """Dispatch validated civ6-mcp requests through a synchronous client."""
+    """Dispatch validated civ6-mcp tool requests through a synchronous client."""
 
     def __init__(self, client: Civ6McpClientProtocol) -> None:
         self._client = client
 
     def dispatch(self, request: Civ6McpRequest) -> Civ6McpDispatchResult:
-        """Validate and invoke one request, returning normalized result metadata."""
+        """Validate and invoke one request, returning dispatch metadata."""
         try:
             validate_civ6_mcp_request(request)
         except ValueError as exc:
@@ -320,7 +359,7 @@ class Civ6McpOperationDispatcher:
         stop_on_terminal: bool = True,
         stop_requested: StopRequested | None = None,
     ) -> list[Civ6McpDispatchResult]:
-        """Dispatch requests in order and optionally stop on terminal outcomes."""
+        """Dispatch requests in order, honoring terminal outcomes and stop requests."""
         results: list[Civ6McpDispatchResult] = []
         for request in requests:
             if stop_requested is not None and stop_requested():
@@ -339,7 +378,7 @@ class Civ6McpOperationDispatcher:
 
 
 def operation_for_tool(tool: str) -> SupportedCiv6McpOperation:
-    """Infer the supported operation category for a civ6-mcp tool name."""
+    """Infer a tool operation category without requiring registered-tool support."""
     if tool == END_TURN_TOOL:
         return SupportedCiv6McpOperation.END_TURN
     if is_civ6_mcp_observation_tool(tool):
@@ -363,11 +402,9 @@ def validate_civ6_mcp_request(request: Civ6McpRequest) -> None:
 
 
 def coerce_civ6_mcp_requests(payload: Any) -> list[Civ6McpRequest]:
-    """Convert planner tool-call payloads into validated civ6-mcp requests."""
+    """Convert planner tool-call envelopes or lists into validated requests."""
     requests: list[Civ6McpRequest] = []
-    for raw in planner_tool_call_items(payload):
-        if not isinstance(raw, dict):
-            raise ValueError(f"Tool call entry must be an object, got {type(raw).__name__}")
+    for raw in planner_tool_call_dicts(payload):
         tool = raw.get("tool") or raw.get("name")
         if not isinstance(tool, str) or not tool:
             raise ValueError(f"Tool call missing 'tool' name: {raw!r}")
@@ -385,18 +422,12 @@ def coerce_civ6_mcp_requests(payload: Any) -> list[Civ6McpRequest]:
 
 
 def classify_civ6_mcp_text(text: str) -> str:
-    """Classify civ6-mcp response text as a stable string value.
-
-    Documented upstream prefixes include terminal banners, abort/hang markers,
-    tool errors, end-turn blockers, and timeout messages. The examples are
-    captured in ``_DOCUMENTED_PREFIX_CLASSIFICATIONS`` while the actual
-    precedence rules remain centralized in ``response.py``.
-    """
+    """Classify civ6-mcp response text as a legacy response-class string."""
     return _classify_response_text(text).value
 
 
 def is_civ6_mcp_observation_tool(tool: str) -> bool:
-    """Return whether a tool name is an allowlisted or dynamic observation."""
+    """Return whether a tool name is an allowlisted or dynamic ``get_*`` observation."""
     return tool in OBSERVATION_TOOLS or _is_dynamic_observation_tool(tool)
 
 

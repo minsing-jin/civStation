@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
-from civStation.agent.modules.backend.civ6_mcp._payload import planner_tool_call_items
+from civStation.agent.modules.backend.civ6_mcp._payload import planner_tool_call_dicts
 from civStation.agent.modules.backend.civ6_mcp.action_mapping import (
     Civ6McpActionMappingError,
     map_civ6_mcp_action,
@@ -26,6 +26,7 @@ from civStation.agent.modules.backend.civ6_mcp.operations import (
 from civStation.agent.modules.backend.civ6_mcp.operations import (
     Civ6McpOperationDispatcher,
     Civ6McpRequestBuilder,
+    _documented_prefix_classification_gaps,
     classify_civ6_mcp_text,
 )
 from civStation.agent.modules.backend.civ6_mcp.results import (
@@ -37,21 +38,28 @@ from civStation.agent.modules.backend.civ6_mcp.results import (
 _TERMINAL_CLASSIFICATIONS = frozenset({"game_over", "aborted", "hang"})
 StopRequested = Callable[[], bool]
 _DOCUMENTED_PREFIX_CLASSIFICATIONS = _OPERATIONS_DOCUMENTED_PREFIX_CLASSIFICATIONS
+_DOCUMENTED_PREFIX_CLASSIFICATION_GAPS = _documented_prefix_classification_gaps(
+    {
+        "executor": _DOCUMENTED_PREFIX_CLASSIFICATIONS,
+        "operations": _OPERATIONS_DOCUMENTED_PREFIX_CLASSIFICATIONS,
+    }
+)
+# Backward-compatible executor-only view of the consolidated audit.
+_UNCOVERED_DOCUMENTED_PREFIX_CLASSIFICATIONS = tuple(
+    (prefix, classification)
+    for table_name, prefix, classification in _DOCUMENTED_PREFIX_CLASSIFICATION_GAPS
+    if table_name == "executor"
+)
 
 
 class Civ6McpExecutor:
-    """Execute planned civ6-mcp tool calls through a synchronous client.
-
-    Text outcomes are classified by the shared civ6-mcp response rules. The
-    documented prefix inventory covers terminal banners, abort/hang
-    markers, tool errors, end-turn blockers, and timeout messages.
-    """
+    """Execute planned civ6-mcp tool calls through the operation dispatcher."""
 
     def __init__(self, client: Civ6McpClientProtocol) -> None:
         self._dispatcher = Civ6McpOperationDispatcher(client)
 
     def execute(self, planned_action: Any) -> ToolCallResult:
-        """Run one planned civ6-mcp action and return its classified result."""
+        """Run one planned civ6-mcp action and return a tool-call result."""
         try:
             call = coerce_tool_call(planned_action)
         except ValueError as exc:
@@ -89,7 +97,7 @@ class Civ6McpExecutor:
         *,
         stop_requested: StopRequested | None = None,
     ) -> list[ToolCallResult]:
-        """Run tool calls sequentially until a terminal outcome or stop request."""
+        """Run tool calls in order until a terminal outcome or stop request."""
         results: list[ToolCallResult] = []
         for call in calls:
             if stop_requested is not None and stop_requested():
@@ -111,7 +119,7 @@ def _is_terminal_outcome(outcome: ToolCallResult) -> bool:
 
 
 def coerce_tool_call(planned_action: Any) -> ToolCall:
-    """Convert one planned backend action into an executor ``ToolCall``."""
+    """Convert one supported planner action shape into an executor ``ToolCall``."""
     try:
         return map_civ6_mcp_action(planned_action)
     except Civ6McpActionMappingError as exc:
@@ -119,7 +127,7 @@ def coerce_tool_call(planned_action: Any) -> ToolCall:
 
 
 def coerce_tool_calls(payload: Any) -> list[ToolCall]:
-    """Convert a planner payload or bare list into executor ``ToolCall`` objects."""
+    """Convert a tool-call envelope or bare list into executor ``ToolCall`` objects."""
     items = _tool_call_items_from_payload(payload)
     try:
         return map_civ6_mcp_actions(items)
@@ -128,13 +136,11 @@ def coerce_tool_calls(payload: Any) -> list[ToolCall]:
 
 
 def _tool_call_items_from_payload(payload: Any) -> list[Any]:
-    items = planner_tool_call_items(payload, reject_vlm_actions=True)
-    for item in items:
-        if not isinstance(item, dict):
-            raise ValueError(f"Tool call entry must be an object, got {type(item).__name__}")
-        if not any(item.get(key) for key in ("tool", "name", "type", "action_type", "action")):
-            raise ValueError(f"Tool call missing 'tool' name: {item!r}")
-    return list(items)
+    return planner_tool_call_dicts(
+        payload,
+        reject_vlm_actions=True,
+        tool_name_keys=("tool", "name", "type", "action_type", "action"),
+    )
 
 
 def _invalid_tool_call(raw: Any) -> ToolCall:

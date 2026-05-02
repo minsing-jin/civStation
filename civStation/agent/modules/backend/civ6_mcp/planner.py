@@ -15,7 +15,8 @@ import logging
 from collections.abc import Mapping
 from typing import Any
 
-from civStation.agent.modules.backend.civ6_mcp._payload import planner_tool_call_items
+from civStation.agent.modules.backend.civ6_mcp import planner_types
+from civStation.agent.modules.backend.civ6_mcp._payload import _load_json_payload, planner_tool_call_items
 from civStation.agent.modules.backend.civ6_mcp.executor import coerce_tool_calls
 from civStation.agent.modules.backend.civ6_mcp.observation_schema import (
     Civ6McpNormalizedObservation,
@@ -26,7 +27,6 @@ from civStation.agent.modules.backend.civ6_mcp.operations import (
     END_TURN_TOOL,
 )
 from civStation.agent.modules.backend.civ6_mcp.planner_types import (
-    DEFAULT_PLANNER_TOOL_ALLOWLIST,
     Civ6McpPlannerProvider,
     PlannerResult,
 )
@@ -39,8 +39,11 @@ from civStation.agent.modules.backend.civ6_mcp.turn_planning import build_priori
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_PLANNER_TOOL_ALLOWLIST = planner_types.DEFAULT_PLANNER_TOOL_ALLOWLIST
+"""Private canonical planner tool allow-list for this module."""
 
-_DEFAULT_PLANNER_TOOL_ALLOWLIST = DEFAULT_PLANNER_TOOL_ALLOWLIST
+DEFAULT_PLANNER_TOOL_ALLOWLIST = _DEFAULT_PLANNER_TOOL_ALLOWLIST
+"""Public compatibility alias for the canonical planner tool allow-list."""
 
 
 class MissingEndTurnPlannerOutputError(RuntimeError):
@@ -78,7 +81,7 @@ class _MissingEndTurnPlanError(ValueError):
 
 
 class Civ6McpToolPlanner:
-    """Coordinates LLM-backed planning for allowlisted civ6-mcp tool calls."""
+    """Coordinate LLM-backed planning for allowlisted civ6-mcp tool calls."""
 
     def __init__(
         self,
@@ -90,7 +93,7 @@ class Civ6McpToolPlanner:
     ) -> None:
         self._provider = provider
         self._tool_catalog = tool_catalog
-        self._allowed_tools = tuple(allowed_tools or DEFAULT_PLANNER_TOOL_ALLOWLIST)
+        self._allowed_tools = tuple(allowed_tools or _DEFAULT_PLANNER_TOOL_ALLOWLIST)
         self._max_retries = max_retries
 
     @property
@@ -99,7 +102,7 @@ class Civ6McpToolPlanner:
         return self._allowed_tools
 
     def render_tool_catalog(self) -> str:
-        """Render allowlisted tool metadata for the planner prompt."""
+        """Render allowlisted upstream tool metadata for the planner prompt."""
         lines: list[str] = []
         for name in self._allowed_tools:
             entry = self._tool_catalog.get(name)
@@ -133,7 +136,7 @@ class Civ6McpToolPlanner:
         recent_calls: str,
         hitl_directive: str = "",
     ) -> PlannerResult:
-        """Return a validated PlannerResult, retrying invalid provider responses."""
+        """Return a validated planner result, retrying invalid provider responses."""
         system_prompt = build_planner_system_prompt(
             tool_catalog=self.render_tool_catalog(),
             allowed_tools=self._allowed_tools,
@@ -206,7 +209,7 @@ class Civ6McpToolPlanner:
         recent_calls: str,
         hitl_directive: str = "",
     ) -> PlannerResult:
-        """Return a validated tool-call plan from a normalized observation."""
+        """Return a prioritized and validated tool-call plan from an observation payload."""
         normalized_observation = _normalize_planner_observation(observation)
 
         turn_plan = build_prioritized_turn_plan(normalized_observation, strategy=strategy)
@@ -226,7 +229,7 @@ class Civ6McpToolPlanner:
 
 def _load_strict_planner_payload(raw: str) -> dict[str, Any]:
     """Load the planner response as strict JSON with the required top-level shape."""
-    payload = json.loads(raw)
+    payload = _load_json_payload(raw)
     if not isinstance(payload, dict):
         raise ValueError("Planner output must be a top-level JSON object with a 'tool_calls' array.")
     try:

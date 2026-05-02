@@ -1,9 +1,9 @@
-"""Lazy public exports for the civ6-mcp backend.
+"""Lazy public package exports for the civ6-mcp backend.
 
 The upstream project (github.com/lmwilki/civ6-mcp) exposes Civ6's internal
 state and commands through a Python MCP server that talks to the game over
 FireTuner TCP. This package keeps exports lazy so importing the client startup
-path does not initialize VLM/computer-use modules.
+path does not import civ6-mcp implementation modules until needed.
 """
 
 from __future__ import annotations
@@ -135,7 +135,7 @@ __all__ = sorted(_EXPORT_MODULES)
 
 
 def __getattr__(name: str) -> Any:
-    """Resolve civ6-mcp exports without importing implementation modules eagerly."""
+    """Resolve a public civ6-mcp export from its implementation module on demand."""
     module_name = _EXPORT_MODULES.get(name)
     if module_name is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
@@ -146,5 +146,5 @@ def __getattr__(name: str) -> Any:
 
 
 def __dir__() -> list[str]:
-    """Return lazy public civ6-mcp exports alongside loaded module globals."""
+    """Return loaded globals plus lazy public civ6-mcp export names."""
     return sorted((*globals(), *__all__))

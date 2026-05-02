@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
+import pytest
+
 from civStation.agent.modules.backend.civ6_mcp.observation_schema import (
     CIV6_MCP_CONTEXT_FIELD_MAPPINGS,
     CIV6_MCP_OBSERVATION_SECTION_MAPPINGS,
@@ -416,6 +418,35 @@ def test_normalized_observation_output_remains_stable_for_mixed_helper_payload_s
     }
 
 
+def test_normalize_raw_mcp_game_state_matches_parser_regression_fixture_structures(
+    civ6_mcp_parser_regression_cases: dict[str, dict[str, object]],
+) -> None:
+    for case_name, case in civ6_mcp_parser_regression_cases.items():
+        observation = normalize_raw_mcp_game_state(case["raw_state"], max_section_chars=1200)
+
+        assert asdict(observation) == _expected_normalized_observation(case["expected_bundle"]), case_name
+
+
+def test_observation_tool_response_overview_path_matches_parser_regression_fixtures(
+    civ6_mcp_parser_regression_cases: dict[str, dict[str, object]],
+) -> None:
+    direct_case = civ6_mcp_parser_regression_cases["direct_tool_mapping"]
+    consolidated_case = civ6_mcp_parser_regression_cases["consolidated_alias_sdk_mapping"]
+    structured_case = civ6_mcp_parser_regression_cases["overview_only_structured_mapping"]
+    overview_payloads = {
+        "direct_tool_mapping": direct_case["raw_state"]["get_game_overview"],
+        "consolidated_alias_sdk_mapping": consolidated_case["raw_state"]["game_overview"],
+        "overview_only_structured_mapping": structured_case["raw_state"],
+    }
+
+    for case_name, payload in overview_payloads.items():
+        expected_overview = civ6_mcp_parser_regression_cases[case_name]["expected_bundle"]["overview"]
+        parsed = parse_observation_tool_response("get_game_overview", payload, max_section_chars=1200)
+
+        assert asdict(parsed.bundle.overview) == expected_overview, case_name
+        assert asdict(parsed.normalized) == _expected_overview_only_observation(expected_overview), case_name
+
+
 def test_parse_observation_tool_response_validates_one_successful_get_tool_payload() -> None:
     parsed = parse_observation_tool_response(
         "get_game_overview",
@@ -460,6 +491,48 @@ def test_observation_tool_response_matches_state_bundle_sdk_payload_shapes() -> 
 
         assert parsed.bundle.units_text == bundle.units_text
         assert parsed.normalized.tool_results["get_units"] == bundle.units_text
+
+
+def test_observation_tool_response_output_remains_stable_for_non_overview_sections() -> None:
+    payload = {"content_blocks": ["Units:", "- Builder at (3, 4)"]}
+    parsed = parse_observation_tool_response("get_units", payload, max_section_chars=1200)
+    expected_bundle = StateBundle(units_text="Units:\n- Builder at (3, 4)")
+
+    assert asdict(parsed) == {
+        "tool": "get_units",
+        "bundle": asdict(expected_bundle),
+        "normalized": {
+            "backend": "civ6-mcp",
+            "global_context_updates": {},
+            "game_observation_updates": {},
+            "raw_sections": {"UNITS": "Units:\n- Builder at (3, 4)"},
+            "planner_context": "## UNITS\nUnits:\n- Builder at (3, 4)",
+            "tool_results": {"get_units": "Units:\n- Builder at (3, 4)"},
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    ("tool", "payload", "message"),
+    [
+        (None, "Units:\n- Builder", "None is not a civ6-mcp observation tool."),
+        ("set_research", "Writing", "'set_research' is not a civ6-mcp observation tool."),
+        (
+            "get_units",
+            None,
+            "civ6-mcp observation tool 'get_units' returned an empty response body.",
+        ),
+    ],
+)
+def test_observation_tool_response_error_messages_remain_stable(
+    tool: object,
+    payload: object,
+    message: str,
+) -> None:
+    with pytest.raises(ValueError) as exc_info:
+        parse_observation_tool_response(tool, payload)
+
+    assert str(exc_info.value) == message
 
 
 def test_parse_observation_tool_response_rejects_non_get_and_empty_payloads() -> None:
@@ -577,3 +650,165 @@ def test_section_texts_for_bundle_omits_empty_sections() -> None:
     sections = section_texts_for_bundle(bundle)
 
     assert sections == {"CITIES": "Cities:\n- Seoul"}
+
+
+_GLOBAL_CONTEXT_FIELDS = (
+    "current_turn",
+    "game_era",
+    "game_speed",
+    "civilization_name",
+    "leader_name",
+    "gold",
+    "science_per_turn",
+    "culture_per_turn",
+    "gold_per_turn",
+    "faith",
+    "faith_per_turn",
+    "total_population",
+    "military_strength",
+    "unit_count",
+    "current_research",
+    "current_civic",
+)
+_OBSERVATION_FIELD_NAMES = (*_GLOBAL_CONTEXT_FIELDS, "victory_text")
+_EXPECTED_SECTION_FIELDS = (
+    ("overview", "OVERVIEW", "get_game_overview"),
+    ("units_text", "UNITS", "get_units"),
+    ("cities_text", "CITIES", "get_cities"),
+    ("diplomacy_text", "DIPLOMACY", "get_diplomacy"),
+    ("tech_civics_text", "TECH_CIVICS", "get_tech_civics"),
+    ("notifications_text", "NOTIFICATIONS", "get_notifications"),
+    ("pending_diplomacy_text", "PENDING_DIPLOMACY", "get_pending_diplomacy"),
+    ("pending_trades_text", "PENDING_TRADES", "get_pending_trades"),
+    ("victory_progress_text", "VICTORY_PROGRESS", "get_victory_progress"),
+)
+
+
+def _expected_normalized_observation(expected_bundle: object) -> dict[str, object]:
+    bundle = expected_bundle if isinstance(expected_bundle, dict) else {}
+    overview = bundle.get("overview", {}) if isinstance(bundle.get("overview"), dict) else {}
+    sections = _expected_sections(bundle)
+    fields = _expected_game_observation_fields(overview)
+    summary = _expected_situation_summary(overview)
+    game_observation_updates = {}
+    if summary:
+        game_observation_updates["situation_summary"] = summary
+    if fields:
+        game_observation_updates["observation_fields"] = fields
+
+    return {
+        "backend": "civ6-mcp",
+        "global_context_updates": _expected_global_context_updates(overview),
+        "game_observation_updates": game_observation_updates,
+        "raw_sections": sections,
+        "planner_context": _expected_planner_context(sections),
+        "tool_results": _expected_tool_results(bundle),
+    }
+
+
+def _expected_overview_only_observation(expected_overview: object) -> dict[str, object]:
+    overview = expected_overview if isinstance(expected_overview, dict) else {}
+    return _expected_normalized_observation(
+        {
+            "overview": overview,
+            "units_text": "",
+            "cities_text": "",
+            "diplomacy_text": "",
+            "tech_civics_text": "",
+            "notifications_text": "",
+            "pending_diplomacy_text": "",
+            "pending_trades_text": "",
+            "victory_progress_text": "",
+            "extra": {},
+            "missing_tools": [],
+            "failed_tools": {},
+            "malformed_tools": {},
+        }
+    )
+
+
+def _expected_global_context_updates(overview: dict[str, object]) -> dict[str, object]:
+    return {
+        field_name: overview[field_name]
+        for field_name in _GLOBAL_CONTEXT_FIELDS
+        if overview.get(field_name) is not None and overview.get(field_name) != ""
+    }
+
+
+def _expected_game_observation_fields(overview: dict[str, object]) -> dict[str, object]:
+    fields = {
+        field_name: overview[field_name]
+        for field_name in _OBSERVATION_FIELD_NAMES
+        if overview.get(field_name) is not None and overview.get(field_name) != ""
+    }
+    if overview.get("is_game_over") is True:
+        fields["is_game_over"] = True
+    return fields
+
+
+def _expected_sections(expected_bundle: dict[str, object]) -> dict[str, str]:
+    sections = {}
+    for bundle_field, section_name, _tool in _EXPECTED_SECTION_FIELDS:
+        value = expected_bundle["overview"]["raw_text"] if bundle_field == "overview" else expected_bundle[bundle_field]
+        if isinstance(value, str) and value.strip():
+            sections[section_name] = value
+    extra = expected_bundle.get("extra", {})
+    if isinstance(extra, dict):
+        sections.update({str(tool).upper(): str(text) for tool, text in extra.items() if str(text).strip()})
+    diagnostics = _expected_diagnostic_section(expected_bundle)
+    if diagnostics:
+        sections["STATE_DIAGNOSTICS"] = diagnostics
+    return sections
+
+
+def _expected_tool_results(expected_bundle: dict[str, object]) -> dict[str, str]:
+    results = {}
+    for bundle_field, _section_name, tool in _EXPECTED_SECTION_FIELDS:
+        value = expected_bundle["overview"]["raw_text"] if bundle_field == "overview" else expected_bundle[bundle_field]
+        if isinstance(value, str) and value.strip():
+            results[tool] = value
+    extra = expected_bundle.get("extra", {})
+    if isinstance(extra, dict):
+        results.update({str(tool): str(text) for tool, text in extra.items() if str(text).strip()})
+    return results
+
+
+def _expected_diagnostic_section(expected_bundle: dict[str, object]) -> str:
+    lines = []
+    missing_tools = expected_bundle.get("missing_tools")
+    if isinstance(missing_tools, list) and missing_tools:
+        lines.append(f"missing: {', '.join(str(tool) for tool in missing_tools)}")
+    failed_tools = expected_bundle.get("failed_tools")
+    if isinstance(failed_tools, dict) and failed_tools:
+        failed = ", ".join(f"{tool} ({reason})" for tool, reason in sorted(failed_tools.items()))
+        lines.append(f"failed: {failed}")
+    malformed_tools = expected_bundle.get("malformed_tools")
+    if isinstance(malformed_tools, dict) and malformed_tools:
+        malformed = ", ".join(f"{tool} ({reason})" for tool, reason in sorted(malformed_tools.items()))
+        lines.append(f"malformed: {malformed}")
+    return "\n".join(lines)
+
+
+def _expected_situation_summary(overview: dict[str, object]) -> str:
+    summary_bits = []
+    if overview.get("current_turn") is not None:
+        summary_bits.append(f"Turn {overview['current_turn']}")
+    if overview.get("game_era"):
+        summary_bits.append(f"Era {overview['game_era']}")
+    if overview.get("science_per_turn") is not None:
+        summary_bits.append(f"Sci +{overview['science_per_turn']:.1f}/t")
+    if overview.get("culture_per_turn") is not None:
+        summary_bits.append(f"Cul +{overview['culture_per_turn']:.1f}/t")
+    if overview.get("current_research"):
+        summary_bits.append(f"Research {overview['current_research']}")
+    if overview.get("current_civic"):
+        summary_bits.append(f"Civic {overview['current_civic']}")
+    if overview.get("is_game_over") and overview.get("victory_text"):
+        summary_bits.append(f"GAME OVER: {overview['victory_text']}")
+    return " | ".join(summary_bits)
+
+
+def _expected_planner_context(sections: dict[str, str]) -> str:
+    if not sections:
+        return "(no civ6-mcp state available)"
+    return "\n\n".join(f"## {label}\n{body.strip()}" for label, body in sections.items())

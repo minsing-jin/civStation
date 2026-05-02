@@ -64,7 +64,7 @@ DEFAULT_CIV6_MCP_STRATEGY = "Pursue a science victory while avoiding unnecessary
 
 @dataclass(frozen=True)
 class Civ6McpTurnLoopConfig:
-    """Runtime configuration for civ6-mcp turn execution."""
+    """Runtime policy knobs for civ6-mcp turn-loop execution."""
 
     max_planner_calls_per_turn: int = 25
     delay_between_turns: float = 1.0
@@ -74,7 +74,7 @@ class Civ6McpTurnLoopConfig:
     outcome_log_path: Path | str | None = None
 
     def validate(self) -> None:
-        """Validate civ6-mcp turn-loop runtime bounds."""
+        """Validate civ6-mcp turn-loop limits and default strategy."""
         if self.max_planner_calls_per_turn < 1:
             raise ValueError("max_planner_calls_per_turn must be at least 1")
         if self.delay_between_turns < 0:
@@ -104,7 +104,7 @@ class Civ6McpTurnState:
 
 @dataclass(frozen=True)
 class Civ6McpTurnRequestContext:
-    """Stable inputs for one civ6-mcp turn execution."""
+    """Stable inputs for a single civ6-mcp turn invocation."""
 
     turn_index: int
     planner_provider: object
@@ -134,7 +134,7 @@ class Civ6McpTurnRequestContext:
 
 @dataclass
 class Civ6McpTurnResult:
-    """Result data produced by one civ6-mcp turn execution."""
+    """Outcome data produced by one civ6-mcp turn execution."""
 
     turn_index: int
     success: bool = False
@@ -354,7 +354,7 @@ def run_one_turn_civ6_mcp(
     turn_config: Civ6McpTurnLoopConfig | None = None,
     observer_factory: Civ6McpObserverFactory | None = None,
 ) -> Civ6McpTurnResult:
-    """Execute one Civ6 turn through the civ6-mcp tool-call backend."""
+    """Execute one turn through the civ6-mcp tool-call backend."""
     config = turn_config or Civ6McpTurnLoopConfig()
     config.validate()
     effective_max_planner_calls = (
@@ -613,7 +613,7 @@ def run_multi_turn_civ6_mcp(
     turn_config: Civ6McpTurnLoopConfig | None = None,
     observer_factory: Civ6McpObserverFactory | None = None,
 ) -> list[Civ6McpTurnResult]:
-    """Execute civ6-mcp turns sequentially until completion, stop, or failure."""
+    """Execute multiple civ6-mcp turns until stop, terminal condition, or failure."""
     config = turn_config or Civ6McpTurnLoopConfig()
     config.validate()
     effective_delay_between_turns = (
@@ -678,7 +678,7 @@ def run_civ6_mcp_turn_loop(
     client_factory: Civ6McpClientFactory | None = None,
     env_overrides: dict[str, str] | None = None,
 ) -> list[Civ6McpTurnResult]:
-    """Manage the civ6-mcp client lifecycle around turn execution."""
+    """Manage the civ6-mcp client lifecycle around multi-turn execution."""
     if num_turns < 1:
         return []
     if _check_stop_requested(agent_gate, command_queue):
@@ -780,7 +780,7 @@ def build_civ6_mcp_client(
     launcher: str | None,
     env_overrides: dict[str, str] | None = None,
 ) -> Civ6McpClient:
-    """Construct and start a civ6-mcp client with clear configuration errors."""
+    """Build, validate, and start a civ6-mcp client from runtime configuration."""
     config = Civ6McpConfig.from_environment(
         install_path=install_path,
         launcher=launcher,

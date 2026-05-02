@@ -1,12 +1,14 @@
-"""Backend selection layer.
+"""Public backend selection exports.
 
 Currently supported backends:
 - vlm: existing VLM/computer-use pipeline (default).
-- civ6_mcp: tool-call backend that drives Civ6 via the civ6-mcp MCP server
+- civ6-mcp: tool-call backend that drives Civ6 via the civ6-mcp MCP server
   (https://github.com/lmwilki/civ6-mcp) over the FireTuner protocol.
 
 Backends are mutually exclusive at runtime; users pick one with --backend.
 """
+
+from typing import Any
 
 from civStation.agent.modules.backend.selector import (
     BackendKind,
@@ -51,8 +53,8 @@ _CIV6_MCP_LAZY_EXPORTS = (
 )
 
 
-def __getattr__(name: str):
-    """Lazily expose civ6-mcp hooks without importing MCP dependencies on selector import."""
+def __getattr__(name: str) -> Any:
+    """Resolve selected civ6-mcp hooks without importing that backend eagerly."""
     if name in _CIV6_MCP_LAZY_EXPORTS:
         from civStation.agent.modules.backend import civ6_mcp
 

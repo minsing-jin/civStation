@@ -20,7 +20,7 @@ from civStation.agent.modules.backend.civ6_mcp.response import (
 
 @dataclass
 class ToolCall:
-    """Planner-requested civ6-mcp tool invocation."""
+    """Carry executor-facing civ6-mcp tool invocation metadata."""
 
     tool: str
     arguments: dict[str, Any] = field(default_factory=dict)
@@ -29,7 +29,7 @@ class ToolCall:
 
 @dataclass
 class ToolCallResult:
-    """Executor result for one civ6-mcp tool call and its normalized MCP metadata."""
+    """Carry executor result metadata for one civ6-mcp tool call."""
 
     call: ToolCall
     success: bool = False
@@ -79,7 +79,7 @@ def executor_result_from_mcp_tool_result(
     call: ToolCall,
     result: Any,
 ) -> ToolCallResult:
-    """Build a public executor result from a raw MCP tool result."""
+    """Build an executor result from a raw MCP SDK tool result."""
     response = normalize_mcp_tool_result(call.tool, call.arguments, result)
     return executor_result_from_normalized_response(call, response)
 
@@ -106,7 +106,7 @@ def executor_result_from_mcp_timeout(
 
 
 def tool_call_result_from_dispatch(call: ToolCall, dispatch_result: Any) -> ToolCallResult:
-    """Build a public executor result from dispatcher result metadata."""
+    """Build an executor result from operation-dispatcher metadata."""
     response = getattr(dispatch_result, "response", None)
     if isinstance(response, Civ6McpNormalizedResult):
         return executor_result_from_normalized_response(call, response)

@@ -10,13 +10,28 @@ import pytest
 
 from civStation.agent.modules.backend.civ6_mcp.client import Civ6McpError
 from civStation.agent.modules.backend.civ6_mcp.executor import (
+    _DOCUMENTED_PREFIX_CLASSIFICATION_GAPS as EXECUTOR_DOCUMENTED_PREFIX_CLASSIFICATION_GAPS,
+)
+from civStation.agent.modules.backend.civ6_mcp.executor import (
     _DOCUMENTED_PREFIX_CLASSIFICATIONS as EXECUTOR_DOCUMENTED_PREFIX_CLASSIFICATIONS,
+)
+from civStation.agent.modules.backend.civ6_mcp.executor import (
+    _UNCOVERED_DOCUMENTED_PREFIX_CLASSIFICATIONS as EXECUTOR_UNCOVERED_DOCUMENTED_PREFIX_CLASSIFICATIONS,
 )
 from civStation.agent.modules.backend.civ6_mcp.executor import (
     Civ6McpExecutor,
     ToolCall,
 )
-from civStation.agent.modules.backend.civ6_mcp.response import normalize_mcp_response_timeout
+from civStation.agent.modules.backend.civ6_mcp.operations import (
+    _DOCUMENTED_PREFIX_CLASSIFICATIONS as OPERATIONS_DOCUMENTED_PREFIX_CLASSIFICATIONS,
+)
+from civStation.agent.modules.backend.civ6_mcp.operations import (
+    classify_civ6_mcp_text as classify_operations_text,
+)
+from civStation.agent.modules.backend.civ6_mcp.response import (
+    _UPSTREAM_TEXT_PREFIX_CHECKLIST,
+    normalize_mcp_response_timeout,
+)
 
 END_TURN_ARGUMENTS = {
     "tactical": "no tactical blockers",
@@ -275,6 +290,34 @@ def test_executor_classifies_backend_exception_with_civ6_mcp_failure_prefix() ->
 @pytest.mark.parametrize(("text", "expected_classification"), EXECUTOR_DOCUMENTED_PREFIX_CLASSIFICATIONS)
 def test_executor_classify_matches_documented_prefix_inventory(text: str, expected_classification: str) -> None:
     assert Civ6McpExecutor._classify(text) == expected_classification
+
+
+@pytest.mark.parametrize(("text", "expected_classification"), EXECUTOR_DOCUMENTED_PREFIX_CLASSIFICATIONS)
+def test_executor_and_operations_classify_documented_prefixes_consistently(
+    text: str,
+    expected_classification: str,
+) -> None:
+    assert EXECUTOR_DOCUMENTED_PREFIX_CLASSIFICATIONS == OPERATIONS_DOCUMENTED_PREFIX_CLASSIFICATIONS
+    assert Civ6McpExecutor._classify(text) == expected_classification
+    assert classify_operations_text(text) == expected_classification
+
+
+def test_executor_documented_prefix_audit_records_no_uncovered_prefixes() -> None:
+    uncovered = tuple(
+        (item.prefix, item.legacy_classification)
+        for item in _UPSTREAM_TEXT_PREFIX_CHECKLIST
+        if not any(
+            expected == item.legacy_classification and text.startswith(item.prefix)
+            for text, expected in EXECUTOR_DOCUMENTED_PREFIX_CLASSIFICATIONS
+        )
+    )
+
+    assert EXECUTOR_UNCOVERED_DOCUMENTED_PREFIX_CLASSIFICATIONS == uncovered
+    assert EXECUTOR_UNCOVERED_DOCUMENTED_PREFIX_CLASSIFICATIONS == ()
+
+
+def test_executor_consolidates_documented_prefix_gaps_across_classification_tables() -> None:
+    assert EXECUTOR_DOCUMENTED_PREFIX_CLASSIFICATION_GAPS == ()
 
 
 def test_executor_preserves_typed_timeout_failure_category() -> None:

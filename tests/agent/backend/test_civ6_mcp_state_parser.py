@@ -8,6 +8,7 @@ from dataclasses import asdict, fields
 import pytest
 
 from civStation.agent.modules.backend.civ6_mcp.state_parser import (
+    GameOverviewSnapshot,
     StateBundle,
     parse_game_overview,
     state_bundle_from_raw_mcp_state,
@@ -366,6 +367,64 @@ def test_parse_structured_civ6_mcp_overview_payload() -> None:
     assert "STEAM_POWER" in snap.raw_text
 
 
+def test_parse_overview_preserves_fields_across_supported_payload_shapes() -> None:
+    text_payload = """\
+Game Overview
+Turn 87
+Era: Medieval Era
+Game Speed: Online
+Civilization: Korea (Seondeok)
+Gold: 104 (+104 / turn)
+Faith: 7 (+7.5 / turn)
+Science: +93.25 / turn
+Culture: +41.5 / turn
+Research: EDUCATION (3 turns)
+Civic: FEUDALISM (2 turns)
+"""
+    structured_payload = {
+        "turn": 87,
+        "era": "Medieval Era",
+        "game_speed": "Online",
+        "civilization": {"name": "Korea", "leader": "Seondeok"},
+        "gold_balance": 104,
+        "faith_balance": 7,
+        "yields": {
+            "science": 93.25,
+            "culture": 41.5,
+            "gold": 104,
+            "faith": 7.5,
+        },
+        "current_research": "EDUCATION (3 turns)",
+        "current_civic": "FEUDALISM (2 turns)",
+    }
+    json_payload = json.dumps(structured_payload)
+    sdk_payload = FakeMcpCallToolResult(structured_content=structured_payload)
+    expected_fields = {
+        "current_turn": 87,
+        "game_era": "Medieval",
+        "game_speed": "Online",
+        "civilization_name": "Korea",
+        "leader_name": "Seondeok",
+        "gold": 104,
+        "science_per_turn": 93.25,
+        "culture_per_turn": 41.5,
+        "gold_per_turn": 104.0,
+        "faith": 7,
+        "faith_per_turn": 7.5,
+        "current_research": "EDUCATION (3 turns)",
+        "current_civic": "FEUDALISM (2 turns)",
+        "is_game_over": False,
+        "victory_text": None,
+    }
+
+    for payload in (text_payload, structured_payload, json_payload, sdk_payload):
+        snapshot = parse_game_overview(payload)
+
+        assert snapshot.raw_text
+        for field_name, expected in expected_fields.items():
+            assert getattr(snapshot, field_name) == expected, field_name
+
+
 def test_parse_overview_accepts_sdk_style_structured_payload() -> None:
     payload = FakeMcpCallToolResult(
         structured_content={
@@ -607,6 +666,34 @@ def test_state_bundle_matches_fixture_regression_baselines(
         bundle = state_bundle_from_raw_mcp_state(case["raw_state"])
 
         assert _jsonable(asdict(bundle)) == case["expected_bundle"], case_name
+
+
+def test_parse_game_overview_malformed_json_path_remains_lenient(caplog: pytest.LogCaptureFixture) -> None:
+    malformed_json = '{"turn": 120, "era": "Future Era",'
+
+    with caplog.at_level("DEBUG", logger="civStation.agent.modules.backend.civ6_mcp.state_parser"):
+        snapshot = parse_game_overview(malformed_json)
+
+    assert asdict(snapshot) == asdict(GameOverviewSnapshot(raw_text=malformed_json))
+    assert "civ6-mcp overview looked like JSON but could not be decoded" in caplog.text
+
+
+def test_state_bundle_diagnostic_error_shapes_remain_parser_safe() -> None:
+    bundle = state_bundle_from_raw_mcp_state(
+        {
+            "get_units": None,
+            "missing_tools": ["get_units", 404],
+            "failed_tools": "timeout",
+            "malformed_tools": {7: RuntimeError("boom")},
+        }
+    )
+
+    assert asdict(bundle) == asdict(
+        StateBundle(
+            missing_tools=("get_units", "404"),
+            malformed_tools={"7": "boom"},
+        )
+    )
 
 
 def test_representative_parser_regression_inputs_match_baseline_sections(

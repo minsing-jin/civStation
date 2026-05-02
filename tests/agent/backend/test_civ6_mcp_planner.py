@@ -8,11 +8,14 @@ all testable without network.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 
 import pytest
 
+from civStation.agent.modules.backend.civ6_mcp import planner as planner_module
 from civStation.agent.modules.backend.civ6_mcp import prompts as planner_prompts
+from civStation.agent.modules.backend.civ6_mcp.action_mapping import PLANNED_ACTION_TYPE_TO_MCP_TOOL
 from civStation.agent.modules.backend.civ6_mcp.observation_schema import Civ6McpNormalizedObservation
 from civStation.agent.modules.backend.civ6_mcp.operations import (
     ACTION_TOOLS,
@@ -109,6 +112,7 @@ def test_default_planner_tool_allowlist_is_reusable_export() -> None:
     provider = FakeProvider([json.dumps(_valid_plan_payload())])
     planner = Civ6McpToolPlanner(provider=provider, tool_catalog=_TOOL_CATALOG)
 
+    assert DEFAULT_PLANNER_TOOL_ALLOWLIST is planner_module._DEFAULT_PLANNER_TOOL_ALLOWLIST
     assert DEFAULT_PLANNER_TOOL_ALLOWLIST is CANONICAL_PLANNER_TOOL_ALLOWLIST
     assert DEFAULT_PLANNER_TOOL_ALLOWLIST
     assert DEFAULT_PLANNER_TOOL_ALLOWLIST[-1] == END_TURN_TOOL
@@ -124,6 +128,55 @@ def test_default_planner_tool_allowlist_preserves_operation_groups_and_end_turn_
     assert set(allowlist[:action_start]) == OBSERVATION_TOOLS
     assert set(allowlist[action_start:-1]) == ACTION_TOOLS
     assert allowlist[-1] == END_TURN_TOOL
+
+
+def test_rendered_planner_prompt_lists_exact_canonical_allowlist_entries() -> None:
+    tool_catalog = {
+        tool: {"description": f"{tool} description", "input_schema": {"properties": {}}}
+        for tool in CANONICAL_PLANNER_TOOL_ALLOWLIST
+    }
+    tool_catalog["run_lua"] = {"description": "raw gameplay scripts", "input_schema": {"properties": {}}}
+    tool_catalog["click"] = {"description": "VLM pixel action", "input_schema": {"properties": {}}}
+    provider = FakeProvider([json.dumps(_valid_plan_payload())])
+    planner = Civ6McpToolPlanner(provider=provider, tool_catalog=tool_catalog)
+
+    planner.plan(strategy="Pursue science victory.", state_context="Turn 1.", recent_calls="(none)")
+
+    rendered_catalog = (
+        provider.captured_prompts[0]
+        .split(
+            "Available tools (subset; full schema is provided separately):\n",
+            1,
+        )[1]
+        .split("\n\nOutput schema:", 1)[0]
+    )
+    rendered_tool_names = [
+        line.removeprefix("- ").split("(", 1)[0] for line in rendered_catalog.splitlines() if line.startswith("- ")
+    ]
+
+    assert rendered_tool_names == list(CANONICAL_PLANNER_TOOL_ALLOWLIST)
+    assert "run_lua" not in rendered_tool_names
+    assert "click" not in rendered_tool_names
+
+
+def test_planner_catalog_and_action_metadata_share_canonical_allowlist() -> None:
+    tool_catalog = {
+        tool: {"description": f"{tool} description", "input_schema": {"properties": {}}}
+        for tool in CANONICAL_PLANNER_TOOL_ALLOWLIST
+    }
+    tool_catalog["click"] = {"description": "VLM pixel action", "input_schema": {"properties": {}}}
+    planner = Civ6McpToolPlanner(provider=FakeProvider([]), tool_catalog=tool_catalog)
+
+    catalog_tool_names = [
+        line.removeprefix("- ").split("(", 1)[0] for line in planner.render_tool_catalog().splitlines()
+    ]
+
+    assert catalog_tool_names == list(CANONICAL_PLANNER_TOOL_ALLOWLIST)
+    assert {tool: PLANNED_ACTION_TYPE_TO_MCP_TOOL[tool] for tool in CANONICAL_PLANNER_TOOL_ALLOWLIST} == {
+        tool: tool for tool in CANONICAL_PLANNER_TOOL_ALLOWLIST
+    }
+    assert "click" not in catalog_tool_names
+    assert "click" not in PLANNED_ACTION_TYPE_TO_MCP_TOOL
 
 
 def test_default_planner_prompt_content_stays_in_sync_with_allowlist() -> None:
@@ -155,6 +208,34 @@ def test_default_planner_prompt_content_stays_in_sync_with_allowlist() -> None:
     assert f'{{"tool": "{first_observation_tool}"' in output_schema
     assert f'{{"tool": "{first_action_tool}"' in output_schema
     assert f'"tool": "{END_TURN_TOOL}"' in output_schema
+
+
+def test_planner_prompt_allowlist_sections_track_private_default_without_stale_tools() -> None:
+    stale_tools = ("run_lua", "click", "stale_removed_tool")
+    tool_catalog = {
+        tool: {"description": f"{tool} description", "input_schema": {"properties": {}}}
+        for tool in (*planner_module._DEFAULT_PLANNER_TOOL_ALLOWLIST, *stale_tools)
+    }
+    provider = FakeProvider([json.dumps(_valid_plan_payload())])
+    planner = Civ6McpToolPlanner(provider=provider, tool_catalog=tool_catalog)
+
+    planner.plan(strategy="Pursue science victory.", state_context="Turn 1.", recent_calls="(none)")
+
+    prompt = provider.captured_prompts[0]
+    rendered_catalog = prompt.split("Available tools (subset; full schema is provided separately):\n", 1)[1].split(
+        "\n\nOutput schema:",
+        1,
+    )[0]
+    output_schema = prompt.split("Output schema:", 1)[1]
+    catalog_tool_names = [
+        line.removeprefix("- ").split("(", 1)[0] for line in rendered_catalog.splitlines() if line.startswith("- ")
+    ]
+    example_tool_names = re.findall(r'"tool": "([^"]+)"', output_schema)
+
+    assert catalog_tool_names == list(planner_module._DEFAULT_PLANNER_TOOL_ALLOWLIST)
+    assert set(example_tool_names).issubset(planner_module._DEFAULT_PLANNER_TOOL_ALLOWLIST)
+    assert not set(stale_tools).intersection(catalog_tool_names)
+    assert not set(stale_tools).intersection(example_tool_names)
 
 
 def test_planner_prompt_examples_use_planner_default_even_if_prompt_default_drifts(monkeypatch) -> None:
@@ -225,6 +306,18 @@ def test_planner_system_prompt_examples_default_to_canonical_allowlist() -> None
     assert f'{{"tool": "{first_observation_tool}"' in prompt
     assert f'{{"tool": "{first_action_tool}"' in prompt
     assert f'"tool": "{END_TURN_TOOL}"' in prompt
+
+
+def test_planner_system_prompt_examples_default_to_planner_module_allowlist(monkeypatch) -> None:
+    canonical_allowlist = ("list_planner_canonical", "planner_canonical_action", END_TURN_TOOL)
+    monkeypatch.setattr(planner_module, "DEFAULT_PLANNER_TOOL_ALLOWLIST", canonical_allowlist)
+
+    prompt = build_planner_system_prompt(tool_catalog="- end_turn() — advance")
+
+    assert '{"tool": "list_planner_canonical"' in prompt
+    assert '{"tool": "planner_canonical_action"' in prompt
+    assert '{"tool": "get_game_overview"' not in prompt
+    assert '{"tool": "set_research"' not in prompt
 
 
 def test_planner_from_observation_rejects_non_civ6_mcp_payload() -> None:

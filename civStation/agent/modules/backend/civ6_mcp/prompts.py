@@ -18,7 +18,6 @@ from civStation.agent.modules.backend.civ6_mcp.operations import (
     END_TURN_REFLECTION_FIELDS,
     END_TURN_TOOL,
 )
-from civStation.agent.modules.backend.civ6_mcp.planner_types import DEFAULT_PLANNER_TOOL_ALLOWLIST
 
 PLANNER_SYSTEM_PROMPT_EN = """\
 You are the Civilization VI tool-call planner for the civStation agent.
@@ -97,12 +96,28 @@ def build_planner_system_prompt(
     tool_catalog: str,
     allowed_tools: Iterable[str] | None = None,
 ) -> str:
-    """Build the planner system prompt with the supplied tool catalog and examples."""
-    planner_tools = tuple(allowed_tools or DEFAULT_PLANNER_TOOL_ALLOWLIST)
+    """Build the planner system prompt with catalog text and tool examples."""
+    planner_tools = tuple(_canonical_planner_tool_allowlist() if allowed_tools is None else allowed_tools)
     return PLANNER_SYSTEM_PROMPT_EN.format(
         tool_catalog=tool_catalog or "(no tools loaded)",
         tool_call_examples=_render_tool_call_examples(planner_tools),
     )
+
+
+def _canonical_planner_tool_allowlist() -> tuple[str, ...]:
+    """Return the planner module's canonical allow-list without importing it eagerly."""
+    from civStation.agent.modules.backend.civ6_mcp.planner import (
+        DEFAULT_PLANNER_TOOL_ALLOWLIST as planner_tool_allowlist,
+    )
+
+    return planner_tool_allowlist
+
+
+def __getattr__(name: str) -> object:
+    """Preserve legacy prompt-module access to the planner allow-list."""
+    if name == "DEFAULT_PLANNER_TOOL_ALLOWLIST":
+        return _canonical_planner_tool_allowlist()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def _render_tool_call_examples(allowed_tools: Iterable[str] | None) -> str:

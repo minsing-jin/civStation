@@ -32,11 +32,11 @@ DEFAULT_PLANNER_TOOL_ALLOWLIST: tuple[str, ...] = (
     *_ACTION_TOOL_ORDER,
     END_TURN_TOOL,
 )
-"""Canonical ordered civ6-mcp tool allow-list for planner prompts and defaults."""
+"""Default ordered civ6-mcp tool allow-list for planner prompts and observers."""
 
 
 class Civ6McpIntentType(str, Enum):
-    """Planner intent categories for supported civ6-mcp tools."""
+    """Planner intent categories for registered civ6-mcp tools."""
 
     OBSERVE = "observe"
     ACT = "act"
@@ -51,7 +51,7 @@ class Civ6McpActionType(str, Enum):
 
 @dataclass(frozen=True)
 class Civ6McpPlannerIntent:
-    """Planner intent describing one civ6-mcp tool before execution."""
+    """Planner intent for one registered civ6-mcp tool before execution."""
 
     tool: str
     arguments: Civ6McpToolArguments = field(default_factory=dict)
@@ -76,7 +76,7 @@ class Civ6McpPlannerIntent:
 
     @property
     def type(self) -> Civ6McpIntentType:
-        """Expose the intent category as an action-schema-style ``type`` field."""
+        """Expose the intent category as a planner-payload ``type`` field."""
         return self.intent_type
 
     def to_action(self) -> Civ6McpPlannerAction:
@@ -94,7 +94,7 @@ class Civ6McpPlannerIntent:
 
 @dataclass(frozen=True)
 class Civ6McpPlannerAction:
-    """Executable planner action for one civ6-mcp JSON-RPC tool call."""
+    """Executable planner action for one civ6-mcp tool call."""
 
     tool: str
     arguments: Civ6McpToolArguments = field(default_factory=dict)
@@ -112,7 +112,7 @@ class Civ6McpPlannerAction:
 
     @property
     def type(self) -> Civ6McpActionType:
-        """Expose the action category as an action-schema-style ``type`` field."""
+        """Expose the action category as a planner-payload ``type`` field."""
         return self.action_type
 
     def to_tool_call(self) -> ToolCall:
@@ -195,7 +195,7 @@ class Civ6McpPlanner(Protocol):
 
 
 def infer_civ6_mcp_intent_type(tool: str) -> Civ6McpIntentType:
-    """Classify a supported civ6-mcp tool name as observe, act, or end-turn."""
+    """Classify a registered civ6-mcp tool name as observe, act, or end-turn."""
     if tool == END_TURN_TOOL:
         return Civ6McpIntentType.END_TURN
     if tool in OBSERVATION_TOOLS:
